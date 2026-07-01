@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MonoMod.Utils" Version="25.0.12"/>
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Concord.Emit.Tests"/>
+    <InternalsVisibleTo Include="Concord.Orchestration"/>
+  </ItemGroup>
+</Project>

@@ -1,0 +1,108 @@
+name: CI
+
+# Build, test, and pack. Private: produces workflow artifacts only — no push,
+# no publish, no release. The full game-dependent solution (Concord.slnx) is not
+# buildable on hosted runners, so CI exercises Concord.ci.slnx, which excludes the
+# runtime adapters and TestMod (they reference game assemblies via a local GameDir).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build & Pack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          # global.json (10.0.100, rollForward latestFeature) pins the exact SDK;
+          # '10.0.x' here ensures the matching band is installed and available.
+
+      - name: Cache NuGet
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', 'global.json') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      - name: Restore
+        run: dotnet restore Concord.ci.slnx
+
+      - name: Build
+        run: dotnet build Concord.ci.slnx -c Release --no-restore
+
+      # Produce the compile-time-only Concord.Ref nupkg (ref/ folder, no lib/).
+      - name: Pack reference assembly
+        run: dotnet pack src/Concord.Ref/Concord.Ref.csproj -c Release -o artifacts
+
+      - name: Upload runtime assembly
+        uses: actions/upload-artifact@v4
+        with:
+          name: concord-runtime
+          path: Assemblies/Concord.dll
+          if-no-files-found: error
+
+      - name: Upload ref package
+        uses: actions/upload-artifact@v4
+        with:
+          name: concord-ref-nupkg
+          path: artifacts/Concord.Ref.*.nupkg
+          if-no-files-found: error
+
+  test:
+    name: Test · ${{ matrix.label }}
+    needs: build
+    runs-on: ${{ matrix.runner }}
+    # fail-fast off so one flaky platform doesn't cancel the rest; experimental cells
+    # (arm64 / x64-on-intel-mac) don't fail the overall run until promoted below.
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Canonical trio — required (experimental: false).
+          - { label: linux-x64,    runner: ubuntu-24.04,   experimental: false }
+          - { label: windows-x64,  runner: windows-latest, experimental: false }
+          - { label: macos-arm64,  runner: macos-latest,   experimental: false }
+          # Extended coverage — informational until green, then flip experimental to false.
+          - { label: linux-arm64,  runner: ubuntu-24.04-arm, experimental: true }
+          - { label: windows-arm64,runner: windows-11-arm,   experimental: true }
+          - { label: macos-x64,    runner: macos-13,        experimental: true }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', 'global.json') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      - name: Restore
+        run: dotnet restore Concord.ci.slnx
+
+      - name: Test
+        run: dotnet test Concord.ci.slnx -c Release --no-restore --logger trx --results-directory test-results
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.label }}
+          path: test-results/**/*.trx

@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>Concord</AssemblyName>
+    <RootNamespace>Concord</RootNamespace>
+    <OutputPath>../../Assemblies</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Concord.Detour/Concord.Detour.csproj"/>
+    <ProjectReference Include="../Concord.Emit/Concord.Emit.csproj"/>
+    <ProjectReference Include="../Concord.AttachedData/Concord.AttachedData.csproj"/>
+    <ProjectReference Include="../Concord.Orchestration/Concord.Orchestration.csproj"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ILRepack.Lib.MSBuild.Task" Version="2.0.45" PrivateAssets="all"/>
+  </ItemGroup>
+
+</Project>

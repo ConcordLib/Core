@@ -1,0 +1,675 @@
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using Mono.Cecil;
+using Mono.Cecil.Cil;
+using MonoMod.Utils;
+using MethodBody = Mono.Cecil.Cil.MethodBody;
+
+namespace Concord.Emit;
+
+/// <summary>
+///     Builds composed wrapper methods from an original target and ordered Concord injections.
+/// </summary>
+public static class WrapperComposer {
+    /// <summary>
+    ///     Creates a wrapper method for a target and a copy of the original body.
+    /// </summary>
+    /// <param name="target">
+    ///     The method to patch. Async and iterator methods are resolved to their generated
+    ///     <c>MoveNext</c> method before composition.
+    /// </param>
+    /// <param name="ordered">The injections to compose, ordered by their caller.</param>
+    /// <returns>The generated wrapper method and original body copy.</returns>
+    public static ComposeResult Compose(MethodBase target, IReadOnlyList<Injection> ordered) {
+        MethodBase resolved = ResolveStateMachineTarget(target);
+
+        MethodInfo originalBody = OriginalBody.Clone(resolved);
+
+        using DynamicMethodDefinition source = new DynamicMethodDefinition(resolved);
+        Type returnType = ResolveReturnType(resolved);
+        Type[] parameterTypes = ResolveParameterTypes(resolved);
+
+        using DynamicMethodDefinition wrapper = new DynamicMethodDefinition(WrapperName(resolved), returnType, parameterTypes);
+        BodyCopier.CopySpine(source.Definition, wrapper.Definition);
+
+        Assemble(wrapper.Definition, resolved, ordered, returnType);
+        MethodInfo wrapperMethod = wrapper.Generate();
+        return new ComposeResult(wrapperMethod, originalBody);
+    }
+
+    /// <summary>
+    ///     Diagnostic variant of <see cref="Compose" />: runs the full spine-copy and assembly
+    ///     pipeline but returns a textual dump of the composed wrapper body BEFORE JIT generation,
+    ///     for inspecting cross-module operands, the locals table, and per-instruction stack depth.
+    /// </summary>
+    /// <param name="target">The method to patch.</param>
+    /// <param name="ordered">The injections to compose.</param>
+    /// <returns>A human-readable IL dump of the composed wrapper.</returns>
+    public static string ComposeDump(MethodBase target, IReadOnlyList<Injection> ordered) {
+        MethodBase resolved = ResolveStateMachineTarget(target);
+
+        using DynamicMethodDefinition source = new DynamicMethodDefinition(resolved);
+        Type returnType = ResolveReturnType(resolved);
+        Type[] parameterTypes = ResolveParameterTypes(resolved);
+
+        using DynamicMethodDefinition wrapper = new DynamicMethodDefinition(WrapperName(resolved), returnType, parameterTypes);
+        BodyCopier.CopySpine(source.Definition, wrapper.Definition);
+
+        Assemble(wrapper.Definition, resolved, ordered, returnType);
+
+        return IlDump.Format(wrapper.Definition);
+    }
+
+    /// <summary>
+    ///     Resolves async and iterator entry methods to their generated state-machine <c>MoveNext</c> method.
+    /// </summary>
+    /// <param name="target">The method to inspect.</param>
+    /// <returns>The state-machine <c>MoveNext</c> method when present; otherwise <paramref name="target" />.</returns>
+    public static MethodBase ResolveStateMachineTarget(MethodBase target) {
+        Type? stateMachineType = ReadStateMachineType(target);
+        if (stateMachineType is null) {
+            return target;
+        }
+
+        MethodInfo? moveNext = stateMachineType.GetMethod("MoveNext", BindingFlags.NonPublic | BindingFlags.Instance); // NOSONAR concord reaches private target members by design; validated at resolve time
+        if (moveNext is null) {
+            throw new ConcordEmitException(
+                "CONC060",
+                $"State machine type '{stateMachineType.Name}' for '{target.DeclaringType?.Name}.{target.Name}' has no MoveNext method.");
+        }
+
+        return moveNext;
+    }
+
+    private static Type? ReadStateMachineType(MethodBase target) {
+        AsyncStateMachineAttribute? asyncAttr = target.GetCustomAttribute<AsyncStateMachineAttribute>();
+        if (asyncAttr is not null) {
+            return asyncAttr.StateMachineType;
+        }
+
+        IteratorStateMachineAttribute? iterator = target.GetCustomAttribute<IteratorStateMachineAttribute>();
+        return iterator?.StateMachineType;
+    }
+
+    private static void Assemble(MethodDefinition wrapperDefinition, MethodBase target, IReadOnlyList<Injection> ordered, Type returnType) {
+        MethodBody body = wrapperDefinition.Body;
+        ModuleDefinition module = wrapperDefinition.Module;
+        bool isVoid = returnType == typeof(void);
+
+        bool hasAround = false;
+        for (int i = 0; i < ordered.Count; i++) {
+            if (ordered[i].At is InjectAt.Around) {
+                hasAround = true;
+                break;
+            }
+        }
+
+        ProtocolLocals locals = DeclareLocals(body, module, returnType, isVoid, hasAround && !isVoid);
+
+        List<Instruction> spine = new List<Instruction>(body.Instructions);
+        Instruction afterSpine = Instruction.Create(OpCodes.Nop);
+
+        List<Instruction> epilogue = BuildEpilogue(locals, isVoid);
+        Instruction epilogueStart = epilogue[0];
+
+        RewriteSpineReturns(spine, locals, afterSpine, isVoid, hasAround, body.ExceptionHandlers);
+
+        if (!isVoid && !hasAround) {
+            bool hasReturnSite = false;
+            for (int i = 0; i < ordered.Count; i++) {
+                if (ordered[i].At is InjectAt.Return) {
+                    hasReturnSite = true;
+                    break;
+                }
+            }
+
+            if (hasReturnSite) {
+                NormalizeReturnSites(spine, locals, afterSpine);
+            }
+        }
+
+        Instruction guardStart = Instruction.Create(OpCodes.Ldloc, locals.Cancel);
+        Instruction guardBranch = Instruction.Create(OpCodes.Brtrue, afterSpine);
+
+        bool hasHead = false;
+        List<Instruction> heads = new List<Instruction>();
+        List<Instruction> returns = new List<Instruction>();
+        List<Instruction>? aroundBody = null;
+
+        for (int i = ordered.Count - 1; i >= 0; i--) {
+            Injection injection = ordered[i];
+
+            if (injection.At is InjectAt.Head) {
+                ProcessHeadInjection(injection, wrapperDefinition, target, locals, guardStart, isVoid, ref hasHead, heads);
+                continue;
+            }
+
+            if (injection.At is InjectAt.Tail) {
+                ProcessTailInjection(injection, wrapperDefinition, target, locals, epilogueStart, returns);
+                continue;
+            }
+
+            if (injection.At is InjectAt.Return returnSite) {
+                ProcessReturnInjection(injection, returnSite, wrapperDefinition, target, locals, afterSpine, spine);
+                continue;
+            }
+
+            if (injection.At is InjectAt.Invoke invoke) {
+                ProcessInvokeInjection(injection, invoke, wrapperDefinition, target, locals, spine);
+                continue;
+            }
+
+            if (injection.At is InjectAt.Around) {
+                ProcessAroundInjection(injection, wrapperDefinition, target, locals, epilogueStart, afterSpine, spine, ref aroundBody);
+            }
+        }
+
+        List<Instruction> assembled = new List<Instruction>();
+
+        if (aroundBody is not null) {
+            assembled.AddRange(aroundBody);
+            assembled.AddRange(epilogue);
+        } else {
+            assembled.AddRange(heads);
+            if (hasHead) {
+                assembled.Add(guardStart);
+                assembled.Add(guardBranch);
+            }
+
+            assembled.AddRange(spine);
+            assembled.Add(afterSpine);
+            assembled.AddRange(returns);
+            assembled.AddRange(epilogue);
+        }
+
+        body.Instructions.Clear();
+        foreach (Instruction instruction in assembled) {
+            body.Instructions.Add(instruction);
+        }
+    }
+
+    private static void ProcessHeadInjection(
+        Injection injection,
+        MethodDefinition wrapperDefinition,
+        MethodBase target,
+        ProtocolLocals locals,
+        Instruction guardStart,
+        bool isVoid,
+        ref bool hasHead,
+        List<Instruction> heads) {
+        hasHead = true;
+        using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
+        GuardCancelWithoutReturn(injectionMethodDefinition.Definition.Body, target, isVoid);
+        heads.AddRange(
+            BodyCopier.CopyInjection(
+                injectionMethodDefinition.Definition,
+                wrapperDefinition,
+                target,
+                injection.InjectionMethod,
+                locals,
+                guardStart));
+    }
+
+    private static void ProcessTailInjection(
+        Injection injection,
+        MethodDefinition wrapperDefinition,
+        MethodBase target,
+        ProtocolLocals locals,
+        Instruction epilogueStart,
+        List<Instruction> returns) {
+        using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
+        returns.AddRange(
+            BodyCopier.CopyInjection(
+                injectionMethodDefinition.Definition,
+                wrapperDefinition,
+                target,
+                injection.InjectionMethod,
+                locals,
+                epilogueStart));
+    }
+
+    private static void ProcessReturnInjection(
+        Injection injection,
+        InjectAt.Return returnSite,
+        MethodDefinition wrapperDefinition,
+        MethodBase target,
+        ProtocolLocals locals,
+        Instruction afterSpine,
+        List<Instruction> spine) {
+        List<Instruction> allExits = FindReturnExits(spine, afterSpine);
+        if (allExits.Count == 0) {
+            throw new ConcordEmitException(
+                "CONC034",
+                $"Return injection on '{target.DeclaringType?.Name}.{target.Name}' found no return in the target body.");
+        }
+
+        List<Instruction> exits = SelectReturnExits(allExits, returnSite.By, target);
+
+        using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
+        foreach (Instruction exit in exits) {
+            List<Instruction> siteBody = BodyCopier.CopyInjection(
+                injectionMethodDefinition.Definition,
+                wrapperDefinition,
+                target,
+                injection.InjectionMethod,
+                locals,
+                exit);
+            int exitIndex = spine.IndexOf(exit);
+            spine.InsertRange(exitIndex, siteBody);
+        }
+    }
+
+    private static void ProcessInvokeInjection(
+        Injection injection,
+        InjectAt.Invoke invoke,
+        MethodDefinition wrapperDefinition,
+        MethodBase target,
+        ProtocolLocals locals,
+        List<Instruction> spine) {
+        List<Instruction> allSites = ControlHandleLowering.FindInvokeCallSites(spine, invoke.DeclaringType, invoke.Method, invoke.ParameterTypes);
+        if (allSites.Count == 0) {
+            throw new ConcordEmitException(
+                "CONC031",
+                $"Injection on '{target.DeclaringType?.Name}.{target.Name}' targets call site '{invoke.DeclaringType.Name}.{invoke.Method}' which does not occur in the method body.");
+        }
+
+        List<Instruction> sites = SelectInvokeSites(allSites, invoke.By, target, invoke);
+
+        using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
+
+        if (invoke.Shift is At.Around) {
+            foreach (Instruction site in sites) {
+                WrapCallSite(spine, site, injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod);
+            }
+
+            return;
+        }
+
+        bool after = invoke.Shift is At.Tail;
+        foreach (Instruction site in sites) {
+            List<Instruction> invokeBody = BodyCopier.CopyInjection(
+                injectionMethodDefinition.Definition,
+                wrapperDefinition,
+                target,
+                injection.InjectionMethod,
+                locals,
+                site);
+            int siteIndex = spine.IndexOf(site);
+            spine.InsertRange(after ? siteIndex + 1 : siteIndex, invokeBody);
+        }
+    }
+
+    private static void ProcessAroundInjection(
+        Injection injection,
+        MethodDefinition wrapperDefinition,
+        MethodBase target,
+        ProtocolLocals locals,
+        Instruction epilogueStart,
+        Instruction afterSpine,
+        List<Instruction> spine,
+        ref List<Instruction>? aroundBody) {
+        if (aroundBody is not null) {
+            throw new ConcordEmitException(
+                "CONC051",
+                $"Multiple Around injections on '{target.DeclaringType?.Name}.{target.Name}' are not supported; only one Around injection per target is allowed.");
+        }
+
+        using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
+        aroundBody = BodyCopier.CopyInjection(
+            injectionMethodDefinition.Definition,
+            wrapperDefinition,
+            target,
+            injection.InjectionMethod,
+            locals,
+            epilogueStart,
+            spine);
+        RetargetAroundSpineBranches(aroundBody, spine, afterSpine, epilogueStart, locals);
+    }
+
+    private static void WrapCallSite(
+        List<Instruction> spine,
+        Instruction site,
+        MethodDefinition injectionMethodDefinition,
+        MethodDefinition wrapperDefinition,
+        MethodBase target,
+        MethodBase injectionMethod) {
+        int siteIndex = spine.IndexOf(site);
+        if (siteIndex <= 0) {
+            throw new ConcordEmitException(
+                "CONC032",
+                $"Wrapping call site '{site.Operand}' has no preceding argument-setup instruction to drop.");
+        }
+
+        MethodReference originalCall = (MethodReference)site.Operand;
+
+        Instruction wrapEnd = Instruction.Create(OpCodes.Nop);
+        List<Instruction> wrapBody = BodyCopier.CopyWrapInjection(
+            injectionMethodDefinition,
+            wrapperDefinition,
+            target,
+            injectionMethod,
+            wrapEnd,
+            originalCall);
+
+        int argSetupIndex = siteIndex - 1;
+        spine.RemoveAt(siteIndex);
+        spine.RemoveAt(argSetupIndex);
+
+        List<Instruction> replacement = new List<Instruction>(wrapBody.Count + 1);
+        replacement.AddRange(wrapBody);
+        replacement.Add(wrapEnd);
+
+        spine.InsertRange(argSetupIndex, replacement);
+    }
+
+    private static List<Instruction> SelectInvokeSites(List<Instruction> allSites, uint by, MethodBase target, InjectAt.Invoke invoke) {
+        if (by == 0) {
+            return allSites;
+        }
+
+        if (by > allSites.Count) {
+            throw new ConcordEmitException(
+                "CONC033",
+                $"Injection on '{target.DeclaringType?.Name}.{target.Name}' targets occurrence {by} of call site '{invoke.DeclaringType.Name}.{invoke.Method}', but only {allSites.Count} occurrence(s) exist in the method body.");
+        }
+
+        return [allSites[(int)(by - 1)]];
+    }
+
+    private static List<Instruction> FindReturnExits(List<Instruction> spine, Instruction afterSpine) {
+        List<Instruction> exits = new List<Instruction>();
+        foreach (Instruction instruction in spine) {
+            if ((instruction.OpCode == OpCodes.Br || instruction.OpCode == OpCodes.Leave)
+                && ReferenceEquals(instruction.Operand, afterSpine)) {
+                exits.Add(instruction);
+            }
+        }
+
+        return exits;
+    }
+
+    private static List<Instruction> SelectReturnExits(List<Instruction> allExits, uint by, MethodBase target) {
+        if (by == 0) {
+            return allExits;
+        }
+
+        if (by > allExits.Count) {
+            throw new ConcordEmitException(
+                "CONC035",
+                $"Return injection on '{target.DeclaringType?.Name}.{target.Name}' targets occurrence {by}, but only {allExits.Count} return(s) exist in the method body.");
+        }
+
+        return [allExits[(int)(by - 1)]];
+    }
+
+    private static ProtocolLocals DeclareLocals(
+        MethodBody body,
+        ModuleDefinition module,
+        Type returnType,
+        bool isVoid,
+        bool needsSpliceValue) {
+        VariableDefinition cancel = new VariableDefinition(module.ImportReference(typeof(bool)));
+        body.Variables.Add(cancel);
+        body.InitLocals = true;
+
+        if (isVoid) {
+            return new ProtocolLocals(cancel, null, null);
+        }
+
+        VariableDefinition hasReturn = new VariableDefinition(module.ImportReference(typeof(bool)));
+        VariableDefinition returnValue = new VariableDefinition(module.ImportReference(returnType));
+        body.Variables.Add(hasReturn);
+        body.Variables.Add(returnValue);
+
+        VariableDefinition? spliceValue = null;
+        if (needsSpliceValue) {
+            spliceValue = new VariableDefinition(module.ImportReference(returnType));
+            body.Variables.Add(spliceValue);
+        }
+
+        return new ProtocolLocals(cancel, hasReturn, returnValue, spliceValue);
+    }
+
+    private static List<Instruction> BuildEpilogue(ProtocolLocals locals, bool isVoid) {
+        if (isVoid) {
+            return new List<Instruction> { Instruction.Create(OpCodes.Ret) };
+        }
+
+        return new List<Instruction> { Instruction.Create(OpCodes.Ldloc, locals.ReturnValue!), Instruction.Create(OpCodes.Ret) };
+    }
+
+    private static void RewriteSpineReturns(
+        List<Instruction> spine,
+        ProtocolLocals locals,
+        Instruction afterSpine,
+        bool isVoid,
+        bool isAroundSplice,
+        IList<ExceptionHandler> handlers) {
+        int i = 0;
+        while (i < spine.Count) {
+            Instruction instruction = spine[i];
+            if (instruction.OpCode != OpCodes.Ret) {
+                i++;
+                continue;
+            }
+
+            if (isAroundSplice) {
+                OpCode exit = IsInsideProtectedRegion(instruction, handlers) ? OpCodes.Leave : OpCodes.Br;
+
+                if (isVoid) {
+                    instruction.OpCode = exit;
+                    instruction.Operand = afterSpine;
+                    i++;
+                    continue;
+                }
+
+                instruction.OpCode = OpCodes.Stloc;
+                instruction.Operand = locals.SpliceValue!;
+                spine.Insert(i + 1, Instruction.Create(exit, afterSpine));
+                i += 2;
+                continue;
+            }
+
+            if (isVoid) {
+                instruction.OpCode = OpCodes.Br;
+                instruction.Operand = afterSpine;
+                i++;
+                continue;
+            }
+
+            instruction.OpCode = OpCodes.Stloc;
+            instruction.Operand = locals.ReturnValue!;
+            spine.Insert(i + 1, Instruction.Create(OpCodes.Br, afterSpine));
+            i += 2;
+        }
+    }
+
+    private static void NormalizeReturnSites(List<Instruction> spine, ProtocolLocals locals, Instruction afterSpine) {
+        Instruction? exitStore = FindExitStore(spine, locals, afterSpine);
+        if (exitStore is null) {
+            return;
+        }
+
+        int storeIndex = spine.IndexOf(exitStore);
+        if (storeIndex == 0) {
+            return;
+        }
+
+        Instruction sharedLoad = spine[storeIndex - 1];
+        if (!IsLoadLocal(sharedLoad.OpCode)) {
+            return;
+        }
+
+        int sharedLoadIndex = storeIndex - 1;
+        if (sharedLoadIndex == 0 || !IsUnconditionalExit(spine[sharedLoadIndex - 1].OpCode)) {
+            return;
+        }
+
+        List<Instruction> branchSites = new List<Instruction>();
+        foreach (Instruction instruction in spine) {
+            if ((instruction.OpCode == OpCodes.Br || instruction.OpCode == OpCodes.Br_S)
+                && ReferenceEquals(instruction.Operand, sharedLoad)) {
+                branchSites.Add(instruction);
+            }
+        }
+
+        if (branchSites.Count == 0) {
+            return;
+        }
+
+        foreach (Instruction branch in branchSites) {
+            int branchIndex = spine.IndexOf(branch);
+            spine[branchIndex] = CloneLoadLocal(sharedLoad);
+            spine.Insert(branchIndex + 1, Instruction.Create(OpCodes.Stloc, locals.ReturnValue!));
+            spine.Insert(branchIndex + 2, Instruction.Create(OpCodes.Br, afterSpine));
+        }
+
+        int deadTailIndex = spine.IndexOf(sharedLoad);
+        spine.RemoveAt(deadTailIndex + 2);
+        spine.RemoveAt(deadTailIndex + 1);
+        spine.RemoveAt(deadTailIndex);
+    }
+
+    private static Instruction? FindExitStore(List<Instruction> spine, ProtocolLocals locals, Instruction afterSpine) {
+        for (int i = 0; i < spine.Count - 1; i++) {
+            Instruction store = spine[i];
+            Instruction branch = spine[i + 1];
+            if (store.OpCode == OpCodes.Stloc && ReferenceEquals(store.Operand, locals.ReturnValue)
+                && branch.OpCode == OpCodes.Br && ReferenceEquals(branch.Operand, afterSpine)) {
+                return store;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsLoadLocal(OpCode opCode) {
+        return opCode == OpCodes.Ldloc
+            || opCode == OpCodes.Ldloc_S
+            || opCode == OpCodes.Ldloc_0
+            || opCode == OpCodes.Ldloc_1
+            || opCode == OpCodes.Ldloc_2
+            || opCode == OpCodes.Ldloc_3;
+    }
+
+    private static Instruction CloneLoadLocal(Instruction load) {
+        if (load.Operand is VariableDefinition variable) {
+            return Instruction.Create(load.OpCode, variable);
+        }
+
+        return Instruction.Create(load.OpCode);
+    }
+
+    private static bool IsUnconditionalExit(OpCode opCode) {
+        return opCode == OpCodes.Br
+            || opCode == OpCodes.Br_S
+            || opCode == OpCodes.Ret
+            || opCode == OpCodes.Throw
+            || opCode == OpCodes.Rethrow
+            || opCode == OpCodes.Leave
+            || opCode == OpCodes.Leave_S;
+    }
+
+    private static bool IsInsideProtectedRegion(Instruction instruction, IList<ExceptionHandler> handlers) {
+        foreach (ExceptionHandler handler in handlers) { // NOSONAR project forbids LINQ in loops (perf/determinism); for-loop is intentional
+            if (SpansInstruction(handler.TryStart, handler.TryEnd, instruction) ||
+                SpansInstruction(handler.HandlerStart, handler.HandlerEnd, instruction) ||
+                SpansInstruction(handler.FilterStart, handler.HandlerStart, instruction)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool SpansInstruction(Instruction? start, Instruction? end, Instruction instruction) {
+        if (start is null) {
+            return false;
+        }
+
+        for (Instruction? cursor = start; cursor is not null && cursor != end; cursor = cursor.Next) {
+            if (cursor == instruction) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void GuardCancelWithoutReturn(MethodBody injectionMethodBody, MethodBase target, bool isVoid) {
+        if (isVoid) {
+            return;
+        }
+
+        if (ControlHandleLowering.InjectionMethodCancels(injectionMethodBody) && !ControlHandleLowering.InjectionMethodSetsReturnValue(injectionMethodBody)) {
+            throw new ConcordEmitException(
+                "CONC012",
+                $"Injection on non-void target '{target.DeclaringType?.Name}.{target.Name}' calls Cancel() without setting ReturnValue; a return value is required when the original method is skipped.");
+        }
+    }
+
+    private static void RetargetAroundSpineBranches(
+        List<Instruction> aroundBody,
+        List<Instruction> spine,
+        Instruction afterSpine,
+        Instruction epilogueStart,
+        ProtocolLocals locals) {
+        if (spine.Count == 0) {
+            return;
+        }
+
+        Instruction lastSpineInstruction = spine[spine.Count - 1];
+        int lastSpineIndex = aroundBody.LastIndexOf(lastSpineInstruction);
+        Instruction postStart = lastSpineIndex + 1 < aroundBody.Count
+            ? aroundBody[lastSpineIndex + 1]
+            : epilogueStart;
+
+        Instruction spliceJoin = postStart;
+        if (locals.SpliceValue is not null) {
+            spliceJoin = Instruction.Create(OpCodes.Ldloc, locals.SpliceValue);
+            int insertAt = lastSpineIndex + 1;
+            if (insertAt < aroundBody.Count) {
+                aroundBody.Insert(insertAt, spliceJoin);
+            } else {
+                aroundBody.Add(spliceJoin);
+            }
+        }
+
+        foreach (Instruction instruction in aroundBody) {
+            if (instruction.Operand == afterSpine) {
+                instruction.Operand = spliceJoin;
+            }
+        }
+    }
+
+    private static Type ResolveReturnType(MethodBase target) {
+        return target is MethodInfo method ? method.ReturnType : typeof(void);
+    }
+
+    private static Type[] ResolveParameterTypes(MethodBase target) {
+        ParameterInfo[] parameters = target.GetParameters();
+        bool hasThis = !target.IsStatic;
+        Type[] result = new Type[parameters.Length + (hasThis ? 1 : 0)];
+
+        int offset = 0;
+        if (hasThis) {
+            result[0] = ThisParameterType(target);
+            offset = 1;
+        }
+
+        for (int i = 0; i < parameters.Length; i++) {
+            result[offset + i] = parameters[i].ParameterType;
+        }
+
+        return result;
+    }
+
+    private static Type ThisParameterType(MethodBase target) {
+        Type declaring = target.DeclaringType!;
+        return declaring.IsValueType ? declaring.MakeByRefType() : declaring;
+    }
+
+    private static string WrapperName(MethodBase target) {
+        return $"{target.DeclaringType?.Name}.{target.Name}\u2039concord\u203A";
+    }
+}

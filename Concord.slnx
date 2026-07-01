@@ -1,0 +1,22 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Concord/Concord.csproj"/>
+    <Project Path="src/Concord.Analyzers/Concord.Analyzers.csproj"/>
+    <Project Path="src/Concord.Detour/Concord.Detour.csproj"/>
+    <Project Path="src/Concord.Emit/Concord.Emit.csproj"/>
+    <Project Path="src/Concord.AttachedData/Concord.AttachedData.csproj"/>
+    <Project Path="src/Concord.Orchestration/Concord.Orchestration.csproj"/>
+    <Project Path="src/Concord.Ref/Concord.Ref.csproj"/>
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Concord.Analyzers.Tests/Concord.Analyzers.Tests.csproj"/>
+    <Project Path="tests/Concord.Detour.Tests/Concord.Detour.Tests.csproj"/>
+    <Project Path="tests/Concord.Emit.Tests/Concord.Emit.Tests.csproj"/>
+    <Project Path="tests/Concord.Emit.Tests.ForeignTargets/Concord.Emit.Tests.ForeignTargets.csproj"/>
+    <Project Path="tests/Concord.AttachedData.Tests/Concord.AttachedData.Tests.csproj"/>
+    <Project Path="tests/Concord.Orchestration.Tests/Concord.Orchestration.Tests.csproj"/>
+  </Folder>
+  <!--Folder Name="/bench/">
+    <Project Path="bench/Concord.Benchmarks/Concord.Benchmarks.csproj"/>
+  </Folder-->
+</Solution>

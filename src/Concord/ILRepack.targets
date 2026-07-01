@@ -1,0 +1,33 @@
+<Project>
+  <Target Name="MergeConcord" AfterTargets="Build">
+    <ItemGroup>
+      <ConcordMergeInputs Include="$(OutputPath)Concord.dll"/>
+      <ConcordMergeInputs Include="$(OutputPath)Concord.Detour.dll"/>
+      <ConcordMergeInputs Include="$(OutputPath)Concord.Emit.dll"/>
+      <ConcordMergeInputs Include="$(OutputPath)Concord.AttachedData.dll"/>
+      <ConcordMergeInputs Include="$(OutputPath)Concord.Orchestration.dll"/>
+      <ConcordMergeInputs Include="$(OutputPath)MonoMod.*.dll"/>
+      <ConcordMergeInputs Include="$(OutputPath)Mono.Cecil*.dll"/>
+      <ConcordMergeLib Include="$(TargetRuntimeDir)" Condition="'$(TargetRuntimeDir)' != ''"/>
+      <ConcordMergeLib Include="$(OutputPath)"/>
+      <ConcordInternalizeExclude Include="^Concord[.]"/>
+    </ItemGroup>
+    <ILRepack
+      Parallel="true"
+      DebugInfo="true"
+      Internalize="true"
+      InternalizeExclude="@(ConcordInternalizeExclude)"
+      InputAssemblies="@(ConcordMergeInputs)"
+      LibraryPath="@(ConcordMergeLib)"
+      TargetKind="Dll"
+      OutputFile="$(OutputPath)Concord.dll"/>
+    <ItemGroup>
+      <ConcordLeftovers Include="$(OutputPath)Concord.Detour.dll;$(OutputPath)Concord.Emit.dll;$(OutputPath)MonoMod.*.dll;$(OutputPath)Mono.Cecil*.dll"/>
+      <ConcordLeftovers Include="$(OutputPath)Concord.Detour.pdb;$(OutputPath)Concord.Detour.xml;$(OutputPath)Concord.Emit.pdb;$(OutputPath)Concord.Emit.xml"/>
+      <ConcordLeftovers Include="$(OutputPath)MonoMod.*.pdb;$(OutputPath)MonoMod.*.xml;$(OutputPath)Mono.Cecil*.pdb;$(OutputPath)Mono.Cecil*.xml"/>
+      <ConcordLeftovers Include="$(OutputPath)Concord.AttachedData.dll;$(OutputPath)Concord.Orchestration.dll"/>
+      <ConcordLeftovers Include="$(OutputPath)Concord.AttachedData.pdb;$(OutputPath)Concord.AttachedData.xml;$(OutputPath)Concord.Orchestration.pdb;$(OutputPath)Concord.Orchestration.xml"/>
+    </ItemGroup>
+    <Delete Files="@(ConcordLeftovers)"/>
+  </Target>
+</Project>

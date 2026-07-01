@@ -1,0 +1,13 @@
+bin/
+obj/
+*.user
+.vs/
+.vscode/
+.idea/
+artifacts/
+BenchmarkDotNet.Artifacts/
+*.nupkg
+*.snupkg
+
+# Build artifact (merged dll copied into mods by CopyConcord.targets)
+Assemblies/

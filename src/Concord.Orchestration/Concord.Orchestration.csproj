@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Concord.Emit/Concord.Emit.csproj"/>
+    <ProjectReference Include="../Concord.Detour/Concord.Detour.csproj"/>
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Concord.Orchestration.Tests"/>
+  </ItemGroup>
+</Project>

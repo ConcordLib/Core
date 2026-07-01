@@ -1,0 +1,83 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Concord.Ref — compile-time-only reference assembly.
+       Mirrors the public surface of the shipped (ILRepack-merged) Concord.dll as a
+       metadata-only assembly. Mods reference this to compile; the target runtime supplies
+       the Concord Assembly at runtime. The package contributes no runtime assets. -->
+
+  <PropertyGroup>
+    <!-- Match the rest of the repo: net10, CoreCLR. Not netstandard — Concord is a
+         single-runtime library and there is no old-toolchain modder to accommodate. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- Same assembly name/identity as the Concord Assembly, so a ref-compiled
+         mod binds to the target runtime's assembly without any redirection. -->
+    <AssemblyName>Concord</AssemblyName>
+    <RootNamespace>Concord</RootNamespace>
+
+    <!-- Emit a metadata-only reference assembly: the compiler type-checks the source as
+         usual but writes every method body as `throw null` and stamps the assembly with
+         ReferenceAssemblyAttribute, which makes the runtime refuse to load it. The
+         primary output IS the ref assembly; no implementation ships. -->
+    <ProduceOnlyReferenceAssembly>true</ProduceOnlyReferenceAssembly>
+
+    <!-- A ref assembly carries no debug info / source embedding and no implementation,
+         but it keeps the /// doc XML so the API surface stays self-documenting. Override the
+         repo's DebugType=embedded / EmbedAllSources (set in Directory.Build.props) which need a PDB. -->
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <EmbedAllSources>false</EmbedAllSources>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+    <!-- Packaging: a ref-only package. BuildOutputTargetFolder=ref routes the built
+         reference assembly into ref/net10.0/ instead of lib/, so the nupkg carries
+         compile-time assets and nothing at runtime (no lib/ folder). -->
+    <IsPackable>true</IsPackable>
+    <PackageId>Concord.Ref</PackageId>
+    <Description>Compile-time reference assembly for Concord. Reference this to author mods; the target runtime supplies the Concord Assembly.</Description>
+    <BuildOutputTargetFolder>ref</BuildOutputTargetFolder>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <!-- A ref-only package intentionally ships no dependency group and a doc file alongside
+         the assembly; the SDK flags both as NU5128/NU5131, which are false positives for this
+         shape. Downgrade them to (non-fatal) warnings rather than suppress, so they stay visible. -->
+    <WarningsNotAsErrors>NU5128;NU5131</WarningsNotAsErrors>
+  </PropertyGroup>
+
+  <!-- Ship the README as the package's NuGet readme (rendered on the package page). -->
+  <PropertyGroup>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath=""/>
+  </ItemGroup>
+
+  <!-- Compile the real source from the four implementation projects into a single assembly,
+       exactly matching the Concord Assembly surface (one Concord.dll, all Concord.*
+       namespaces). Linking the same .cs files — not a copy — so the ref can never drift from
+       the implementation: any source change is picked up on the next build. -->
+  <ItemGroup>
+    <Compile Include="..\Concord.Detour\*.cs"            Link="Detour\%(Filename)"/>
+    <Compile Include="..\Concord.Emit\*.cs"               Link="Emit\%(Filename)"/>
+    <Compile Include="..\Concord.AttachedData\*.cs"       Link="AttachedData\%(Filename)"/>
+    <Compile Include="..\Concord.Orchestration\*.cs"      Link="Orchestration\%(Filename)"/>
+  </ItemGroup>
+
+  <!-- MonoMod is referenced only so the source type-checks during the ref compile. Because the
+       public API never exposes MonoMod types in member signatures, the ref assembly's *public*
+       metadata is clean of MonoMod. MonoMod therefore never reaches the mod's runtime graph:
+       the ref package's ref/ dependencies are compile-time-only by NuGet convention, and the
+       target runtime's Concord Assembly supplies the real implementation. -->
+  <ItemGroup>
+    <PackageReference Include="MonoMod.Core"  Version="1.3.4">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="MonoMod.Utils" Version="25.0.12">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>
