@@ -77,6 +77,26 @@ public static class Patcher {
     }
 
     /// <summary>
+    ///     Applies a single, already-constructed <see cref="Injection" /> at any position it can express
+    ///     (Head, Return with a specific index, Tail, Around, or Invoke), composing it directly rather than
+    ///     through the simplified <see cref="At" /> enum used by <see cref="Patch" />.
+    /// </summary>
+    /// <remarks>
+    ///     The returned handle is retained in a static registry, so the detour stays applied even when the
+    ///     caller discards the handle. Dispose the handle to revert the detour and release it from the registry.
+    /// </remarks>
+    /// <param name="target">The method to patch.</param>
+    /// <param name="injection">The injection to compose onto <paramref name="target" />.</param>
+    /// <returns>A handle that reverts the applied detour when disposed.</returns>
+    public static IPatchHandle PatchInjection(MethodBase target, Injection injection) {
+        lock (Gate) {
+            CollectingPatchApplier applier = new CollectingPatchApplier();
+            applier.ApplyPatch(target, injection);
+            return RegisterLive(applier.Handles);
+        }
+    }
+
+    /// <summary>
     ///     Creates a fluent <see cref="PatchBuilder" /> targeting the given method.
     /// </summary>
     /// <param name="target">The method to patch.</param>

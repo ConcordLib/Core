@@ -76,6 +76,18 @@ public static class PatcherGcInjectionMethod {
     }
 }
 
+public static class PatcherReturnTarget {
+    public static int Compute() {
+        return 1;
+    }
+}
+
+public static class PatcherReturnInjectionMethod {
+    public static void OnReturn(ControlHandle<int> ch) {
+        ch.ReturnValue = 99;
+    }
+}
+
 [Collection(SharedAssemblyApplyCollection.Name)]
 public sealed class PatcherTests {
     [Fact]
@@ -133,6 +145,25 @@ public sealed class PatcherTests {
         }
 
         Assert.Equal(1, PatcherImperativeTarget.Compute());
+    }
+
+    [Fact]
+    public void PatchInjection_ReturnPosition_RootsHandle_ChangesReturnValue_DisposeReverts() {
+        MethodBase target = typeof(PatcherReturnTarget).GetMethod(nameof(PatcherReturnTarget.Compute))!;
+        MethodBase injectionMethod = typeof(PatcherReturnInjectionMethod).GetMethod(nameof(PatcherReturnInjectionMethod.OnReturn))!;
+        Injection injection = new Injection((MethodInfo)injectionMethod, new InjectAt.Return(0), injectionMethod.DeclaringType!.FullName!, 0);
+
+        Assert.Equal(1, PatcherReturnTarget.Compute());
+
+        IPatchHandle handle = Patcher.PatchInjection(target, injection);
+        try {
+            Assert.True(handle.IsApplied);
+            Assert.Equal(99, PatcherReturnTarget.Compute());
+        } finally {
+            handle.Dispose();
+        }
+
+        Assert.Equal(1, PatcherReturnTarget.Compute());
     }
 
     [Fact]
