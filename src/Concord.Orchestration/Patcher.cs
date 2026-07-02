@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reflection;
 using Concord.Detour;
 using Concord.Emit;
@@ -30,10 +31,23 @@ public static class Patcher {
             }
 
             CollectingPatchApplier applier = new CollectingPatchApplier();
-            PatchDeclarationScanner.ScanAssembly(assembly, applier, Properties);
-            PatchHandle handle = new PatchHandle(applier.Handles, () => Remove(assembly));
-            Applied[assembly] = handle;
-            return handle;
+            try {
+                PatchDeclarationScanner.ScanAssembly(assembly, applier, Properties);
+            } catch {
+                foreach (IDetourHandle handle in applier.Handles) {
+                    try {
+                        handle.Dispose();
+                    } catch (Exception ex) {
+                        Debug.WriteLine("[Concord] rollback dispose failed: " + ex.Message);
+                    }
+                }
+
+                throw;
+            }
+
+            PatchHandle patchHandle = new PatchHandle(applier.Handles, () => Remove(assembly));
+            Applied[assembly] = patchHandle;
+            return patchHandle;
         }
     }
 
