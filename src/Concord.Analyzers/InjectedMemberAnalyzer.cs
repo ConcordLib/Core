@@ -1143,11 +1143,31 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             targetType.IsSealed ||
             targetType.IsStatic ||
             IsBclType(targetType) ||
-            !compilation.IsSymbolAccessibleWithin(targetType, patchType)) {
+            !compilation.IsSymbolAccessibleWithin(targetType, patchType) ||
+            !HasSubclassAccessibleConstructor(compilation, patchType, targetType)) {
             return false;
         }
 
         return IsObject(patchType.BaseType) || SymbolEqualityComparer.Default.Equals(patchType.BaseType, targetType);
+    }
+
+    private static bool HasSubclassAccessibleConstructor(Compilation compilation, INamedTypeSymbol patchType, INamedTypeSymbol targetType) {
+        foreach (IMethodSymbol ctor in targetType.InstanceConstructors) {
+            if (ctor.DeclaredAccessibility is Accessibility.Protected or Accessibility.ProtectedOrInternal) {
+                return true;
+            }
+
+            if (ctor.DeclaredAccessibility == Accessibility.ProtectedAndInternal &&
+                SymbolEqualityComparer.Default.Equals(ctor.ContainingAssembly, patchType.ContainingAssembly)) {
+                return true;
+            }
+
+            if (compilation.IsSymbolAccessibleWithin(ctor, patchType)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsStringLiteralConstructorArgument(
