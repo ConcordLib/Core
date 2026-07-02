@@ -8,6 +8,7 @@ namespace Concord;
 public interface IPatchHandle : IDisposable {
     /// <summary>
     ///     Gets a value indicating whether the handle's detours are currently applied.
+    ///     Returns true only while the handle is undisposed and all underlying detours are applied.
     /// </summary>
     bool IsApplied { get; }
 

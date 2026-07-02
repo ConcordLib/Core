@@ -11,7 +11,21 @@ internal sealed class PatchHandle : IPatchHandle {
         this.onDispose = onDispose;
     }
 
-    public bool IsApplied => !disposed;
+    public bool IsApplied {
+        get {
+            if (disposed) {
+                return false;
+            }
+
+            foreach (IDetourHandle detour in Detours) {
+                if (!detour.IsApplied) {
+                    return false;
+                }
+            }
+
+            return Detours.Count > 0;
+        }
+    }
 
     public IReadOnlyList<IDetourHandle> Detours { get; }
 

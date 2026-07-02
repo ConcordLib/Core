@@ -42,8 +42,37 @@ public sealed class PatchHandleTests {
         Assert.Same(a, detours[0]);
     }
 
+    [Fact]
+    public void IsApplied_ReflectsUnderlyingDetours() {
+        FakeHandle applied = new FakeHandle();
+        PatchHandle handle = new PatchHandle([applied], null);
+
+        Assert.True(handle.IsApplied);
+
+        handle.Dispose();
+        Assert.False(handle.IsApplied);
+    }
+
+    [Fact]
+    public void IsApplied_ReturnsFalseWhenAnyDetourNotApplied() {
+        FakeHandle applied1 = new FakeHandle();
+        FakeHandle applied2 = new FakeHandle();
+        PatchHandle handle = new PatchHandle([applied1, applied2], null);
+
+        Assert.True(handle.IsApplied);
+
+        applied2.Disposed = true;
+        Assert.False(handle.IsApplied);
+    }
+
+    [Fact]
+    public void IsApplied_ReturnsFalseWhenEmpty() {
+        PatchHandle handle = new PatchHandle([], null);
+        Assert.False(handle.IsApplied);
+    }
+
     private sealed class FakeHandle : IDetourHandle {
-        public bool Disposed { get; private set; }
+        public bool Disposed { get; set; }
 
         public MethodBase Original => typeof(object).GetMethod(nameof(ToString))!;
 
