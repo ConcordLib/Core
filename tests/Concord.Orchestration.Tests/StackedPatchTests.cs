@@ -22,6 +22,28 @@ public static class StackedSecondInjection {
     }
 }
 
+public static class PriorityTarget {
+    public static int Value() {
+        return 5;
+    }
+}
+
+[Patch(typeof(PriorityTarget))]
+public static class PriorityFirstLow {
+    [Inject(At.Tail, nameof(PriorityTarget.Value), Priority = 1)]
+    public static void AddOne(ControlHandle<int> ch) {
+        ch.ReturnValue = ch.ReturnValue + 1;
+    }
+}
+
+[Patch(typeof(PriorityTarget))]
+public static class PrioritySecondHigh {
+    [Inject(At.Tail, nameof(PriorityTarget.Value), Priority = 2)]
+    public static void MultiplyTwo(ControlHandle<int> ch) {
+        ch.ReturnValue = ch.ReturnValue * 2;
+    }
+}
+
 public sealed class StackedPatchTests {
     [Fact]
     public void TwoInjectionsOnOneTarget_BothRun() {
@@ -57,5 +79,15 @@ public sealed class StackedPatchTests {
 
         h2.Dispose();
         Assert.Equal(0, StackedTarget.Value());
+    }
+
+    [Fact]
+    public void Priority_DeterminesTailOrder() {
+        IPatchHandle handle = Patcher.Apply(typeof(PriorityFirstLow).Assembly);
+        try {
+            Assert.Equal(12, PriorityTarget.Value());
+        } finally {
+            handle.Dispose();
+        }
     }
 }

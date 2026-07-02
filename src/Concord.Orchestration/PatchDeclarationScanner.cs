@@ -72,7 +72,7 @@ public static class PatchDeclarationScanner {
             }
 
             MethodBase resolvedTarget = ResolveInjectionTarget(declaration, baseType, inject);
-            Injection injection = new Injection(method, inject.ResolvedAt, declaration.FullName!, 0);
+            Injection injection = new Injection(method, inject.ResolvedAt, declaration.FullName!, inject.ResolvedPriority);
             patches.ApplyPatch(resolvedTarget, injection);
         }
 

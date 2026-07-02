@@ -106,6 +106,12 @@ public sealed class InjectAttribute : Attribute {
     public bool TargetsConstructor { get; }
 
     /// <summary>
+    ///     Gets or sets the ordering priority for this injection when multiple injections target the same method.
+    ///     Higher priority injections execute later (more outer) in tail chains. Defaults to 0.
+    /// </summary>
+    public int Priority { get; init; }
+
+    /// <summary>
     ///     Gets the <see cref="InjectAt" /> corresponding to this injection's position.
     ///     Returns <see cref="InjectAt.Invoke" /> when the invoke constructor was used;
     ///     otherwise maps from <see cref="At" />.
@@ -124,4 +130,9 @@ public sealed class InjectAttribute : Attribute {
             };
         }
     }
+
+    /// <summary>
+    ///     Gets the priority value as resolved from the <see cref="Priority" /> property.
+    /// </summary>
+    internal int ResolvedPriority => Priority;
 }
