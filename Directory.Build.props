@@ -9,8 +9,9 @@
     <DebugSymbols>true</DebugSymbols>
     <EmbedAllSources>true</EmbedAllSources>
 
-    <!-- Only Concord.Ref and Concord.Analyzers publish; they opt back in per-project. -->
+    <!-- Only the packages under src opt back in per-project. -->
     <IsPackable>false</IsPackable>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
 
     <!-- Package versions come from v-prefixed git tags (v1.2.3 -> 1.2.3). -->
     <MinVerTagPrefix>v</MinVerTagPrefix>
