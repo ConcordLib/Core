@@ -1,5 +1,6 @@
 using System.Reflection;
 using Concord;
+using Concord.Detour;
 using Xunit;
 
 namespace Concord.Orchestration.Tests;
@@ -83,11 +84,17 @@ public sealed class StackedPatchTests {
 
     [Fact]
     public void Priority_DeterminesTailOrder() {
-        IPatchHandle handle = Patcher.Apply(typeof(PriorityFirstLow).Assembly);
+        CollectingPatchApplier applier = new CollectingPatchApplier();
+        FakeAttachedPropertyRegistry props = new FakeAttachedPropertyRegistry();
+        PatchDeclarationScanner.ScanType(typeof(PriorityFirstLow), applier, props);
+        PatchDeclarationScanner.ScanType(typeof(PrioritySecondHigh), applier, props);
+
         try {
             Assert.Equal(12, PriorityTarget.Value());
         } finally {
-            handle.Dispose();
+            foreach (IDetourHandle handle in applier.Handles) {
+                handle.Dispose();
+            }
         }
     }
 }
