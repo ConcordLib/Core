@@ -84,8 +84,6 @@ public class InstanceBench {
     private static readonly MethodInfo Target =
         typeof(BenchTargets).GetMethod(nameof(BenchTargets.Instance))!;
 
-    private readonly BenchTargets _target = new BenchTargets();
-
     [GlobalSetup(Targets = [nameof(HarmonyPatched)])]
     public void SetupHarmony() {
         Harmony h = new Harmony("bench.harmony.instance");

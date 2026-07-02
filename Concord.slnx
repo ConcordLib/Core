@@ -16,7 +16,7 @@
     <Project Path="tests/Concord.AttachedData.Tests/Concord.AttachedData.Tests.csproj"/>
     <Project Path="tests/Concord.Orchestration.Tests/Concord.Orchestration.Tests.csproj"/>
   </Folder>
-  <!--Folder Name="/bench/">
+  <Folder Name="/bench/">
     <Project Path="bench/Concord.Benchmarks/Concord.Benchmarks.csproj"/>
-  </Folder-->
+  </Folder>
 </Solution>
