@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using Concord;
 using Concord.Detour;
 using Xunit;
@@ -6,6 +7,7 @@ using Xunit;
 namespace Concord.Orchestration.Tests;
 
 public static class StackedTarget {
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static int Value() {
         return 0;
     }
@@ -24,6 +26,7 @@ public static class StackedSecondInjection {
 }
 
 public static class PriorityTarget {
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static int Value() {
         return 5;
     }

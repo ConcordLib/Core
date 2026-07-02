@@ -12,12 +12,14 @@ public sealed class SharedAssemblyApplyCollection {
 }
 
 public static class PatcherApplyTarget {
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static int Compute() {
         return 1;
     }
 }
 
 public static class PatcherImperativeTarget {
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static int Compute() {
         return 1;
     }
@@ -40,30 +42,35 @@ public static class PatcherImperativeInjectionMethod {
 }
 
 public static class ConcurrentTargetA {
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static int Value() {
         return 1;
     }
 }
 
 public static class ConcurrentTargetB {
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static int Value() {
         return 2;
     }
 }
 
 public static class ConcurrentTargetC {
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static int Value() {
         return 3;
     }
 }
 
 public static class ConcurrentTargetD {
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static int Value() {
         return 4;
     }
 }
 
 public static class PatcherGcTarget {
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static int Compute() {
         return 1;
     }
@@ -77,6 +84,7 @@ public static class PatcherGcInjectionMethod {
 }
 
 public static class PatcherReturnTarget {
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static int Compute() {
         return 1;
     }

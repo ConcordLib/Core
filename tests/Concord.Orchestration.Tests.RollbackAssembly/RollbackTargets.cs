@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Concord;
 
 namespace Concord.Orchestration.Tests.RollbackAssembly;
@@ -5,6 +6,7 @@ namespace Concord.Orchestration.Tests.RollbackAssembly;
 /// <summary>A static target patched by a declaration that composes and applies cleanly.</summary>
 public static class RollbackGoodTarget {
     /// <summary>Returns a fixed value the good declaration adds one to.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static int Compute() {
         return 7;
     }
@@ -13,6 +15,7 @@ public static class RollbackGoodTarget {
 /// <summary>A static target patched by a declaration whose injection method throws CONC012 at compose time.</summary>
 public static class RollbackBadTarget {
     /// <summary>Returns a fixed value that is never reached once the bad declaration is scanned.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static int Compute() {
         return 13;
     }
