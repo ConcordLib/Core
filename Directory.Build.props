@@ -8,7 +8,17 @@
     <DebugType>embedded</DebugType>
     <DebugSymbols>true</DebugSymbols>
     <EmbedAllSources>true</EmbedAllSources>
+
+    <!-- Only Concord.Ref and Concord.Analyzers publish; they opt back in per-project. -->
+    <IsPackable>false</IsPackable>
+
+    <!-- Package versions come from v-prefixed git tags (v1.2.3 -> 1.2.3). -->
+    <MinVerTagPrefix>v</MinVerTagPrefix>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MinVer" Version="7.0.0" PrivateAssets="all"/>
+  </ItemGroup>
 
   <Import Project="StyleCop.props"/>
 </Project>
