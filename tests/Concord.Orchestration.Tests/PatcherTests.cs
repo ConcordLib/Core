@@ -39,6 +39,30 @@ public static class PatcherImperativeInjectionMethod {
     }
 }
 
+public static class ConcurrentTargetA {
+    public static int Value() {
+        return 1;
+    }
+}
+
+public static class ConcurrentTargetB {
+    public static int Value() {
+        return 2;
+    }
+}
+
+public static class ConcurrentTargetC {
+    public static int Value() {
+        return 3;
+    }
+}
+
+public static class ConcurrentTargetD {
+    public static int Value() {
+        return 4;
+    }
+}
+
 public static class PatcherGcTarget {
     public static int Compute() {
         return 1;
@@ -138,5 +162,26 @@ public sealed class PatcherTests {
         System.Reflection.Emit.DynamicMethod dynamic = new System.Reflection.Emit.DynamicMethod("orphan", typeof(void), Type.EmptyTypes);
 
         Assert.Throws<ConcordDeclarationException>(() => Patcher.Patch(target, dynamic, At.Head));
+    }
+
+    [Fact]
+    public void ConcurrentPatch_DifferentTargets_AllApply() {
+        MethodBase[] targets = [
+            typeof(ConcurrentTargetA).GetMethod(nameof(ConcurrentTargetA.Value))!,
+            typeof(ConcurrentTargetB).GetMethod(nameof(ConcurrentTargetB.Value))!,
+            typeof(ConcurrentTargetC).GetMethod(nameof(ConcurrentTargetC.Value))!,
+            typeof(ConcurrentTargetD).GetMethod(nameof(ConcurrentTargetD.Value))!
+        ];
+        MethodBase injection = typeof(PatcherImperativeInjectionMethod).GetMethod(nameof(PatcherImperativeInjectionMethod.OnCompute))!;
+
+        IPatchHandle[] handles = new IPatchHandle[targets.Length];
+        System.Threading.Tasks.Parallel.For(0, targets.Length, i => handles[i] = Patcher.Patch(targets[i], injection, At.Head));
+        try {
+            Assert.All(handles, h => Assert.True(h.IsApplied));
+        } finally {
+            foreach (IPatchHandle h in handles) {
+                h.Dispose();
+            }
+        }
     }
 }

@@ -254,12 +254,12 @@ public sealed class PatchBuilder {
     /// </remarks>
     /// <returns>A handle that reverts all applied detours when disposed.</returns>
     public IPatchHandle Apply() {
-        CollectingPatchApplier applier = new CollectingPatchApplier();
+        List<(MethodBase, Injection)> items = new List<(MethodBase, Injection)>(injections.Count);
         foreach (Injection injection in injections) {
-            applier.ApplyPatch(target, injection);
+            items.Add((target, injection));
         }
 
-        return Patcher.RegisterLive(applier.Handles);
+        return Patcher.ApplyInjections(items);
     }
 
     internal PatchBuilder Inject(InjectAt at, MethodInfo injectionMethod) {

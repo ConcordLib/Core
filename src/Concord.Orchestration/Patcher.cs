@@ -68,10 +68,12 @@ public static class Patcher {
             throw new ConcordDeclarationException("Injection method '" + injectionMethod.Name + "' has no declaring type; only methods declared on a type can be used as injections.");
         }
 
-        CollectingPatchApplier applier = new CollectingPatchApplier();
-        Injection injection = new Injection(injectionMethod, ToInjectAt(at), injectionMethod.DeclaringType.FullName!, 0);
-        applier.ApplyPatch(target, injection);
-        return RegisterLive(applier.Handles);
+        lock (Gate) {
+            CollectingPatchApplier applier = new CollectingPatchApplier();
+            Injection injection = new Injection(injectionMethod, ToInjectAt(at), injectionMethod.DeclaringType.FullName!, 0);
+            applier.ApplyPatch(target, injection);
+            return RegisterLive(applier.Handles);
+        }
     }
 
     /// <summary>
@@ -185,6 +187,17 @@ public static class Patcher {
     /// <exception cref="ConcordDeclarationException">Thrown when no matching instance constructor is found.</exception>
     public static PatchBuilder ForConstructor<T>(Type[] parameterTypes) {
         return ForConstructor(typeof(T), parameterTypes);
+    }
+
+    internal static IPatchHandle ApplyInjections(IReadOnlyList<(MethodBase Target, Injection Injection)> items) {
+        lock (Gate) {
+            CollectingPatchApplier applier = new CollectingPatchApplier();
+            foreach ((MethodBase target, Injection injection) in items) {
+                applier.ApplyPatch(target, injection);
+            }
+
+            return RegisterLive(applier.Handles);
+        }
     }
 
     internal static IPatchHandle RegisterLive(IReadOnlyList<IDetourHandle> detours) {
