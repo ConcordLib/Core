@@ -388,6 +388,45 @@ public sealed class InjectedMemberAnalyzerTests {
     }
 
     [Fact]
+    public async Task ExplicitTypeTarget_PrivateConstructorTarget_ReportsNoDiagnostic() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public class Target {
+                private Target() {
+                }
+            }
+
+            [Concord.Patch(typeof(Target))]
+            public abstract class Patch {
+            }
+            """);
+
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
+    public async Task ExplicitTypeTarget_ProtectedConstructorTarget_ReportsInheritedTargetSuggestion() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public class Target {
+                protected Target() {
+                }
+            }
+
+            [Concord.Patch(typeof(Target))]
+            public abstract class Patch {
+            }
+            """);
+
+        Diagnostic diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(InjectedMemberAnalyzer.PreferInheritedPatchTargetDiagnosticId, diagnostic.Id);
+    }
+
+    [Fact]
     public async Task Inject_TargetMethodMissing_ReportsDiagnostic() {
         ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
             AttributeSource +
