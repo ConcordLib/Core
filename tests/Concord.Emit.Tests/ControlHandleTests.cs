@@ -33,6 +33,15 @@ public static class ControlHandleInjectionMethods {
     public static void CancelWithoutReturn(ControlHandle<int> ch) {
         ch.Cancel();
     }
+
+    public static void CaptureHandle(ControlHandle ch) {
+        StrayHandleSink.Capture(ch);
+    }
+}
+
+public static class StrayHandleSink {
+    public static void Capture(ControlHandle ch) {
+    }
 }
 
 public sealed class ControlHandleTests {
@@ -104,5 +113,17 @@ public sealed class ControlHandleTests {
             WrapperComposer.Compose(target, [head]));
 
         Assert.Equal("CONC012", ex.Code);
+    }
+
+    [Fact]
+    public void Compose_VoidHeadPassesHandleElsewhere_ThrowsCONC013() {
+        MethodBase target = typeof(ControlHandleTargets).GetMethod(nameof(ControlHandleTargets.VoidWork))!;
+        MethodBase injectionMethod = typeof(ControlHandleInjectionMethods).GetMethod(nameof(ControlHandleInjectionMethods.CaptureHandle))!;
+        Injection head = new Injection(injectionMethod, new InjectAt.Head(), "test", 0);
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() =>
+            WrapperComposer.Compose(target, [head]));
+
+        Assert.Equal("CONC013", ex.Code);
     }
 }

@@ -53,6 +53,7 @@ internal static class BodyCopier {
     /// <param name="destination">The destination wrapper method definition.</param>
     /// <param name="target">The target method being patched.</param>
     /// <param name="injectionMethod">The reflection method for the injection method body.</param>
+    /// <param name="injectedMembers">The resolved injected-member map for the injection's declaring type.</param>
     /// <param name="locals">Wrapper locals used for cancellation and return-value protocol state.</param>
     /// <param name="returnBranchTarget">The instruction to branch to when the injection method returns.</param>
     /// <param name="spliceBody">Optional body to splice when an around injection method calls the target method.</param>
@@ -62,14 +63,12 @@ internal static class BodyCopier {
         MethodDefinition destination,
         MethodBase target,
         MethodBase injectionMethod,
+        InjectedMemberMap injectedMembers,
         ProtocolLocals locals,
         Instruction returnBranchTarget,
         IReadOnlyList<Instruction>? spliceBody = null) {
         MethodBody injectionBody = injectionDefinition.Body;
         ModuleDefinition module = destination.Module;
-
-        Type declarationType = injectionMethod.DeclaringType!;
-        InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(declarationType, target);
 
         Dictionary<int, int> argRemap = BuildArgRemap(target, injectionMethod);
         int controlHandleArgIndex = ControlHandleLowering.FindControlHandleArgIndex(injectionMethod);
@@ -87,6 +86,7 @@ internal static class BodyCopier {
                 controlHandleArgIndex,
                 locals,
                 returnBranchTarget,
+                injectionMethod,
                 target,
                 spliceBody);
             entries.Add((source_instruction, emitted));
@@ -112,6 +112,7 @@ internal static class BodyCopier {
     /// <param name="destination">The destination wrapper method definition.</param>
     /// <param name="target">The target method being patched.</param>
     /// <param name="injectionMethod">The reflection method for the injection method body.</param>
+    /// <param name="injectedMembers">The resolved injected-member map for the injection's declaring type.</param>
     /// <param name="wrapEnd">The instruction to branch to when the wrap injection method returns.</param>
     /// <param name="originalCall">The original call-site method reference.</param>
     /// <returns>The copied and lowered instruction sequence.</returns>
@@ -120,13 +121,11 @@ internal static class BodyCopier {
         MethodDefinition destination,
         MethodBase target,
         MethodBase injectionMethod,
+        InjectedMemberMap injectedMembers,
         Instruction wrapEnd,
         MethodReference originalCall) {
         MethodBody injectionBody = injectionDefinition.Body;
         ModuleDefinition module = destination.Module;
-
-        Type declarationType = injectionMethod.DeclaringType!;
-        InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(declarationType, target);
 
         Dictionary<int, int> argRemap = BuildArgRemap(target, injectionMethod);
         int operationArgIndex = ControlHandleLowering.FindOperationArgIndex(injectionMethod);
@@ -202,14 +201,18 @@ internal static class BodyCopier {
         int controlHandleArgIndex,
         ProtocolLocals locals,
         Instruction returnBranchTarget,
+        MethodBase injectionMethod,
         MethodBase? target = null,
         IReadOnlyList<Instruction>? spliceBody = null) {
         if (ControlHandleLowering.IsControlHandleReceiverLoad(source, controlHandleArgIndex)) {
+            EnsureNotStrayControlHandleUse(source, controlHandleArgIndex, target, injectionMethod);
             return new List<Instruction>(0);
         }
 
         if (target is not null && spliceBody is not null && ControlHandleLowering.IsOriginalBodySpliceCall(source, target)) {
             int consumed = target.GetParameters().Length + (target.IsStatic ? 0 : 1);
+            EnsureVerbatimArgForwards(source, consumed, injectionMethod);
+
             List<Instruction> spliced = new List<Instruction>(consumed + spliceBody.Count);
             for (int p = 0; p < consumed; p++) {
                 spliced.Add(Instruction.Create(OpCodes.Pop));
@@ -257,6 +260,63 @@ internal static class BodyCopier {
         Instruction copy = CloneInstruction(source, ctx.Module, ctx.VariableMap, ctx.InjectedMembers);
         RemapArgInstruction(copy, ctx.ArgRemap);
         return new List<Instruction> { copy };
+    }
+
+    private static void EnsureNotStrayControlHandleUse(Instruction receiverLoad, int controlHandleArgIndex, MethodBase? target, MethodBase injectionMethod) {
+        Instruction? next = receiverLoad.Next;
+        if (next is null) {
+            return;
+        }
+
+        bool isStore = IsStoreOpCode(next.OpCode);
+        bool isUnrelatedCall = IsCallOpCode(next.OpCode)
+            && ControlHandleLowering.ClassifyCall(next) == ControlHandleLowering.ControlCallKind.None
+            && !(target is not null && ControlHandleLowering.IsOriginalBodySpliceCall(next, target));
+        bool isChainedReceiverLoad = ControlHandleLowering.IsControlHandleReceiverLoad(next, controlHandleArgIndex);
+
+        if (isChainedReceiverLoad) {
+            EnsureNotStrayControlHandleUse(next, controlHandleArgIndex, target, injectionMethod);
+            return;
+        }
+
+        if (isStore || isUnrelatedCall) {
+            throw new ConcordEmitException(
+                "CONC013",
+                "The control handle parameter of injection '" + injectionMethod.DeclaringType?.Name + "." + injectionMethod.Name +
+                "' must be used only for direct control calls (Cancel/ReturnValue/original invoke); " +
+                "it cannot be stored to a local, captured, or passed elsewhere.");
+        }
+    }
+
+    private static bool IsStoreOpCode(OpCode opCode) {
+        return opCode == OpCodes.Stloc
+            || opCode == OpCodes.Stloc_S
+            || opCode == OpCodes.Stloc_0
+            || opCode == OpCodes.Stloc_1
+            || opCode == OpCodes.Stloc_2
+            || opCode == OpCodes.Stloc_3
+            || opCode == OpCodes.Starg
+            || opCode == OpCodes.Starg_S;
+    }
+
+    private static bool IsCallOpCode(OpCode opCode) {
+        return opCode == OpCodes.Call
+            || opCode == OpCodes.Callvirt
+            || opCode == OpCodes.Newobj;
+    }
+
+    private static void EnsureVerbatimArgForwards(Instruction spliceCall, int consumed, MethodBase injectionMethod) {
+        Instruction? cursor = spliceCall.Previous;
+        for (int p = 0; p < consumed; p++) {
+            if (cursor is null || ControlHandleLowering.GetLoadArgIndex(cursor) < 0) {
+                throw new ConcordEmitException(
+                    "CONC014",
+                    "The original-body call in injection '" + injectionMethod.DeclaringType?.Name + "." + injectionMethod.Name +
+                    "' must forward its arguments verbatim (plain parameter loads); computed or modified arguments are not supported.");
+            }
+
+            cursor = cursor.Previous;
+        }
     }
 
     private static bool TryLowerProjectedMethodCall(Instruction source, LoweringContext ctx, out List<Instruction> lowered) {

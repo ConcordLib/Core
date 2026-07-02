@@ -224,6 +224,7 @@ public static class WrapperComposer {
         ref bool hasHead,
         List<List<Instruction>> heads) {
         hasHead = true;
+        InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
         using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
         GuardCancelWithoutReturn(injectionMethodDefinition.Definition.Body, target, isVoid);
         heads.Add(
@@ -232,6 +233,7 @@ public static class WrapperComposer {
                 wrapperDefinition,
                 target,
                 injection.InjectionMethod,
+                injectedMembers,
                 locals,
                 guardStart));
     }
@@ -243,6 +245,7 @@ public static class WrapperComposer {
         ProtocolLocals locals,
         Instruction epilogueStart,
         List<List<Instruction>> returns) {
+        InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
         using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
         returns.Add(
             BodyCopier.CopyInjection(
@@ -250,6 +253,7 @@ public static class WrapperComposer {
                 wrapperDefinition,
                 target,
                 injection.InjectionMethod,
+                injectedMembers,
                 locals,
                 epilogueStart));
     }
@@ -271,6 +275,7 @@ public static class WrapperComposer {
 
         List<Instruction> exits = SelectReturnExits(allExits, returnSite.By, target);
 
+        InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
         using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
         foreach (Instruction exit in exits) {
             List<Instruction> siteBody = BodyCopier.CopyInjection(
@@ -278,6 +283,7 @@ public static class WrapperComposer {
                 wrapperDefinition,
                 target,
                 injection.InjectionMethod,
+                injectedMembers,
                 locals,
                 exit);
             int exitIndex = spine.IndexOf(exit);
@@ -301,11 +307,12 @@ public static class WrapperComposer {
 
         List<Instruction> sites = SelectInvokeSites(allSites, invoke.By, target, invoke);
 
+        InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
         using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
 
         if (invoke.Shift is At.Around) {
             foreach (Instruction site in sites) {
-                WrapCallSite(spine, site, injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod);
+                WrapCallSite(spine, site, injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers);
             }
 
             return;
@@ -318,6 +325,7 @@ public static class WrapperComposer {
                 wrapperDefinition,
                 target,
                 injection.InjectionMethod,
+                injectedMembers,
                 locals,
                 site);
             int siteIndex = spine.IndexOf(site);
@@ -340,12 +348,14 @@ public static class WrapperComposer {
                 $"Multiple Around injections on '{target.DeclaringType?.Name}.{target.Name}' are not supported; only one Around injection per target is allowed.");
         }
 
+        InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
         using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
         aroundBody = BodyCopier.CopyInjection(
             injectionMethodDefinition.Definition,
             wrapperDefinition,
             target,
             injection.InjectionMethod,
+            injectedMembers,
             locals,
             epilogueStart,
             spine);
@@ -358,7 +368,8 @@ public static class WrapperComposer {
         MethodDefinition injectionMethodDefinition,
         MethodDefinition wrapperDefinition,
         MethodBase target,
-        MethodBase injectionMethod) {
+        MethodBase injectionMethod,
+        InjectedMemberMap injectedMembers) {
         int siteIndex = spine.IndexOf(site);
         if (siteIndex <= 0) {
             throw new ConcordEmitException(
@@ -374,6 +385,7 @@ public static class WrapperComposer {
             wrapperDefinition,
             target,
             injectionMethod,
+            injectedMembers,
             wrapEnd,
             originalCall);
 

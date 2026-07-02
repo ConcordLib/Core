@@ -165,6 +165,34 @@ internal static class ControlHandleLowering {
         return false;
     }
 
+    internal static int GetLoadArgIndex(Instruction instruction) {
+        if (instruction.OpCode == OpCodes.Ldarg_0) {
+            return 0;
+        }
+
+        if (instruction.OpCode == OpCodes.Ldarg_1) {
+            return 1;
+        }
+
+        if (instruction.OpCode == OpCodes.Ldarg_2) {
+            return 2;
+        }
+
+        if (instruction.OpCode == OpCodes.Ldarg_3) {
+            return 3;
+        }
+
+        if (instruction.OpCode == OpCodes.Ldarg || instruction.OpCode == OpCodes.Ldarg_S) {
+            return ArgIndexOperand(instruction.Operand);
+        }
+
+        if (instruction.OpCode == OpCodes.Ldarga || instruction.OpCode == OpCodes.Ldarga_S) {
+            return ArgIndexOperand(instruction.Operand);
+        }
+
+        return -1;
+    }
+
     private static bool ParameterTypesMatch(MethodBase method, Type[] parameterTypes) {
         ParameterInfo[] parameters = method.GetParameters();
         if (parameters.Length != parameterTypes.Length) {
@@ -194,34 +222,6 @@ internal static class ControlHandleLowering {
         }
 
         return type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Operation<>);
-    }
-
-    private static int GetLoadArgIndex(Instruction instruction) {
-        if (instruction.OpCode == OpCodes.Ldarg_0) {
-            return 0;
-        }
-
-        if (instruction.OpCode == OpCodes.Ldarg_1) {
-            return 1;
-        }
-
-        if (instruction.OpCode == OpCodes.Ldarg_2) {
-            return 2;
-        }
-
-        if (instruction.OpCode == OpCodes.Ldarg_3) {
-            return 3;
-        }
-
-        if (instruction.OpCode == OpCodes.Ldarg || instruction.OpCode == OpCodes.Ldarg_S) {
-            return ArgIndexOperand(instruction.Operand);
-        }
-
-        if (instruction.OpCode == OpCodes.Ldarga || instruction.OpCode == OpCodes.Ldarga_S) {
-            return ArgIndexOperand(instruction.Operand);
-        }
-
-        return -1;
     }
 
     private static int ArgIndexOperand(object? operand) {
