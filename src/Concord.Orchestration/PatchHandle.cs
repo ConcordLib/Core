@@ -1,10 +1,11 @@
+using System.Threading;
 using Concord.Detour;
 
 namespace Concord.Orchestration;
 
 internal sealed class PatchHandle : IPatchHandle {
     private readonly Action? onDispose;
-    private bool disposed;
+    private int disposed;
 
     public PatchHandle(IReadOnlyList<IDetourHandle> detours, Action? onDispose) {
         Detours = detours;
@@ -13,7 +14,7 @@ internal sealed class PatchHandle : IPatchHandle {
 
     public bool IsApplied {
         get {
-            if (disposed) {
+            if (Volatile.Read(ref disposed) != 0) {
                 return false;
             }
 
@@ -30,15 +31,25 @@ internal sealed class PatchHandle : IPatchHandle {
     public IReadOnlyList<IDetourHandle> Detours { get; }
 
     public void Dispose() {
-        if (disposed) {
+        if (Interlocked.Exchange(ref disposed, 1) != 0) {
             return;
         }
 
-        disposed = true;
-        foreach (IDetourHandle detour in Detours) {
-            detour.Dispose();
+        List<Exception>? failures = null;
+        try {
+            foreach (IDetourHandle detour in Detours) {
+                try {
+                    detour.Dispose();
+                } catch (Exception ex) {
+                    (failures ??= []).Add(ex);
+                }
+            }
+        } finally {
+            onDispose?.Invoke();
         }
 
-        onDispose?.Invoke();
+        if (failures is not null) {
+            throw new AggregateException("One or more detours failed to revert.", failures);
+        }
     }
 }

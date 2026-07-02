@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Threading;
 using Concord.Emit;
 using MonoMod.Core;
 
@@ -31,15 +32,14 @@ public sealed class MonoModDetourBackend : IDetourBackend {
 
         public MethodBase Original { get; } = original;
 
-        public bool IsApplied => _detour is { IsApplied: true };
+        public bool IsApplied => Volatile.Read(ref _detour) is { IsApplied: true };
 
         public void Dispose() {
-            ICoreDetour? d = _detour;
+            ICoreDetour? d = Interlocked.Exchange(ref _detour, null);
             if (d is null) {
                 return;
             }
 
-            _detour = null;
             if (d.IsApplied) {
                 d.Undo();
             }

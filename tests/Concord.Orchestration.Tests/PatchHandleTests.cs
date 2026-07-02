@@ -71,6 +71,36 @@ public sealed class PatchHandleTests {
         Assert.False(handle.IsApplied);
     }
 
+    [Fact]
+    public void Dispose_ThrowingDetour_StillRunsOnDisposeAndDisposesRest() {
+        CountingDetour survivor = new CountingDetour();
+        bool onDisposeRan = false;
+        PatchHandle handle = new PatchHandle([new ThrowingDetour(), survivor], () => onDisposeRan = true);
+
+        Assert.Throws<AggregateException>(() => handle.Dispose());
+
+        Assert.Equal(1, survivor.DisposeCount);
+        Assert.True(onDisposeRan);
+        Assert.False(handle.IsApplied);
+    }
+
+    private sealed class ThrowingDetour : IDetourHandle {
+        public MethodBase Original => typeof(object).GetMethod(nameof(ToString))!;
+        public bool IsApplied => true;
+        public void Dispose() {
+            throw new InvalidOperationException("boom");
+        }
+    }
+
+    private sealed class CountingDetour : IDetourHandle {
+        public int DisposeCount;
+        public MethodBase Original => typeof(object).GetMethod(nameof(ToString))!;
+        public bool IsApplied => DisposeCount == 0;
+        public void Dispose() {
+            DisposeCount++;
+        }
+    }
+
     private sealed class FakeHandle : IDetourHandle {
         public bool Disposed { get; set; }
 
