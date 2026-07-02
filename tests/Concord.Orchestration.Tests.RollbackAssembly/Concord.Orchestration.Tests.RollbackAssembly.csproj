@@ -1,16 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
-  <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.7.0"/>
-    <PackageReference Include="xunit" Version="2.9.3"/>
-    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5"/>
-  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="../../src/Concord.Orchestration/Concord.Orchestration.csproj"/>
     <ProjectReference Include="../../src/Concord.Emit/Concord.Emit.csproj"/>
     <ProjectReference Include="../../src/Concord.Detour/Concord.Detour.csproj"/>
-    <ProjectReference Include="../Concord.Orchestration.Tests.RollbackAssembly/Concord.Orchestration.Tests.RollbackAssembly.csproj"/>
   </ItemGroup>
 </Project>

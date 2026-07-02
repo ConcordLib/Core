@@ -1,10 +1,15 @@
 using System.Reflection;
-using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
 using Concord.Emit;
+using Concord.Orchestration.Tests.RollbackAssembly;
 using Xunit;
 
 namespace Concord.Orchestration.Tests;
+
+[CollectionDefinition(Name)]
+public sealed class SharedAssemblyApplyCollection {
+    public const string Name = "SharedAssemblyApply";
+}
 
 public static class PatcherApplyTarget {
     public static int Compute() {
@@ -47,6 +52,7 @@ public static class PatcherGcInjectionMethod {
     }
 }
 
+[Collection(SharedAssemblyApplyCollection.Name)]
 public sealed class PatcherTests {
     [Fact]
     public void Apply_AppliesDetour_ChangesReturnValue_DisposeReverts() {
@@ -75,6 +81,17 @@ public sealed class PatcherTests {
         } finally {
             first.Dispose();
         }
+    }
+
+    [Fact]
+    public void Apply_WhenScanThrows_RevertsAlreadyAppliedDetours() {
+        Assembly rollbackAssembly = typeof(RollbackGoodTarget).Assembly;
+
+        Assert.Equal(7, RollbackGoodTarget.Compute());
+
+        Assert.Throws<ConcordEmitException>(() => Patcher.Apply(rollbackAssembly));
+
+        Assert.Equal(7, RollbackGoodTarget.Compute());
     }
 
     [Fact]

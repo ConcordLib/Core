@@ -123,6 +123,7 @@ internal static class OverloadedCtorAttrDeclaration {
     }
 }
 
+[Collection(SharedAssemblyApplyCollection.Name)]
 public sealed class ConstructorPatchingTests {
     [Fact]
     public void ForConstructor_Type_HeadFires_OriginalRuns_DisposeReverts() {
