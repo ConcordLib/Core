@@ -1,4 +1,5 @@
 using System.Reflection;
+using Concord.Detour;
 using Concord.Emit;
 
 namespace Concord.Orchestration.Tests;
@@ -79,4 +80,42 @@ public sealed class FakeAttachedPropertyRegistry : IAttachedPropertyRegistry {
     public void RegisterAttachedProperty(Type baseType, string name, Type valueType) {
         Calls.Add(new PropCall(baseType, name, valueType));
     }
+}
+
+public sealed class FakeDetourHandle : IDetourHandle {
+    private bool _isApplied = true;
+
+    public MethodBase Original { get; }
+    public bool IsApplied => _isApplied;
+
+    public FakeDetourHandle(MethodBase original) {
+        Original = original;
+    }
+
+    public void Dispose() {
+        _isApplied = false;
+    }
+}
+
+public sealed class RecordingApplier : IPatchApplier {
+    public List<IDetourHandle> AppliedHandles { get; } = [];
+
+    public void ApplyPatch(MethodBase target, Injection injection) {
+        FakeDetourHandle handle = new FakeDetourHandle(target);
+        AppliedHandles.Add(handle);
+    }
+}
+
+public class HalfFailingTarget {
+    public virtual void FirstMethod() { }
+    public virtual void SecondMethod() { }
+}
+
+[Patch(typeof(HalfFailingTarget))]
+public abstract class HalfFailingDeclaration : HalfFailingTarget {
+    [Inject(At.Head, nameof(HalfFailingTarget.FirstMethod))]
+    public void OnFirstValid(ControlHandle ch) { }
+
+    [Inject(At.Head, "NonExistentMethod")]
+    public void OnSecondInvalid(ControlHandle ch) { }
 }

@@ -65,6 +65,7 @@ public static class PatchDeclarationScanner {
                                       BindingFlags.Static |
                                       BindingFlags.DeclaredOnly;
 
+        List<(MethodBase Target, Injection Injection)> resolved = [];
         foreach (MethodInfo method in declaration.GetMethods(declared)) {
             InjectAttribute? inject = method.GetCustomAttribute<InjectAttribute>();
             if (inject == null) {
@@ -72,8 +73,11 @@ public static class PatchDeclarationScanner {
             }
 
             MethodBase resolvedTarget = ResolveInjectionTarget(declaration, baseType, inject);
-            Injection injection = new Injection(method, inject.ResolvedAt, declaration.FullName!, inject.ResolvedPriority);
-            patches.ApplyPatch(resolvedTarget, injection);
+            resolved.Add((resolvedTarget, new Injection(method, inject.ResolvedAt, declaration.FullName!, inject.ResolvedPriority)));
+        }
+
+        foreach ((MethodBase target, Injection injection) in resolved) {
+            patches.ApplyPatch(target, injection);
         }
 
         foreach (FieldInfo field in declaration.GetFields(declared)) {

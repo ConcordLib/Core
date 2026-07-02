@@ -131,4 +131,12 @@ public sealed class PatcherTests {
         MethodBase injectionMethod = typeof(PatcherGcInjectionMethod).GetMethod(nameof(PatcherGcInjectionMethod.OnCompute))!;
         Patcher.Patch(target, injectionMethod, At.Head);
     }
+
+    [Fact]
+    public void Patch_InjectionMethodWithNoDeclaringType_ThrowsConcordDeclarationException() {
+        MethodBase target = typeof(PatcherImperativeTarget).GetMethod(nameof(PatcherImperativeTarget.Compute))!;
+        System.Reflection.Emit.DynamicMethod dynamic = new System.Reflection.Emit.DynamicMethod("orphan", typeof(void), Type.EmptyTypes);
+
+        Assert.Throws<ConcordDeclarationException>(() => Patcher.Patch(target, dynamic, At.Head));
+    }
 }

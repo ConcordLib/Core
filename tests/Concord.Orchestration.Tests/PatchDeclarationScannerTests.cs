@@ -105,4 +105,14 @@ public sealed class PatchDeclarationScannerTests {
         Assert.Contains(patches.Calls, c => c.Injection.Owner == typeof(GoodDeclaration).FullName);
         Assert.Contains(props.Calls, c => c.BaseType == typeof(GameBase) && c.Name == "counter");
     }
+
+    [Fact]
+    public void ScanType_SecondInjectionFails_FirstIsNotApplied() {
+        RecordingApplier applier = new RecordingApplier();
+        FakeAttachedPropertyRegistry props = new FakeAttachedPropertyRegistry();
+
+        Assert.Throws<ConcordDeclarationException>(() => PatchDeclarationScanner.ScanType(typeof(HalfFailingDeclaration), applier, props));
+
+        Assert.Empty(applier.AppliedHandles);
+    }
 }

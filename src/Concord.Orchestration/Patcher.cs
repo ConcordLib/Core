@@ -64,8 +64,12 @@ public static class Patcher {
     /// <param name="at">The injection position where the injection method runs relative to the target.</param>
     /// <returns>A handle that reverts the applied detour when disposed.</returns>
     public static IPatchHandle Patch(MethodBase target, MethodBase injectionMethod, At at) {
+        if (injectionMethod.DeclaringType is null) {
+            throw new ConcordDeclarationException("Injection method '" + injectionMethod.Name + "' has no declaring type; only methods declared on a type can be used as injections.");
+        }
+
         CollectingPatchApplier applier = new CollectingPatchApplier();
-        Injection injection = new Injection(injectionMethod, ToInjectAt(at), injectionMethod.DeclaringType!.FullName!, 0);
+        Injection injection = new Injection(injectionMethod, ToInjectAt(at), injectionMethod.DeclaringType.FullName!, 0);
         applier.ApplyPatch(target, injection);
         return RegisterLive(applier.Handles);
     }

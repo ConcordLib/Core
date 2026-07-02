@@ -263,7 +263,11 @@ public sealed class PatchBuilder {
     }
 
     internal PatchBuilder Inject(InjectAt at, MethodInfo injectionMethod) {
-        injections.Add(new Injection(injectionMethod, at, injectionMethod.DeclaringType!.FullName!, 0));
+        if (injectionMethod.DeclaringType is null) {
+            throw new ConcordDeclarationException("Injection method '" + injectionMethod.Name + "' has no declaring type; only methods declared on a type can be used as injections.");
+        }
+
+        injections.Add(new Injection(injectionMethod, at, injectionMethod.DeclaringType.FullName!, 0));
         return this;
     }
 
