@@ -1,4 +1,5 @@
 using System.Reflection;
+using Concord.Emit;
 using MonoMod.Core;
 
 namespace Concord.Detour;
@@ -16,6 +17,13 @@ public sealed class MonoModDetourBackend : IDetourBackend {
 
         ICoreDetour detour = DetourFactory.Current.CreateDetour(original, replacement);
         return new Handle(original, detour);
+    }
+
+    /// <inheritdoc />
+    public IDetourHandle ApplyComposed(MethodBase target, IReadOnlyList<Injection> added) {
+        ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(added);
+        return TargetDetourRegistry.Add(target, added);
     }
 
     private sealed class Handle(MethodBase original, ICoreDetour detour) : IDetourHandle {

@@ -132,20 +132,20 @@ public static class WrapperComposer {
         Instruction guardBranch = Instruction.Create(OpCodes.Brtrue, afterSpine);
 
         bool hasHead = false;
-        List<Instruction> heads = new List<Instruction>();
-        List<Instruction> returns = new List<Instruction>();
+        List<List<Instruction>> headBodies = new List<List<Instruction>>();
+        List<List<Instruction>> returnBodies = new List<List<Instruction>>();
         List<Instruction>? aroundBody = null;
 
         for (int i = ordered.Count - 1; i >= 0; i--) {
             Injection injection = ordered[i];
 
             if (injection.At is InjectAt.Head) {
-                ProcessHeadInjection(injection, wrapperDefinition, target, locals, guardStart, isVoid, ref hasHead, heads);
+                ProcessHeadInjection(injection, wrapperDefinition, target, locals, guardStart, isVoid, ref hasHead, headBodies);
                 continue;
             }
 
             if (injection.At is InjectAt.Tail) {
-                ProcessTailInjection(injection, wrapperDefinition, target, locals, epilogueStart, returns);
+                ProcessTailInjection(injection, wrapperDefinition, target, locals, epilogueStart, returnBodies);
                 continue;
             }
 
@@ -163,6 +163,9 @@ public static class WrapperComposer {
                 ProcessAroundInjection(injection, wrapperDefinition, target, locals, epilogueStart, afterSpine, spine, ref aroundBody);
             }
         }
+
+        List<Instruction> heads = ChainBodies(headBodies, guardStart);
+        List<Instruction> returns = ChainBodies(returnBodies, epilogueStart);
 
         List<Instruction> assembled = new List<Instruction>();
 
@@ -188,6 +191,29 @@ public static class WrapperComposer {
         }
     }
 
+    private static List<Instruction> ChainBodies(List<List<Instruction>> bodies, Instruction sharedTarget) {
+        if (bodies.Count == 0) {
+            return [];
+        }
+
+        for (int i = 0; i < bodies.Count - 1; i++) {
+            List<Instruction> body = bodies[i];
+            Instruction nextStart = bodies[i + 1][0];
+            foreach (Instruction instruction in body) {
+                if (ReferenceEquals(instruction.Operand, sharedTarget)) {
+                    instruction.Operand = nextStart;
+                }
+            }
+        }
+
+        List<Instruction> chained = new List<Instruction>();
+        foreach (List<Instruction> body in bodies) {
+            chained.AddRange(body);
+        }
+
+        return chained;
+    }
+
     private static void ProcessHeadInjection(
         Injection injection,
         MethodDefinition wrapperDefinition,
@@ -196,11 +222,11 @@ public static class WrapperComposer {
         Instruction guardStart,
         bool isVoid,
         ref bool hasHead,
-        List<Instruction> heads) {
+        List<List<Instruction>> heads) {
         hasHead = true;
         using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
         GuardCancelWithoutReturn(injectionMethodDefinition.Definition.Body, target, isVoid);
-        heads.AddRange(
+        heads.Add(
             BodyCopier.CopyInjection(
                 injectionMethodDefinition.Definition,
                 wrapperDefinition,
@@ -216,9 +242,9 @@ public static class WrapperComposer {
         MethodBase target,
         ProtocolLocals locals,
         Instruction epilogueStart,
-        List<Instruction> returns) {
+        List<List<Instruction>> returns) {
         using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
-        returns.AddRange(
+        returns.Add(
             BodyCopier.CopyInjection(
                 injectionMethodDefinition.Definition,
                 wrapperDefinition,
