@@ -8,8 +8,23 @@
     <GenerateDependencyFile>false</GenerateDependencyFile>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <IsPackable>false</IsPackable>
+
+    <!-- Packs the ILRepack-merged Assemblies/Concord.dll (MonoMod folded in), so the
+         package carries no dependency group and no raw build output. The 'Concord' id
+         on nuget.org is taken by an unrelated abandoned package. -->
+    <IsPackable>true</IsPackable>
+    <PackageId>Concord.Runtime</PackageId>
+    <Description>The Concord runtime assembly: the single merged Concord.dll a target runtime ships and loads to run patches. Mods compile against Concord.Ref; this package is for runtime integrators.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <WarningsNotAsErrors>NU5128</WarningsNotAsErrors>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath=""/>
+    <None Include="$(OutputPath)Concord.dll" Pack="true" PackagePath="lib/net10.0" Visible="false"/>
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="../Concord.Detour/Concord.Detour.csproj"/>

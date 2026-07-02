@@ -80,6 +80,7 @@ jobs:
         run: |
           dotnet pack src/Concord.Ref/Concord.Ref.csproj -c Release -o artifacts
           dotnet pack src/Concord.Analyzers/Concord.Analyzers.csproj -c Release -o artifacts
+          dotnet pack src/Concord/Concord.csproj -c Release -o artifacts
 
       - name: NuGet login
         if: steps.tag.outputs.tag != ''
