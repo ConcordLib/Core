@@ -32,12 +32,8 @@ public sealed class AttachedField<TTarget, TVal>
     /// <param name="target">The instance to attach to.</param>
     /// <param name="value">The value to store.</param>
     public void Set(TTarget target, TVal value) {
-        if (_table.TryGetValue(target, out StrongBox<TVal>? box)) {
-            box.Value = value;
-            return;
-        }
-
-        _table.Add(target, new StrongBox<TVal>(value));
+        StrongBox<TVal> box = _table.GetValue(target, static _ => new StrongBox<TVal>());
+        box.Value = value;
     }
 
     /// <summary>

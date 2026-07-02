@@ -1,3 +1,4 @@
+using System.Threading.Tasks;
 using Xunit;
 
 namespace Concord.AttachedData.Tests;
@@ -54,5 +55,15 @@ public sealed class AttachedFieldTests {
         bool found = field.TryGet(new Holder(), out int value);
         Assert.False(found);
         Assert.Equal(0, value);
+    }
+
+    [Fact]
+    public void Set_ConcurrentFirstWrite_DoesNotThrow() {
+        AttachedField<object, int> field = new AttachedField<object, int>();
+        object target = new object();
+
+        Parallel.For(0, 64, _ => field.Set(target, 1));
+
+        Assert.Equal(1, field.Get(target));
     }
 }
