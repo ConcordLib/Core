@@ -17,4 +17,42 @@ public static class BenchTargets {
     public static int Instance(int x) {
         return x + 1;
     }
+
+    public sealed class InstanceTarget {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public int Compute(int x) {
+            return x + 1;
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static int ControlHandleReturn(int x) {
+        return x + 1;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static void ControlHandleCancel() { }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static int AroundSplice(int x, int y) {
+        return x + y;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static int InvokeWrap(int x) {
+        return x * 2;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static int TryFinallyTarget(int x) {
+        try {
+            return x + 1;
+        } finally {
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static int StackedInjections(int x) {
+        return x + 1;
+    }
 }

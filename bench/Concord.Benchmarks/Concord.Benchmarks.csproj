@@ -12,5 +12,6 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Concord.Emit/Concord.Emit.csproj"/>
     <ProjectReference Include="../../src/Concord.Detour/Concord.Detour.csproj"/>
+    <ProjectReference Include="../../src/Concord.AttachedData/Concord.AttachedData.csproj"/>
   </ItemGroup>
 </Project>
