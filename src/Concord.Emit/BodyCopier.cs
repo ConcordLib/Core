@@ -102,6 +102,8 @@ internal static class BodyCopier {
             }
         }
 
+        CopyInjectionHandlers(injectionBody, destination.Body, instructionMap, module);
+
         return result;
     }
 
@@ -161,7 +163,19 @@ internal static class BodyCopier {
             }
         }
 
+        CopyInjectionHandlers(injectionBody, destination.Body, instructionMap, module);
+
         return result;
+    }
+
+    private static void CopyInjectionHandlers(
+        MethodBody injectionBody,
+        MethodBody destinationBody,
+        Dictionary<Instruction, Instruction> instructionMap,
+        ModuleDefinition module) {
+        foreach (ExceptionHandler handler in injectionBody.ExceptionHandlers) {
+            destinationBody.ExceptionHandlers.Add(CloneHandler(handler, instructionMap, module));
+        }
     }
 
     private static List<Instruction> LowerWrapInstruction(
@@ -690,7 +704,7 @@ internal static class BodyCopier {
         };
 
         if (source.CatchType is not null) {
-            copy.CatchType = module.ImportReference(source.CatchType);
+            copy.CatchType = module.ImportReference(source.CatchType.ResolveReflection());
         }
 
         return copy;
