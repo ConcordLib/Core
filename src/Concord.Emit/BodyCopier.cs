@@ -209,6 +209,11 @@ internal static class BodyCopier {
             return new List<Instruction>(0);
         }
 
+        if (IsControlHandleDup(source, controlHandleArgIndex)) {
+            EnsureNotStrayControlHandleUse(source, controlHandleArgIndex, target, injectionMethod);
+            return new List<Instruction>(0);
+        }
+
         if (target is not null && spliceBody is not null && ControlHandleLowering.IsOriginalBodySpliceCall(source, target)) {
             int consumed = target.GetParameters().Length + (target.IsStatic ? 0 : 1);
             EnsureVerbatimArgForwards(source, consumed, injectionMethod);
@@ -262,6 +267,16 @@ internal static class BodyCopier {
         return new List<Instruction> { copy };
     }
 
+    private static bool IsControlHandleDup(Instruction instruction, int controlHandleArgIndex) {
+        if (instruction.OpCode != OpCodes.Dup || instruction.Previous is null) {
+            return false;
+        }
+
+        Instruction previous = instruction.Previous;
+        return ControlHandleLowering.IsControlHandleReceiverLoad(previous, controlHandleArgIndex)
+            || IsControlHandleDup(previous, controlHandleArgIndex);
+    }
+
     private static void EnsureNotStrayControlHandleUse(Instruction receiverLoad, int controlHandleArgIndex, MethodBase? target, MethodBase injectionMethod) {
         Instruction? next = receiverLoad.Next;
         if (next is null) {
@@ -272,7 +287,8 @@ internal static class BodyCopier {
         bool isUnrelatedCall = IsCallOpCode(next.OpCode)
             && ControlHandleLowering.ClassifyCall(next) == ControlHandleLowering.ControlCallKind.None
             && !(target is not null && ControlHandleLowering.IsOriginalBodySpliceCall(next, target));
-        bool isChainedReceiverLoad = ControlHandleLowering.IsControlHandleReceiverLoad(next, controlHandleArgIndex);
+        bool isChainedReceiverLoad = ControlHandleLowering.IsControlHandleReceiverLoad(next, controlHandleArgIndex)
+            || next.OpCode == OpCodes.Dup;
 
         if (isChainedReceiverLoad) {
             EnsureNotStrayControlHandleUse(next, controlHandleArgIndex, target, injectionMethod);

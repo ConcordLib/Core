@@ -30,6 +30,10 @@ public static class ControlHandleInjectionMethods {
         ch.ReturnValue = ch.ReturnValue * 2;
     }
 
+    public static void CompoundAddReturn(ControlHandle<int> ch) {
+        ch.ReturnValue += 3;
+    }
+
     public static void CancelWithoutReturn(ControlHandle<int> ch) {
         ch.Cancel();
     }
@@ -83,6 +87,20 @@ public sealed class ControlHandleTests {
         object? value = result.Wrapper.Invoke(null, []);
 
         Assert.Equal(10, value);
+        Assert.Equal(1, ControlHandleTargets.SpineRuns);
+    }
+
+    [Fact]
+    public void Compose_CompoundAssignReturnValue_AddsToSpineResult() {
+        MethodBase target = typeof(ControlHandleTargets).GetMethod(nameof(ControlHandleTargets.IntWork))!;
+        MethodBase injectionMethod = typeof(ControlHandleInjectionMethods).GetMethod(nameof(ControlHandleInjectionMethods.CompoundAddReturn))!;
+        Injection tail = new Injection(injectionMethod, new InjectAt.Tail(), "test", 0);
+
+        ControlHandleTargets.SpineRuns = 0;
+        ComposeResult result = WrapperComposer.Compose(target, [tail]);
+        object? value = result.Wrapper.Invoke(null, []);
+
+        Assert.Equal(8, value);
         Assert.Equal(1, ControlHandleTargets.SpineRuns);
     }
 
