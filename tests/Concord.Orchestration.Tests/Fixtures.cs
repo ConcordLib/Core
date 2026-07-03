@@ -41,6 +41,13 @@ public abstract class InjectFieldDeclaration : GameBase {
 }
 #pragma warning restore CS0649
 
+[Patch]
+public abstract class StaticFieldDeclaration : GameBase {
+    private static readonly HashSet<string> Registered = [];
+
+    public int marker;
+}
+
 public abstract class UnattributedDeclaration : GameBase {
     public int counter;
 

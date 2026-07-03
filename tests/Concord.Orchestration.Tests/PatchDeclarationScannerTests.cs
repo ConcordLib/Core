@@ -58,6 +58,19 @@ public sealed class PatchDeclarationScannerTests {
     }
 
     [Fact]
+    public void ScanType_StaticField_IsNotAttachedProperty() {
+        FakePatchApplier patches = new FakePatchApplier();
+        FakeAttachedPropertyRegistry props = new FakeAttachedPropertyRegistry();
+
+        PatchDeclarationScanner.ScanType(typeof(StaticFieldDeclaration), patches, props);
+
+        Assert.Empty(patches.Calls);
+        PropCall call = Assert.Single(props.Calls);
+        Assert.Equal(typeof(GameBase), call.BaseType);
+        Assert.Equal("marker", call.Name);
+    }
+
+    [Fact]
     public void ScanType_Unattributed_Skipped() {
         FakePatchApplier patches = new FakePatchApplier();
         FakeAttachedPropertyRegistry props = new FakeAttachedPropertyRegistry();

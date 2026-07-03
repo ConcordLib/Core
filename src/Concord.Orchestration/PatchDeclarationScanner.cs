@@ -81,6 +81,10 @@ public static class PatchDeclarationScanner {
         }
 
         foreach (FieldInfo field in declaration.GetFields(declared)) {
+            if (field.IsStatic) {
+                continue;
+            }
+
             if (field.GetCustomAttribute<InjectFieldAttribute>() is not null) {
                 continue;
             }
