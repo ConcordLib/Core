@@ -5,42 +5,49 @@ using Xunit;
 namespace Concord.Orchestration.Tests;
 
 public static class BuilderMethodBaseTarget {
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static int Compute() {
         return 1;
     }
 }
 
 public static class BuilderTypeTarget {
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static int Compute() {
         return 1;
     }
 }
 
 public sealed class BuilderGenericTarget {
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static int Compute() {
         return 1;
     }
 }
 
 public static class BuilderStringTarget {
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static int Compute() {
         return 1;
     }
 }
 
 public static class BuilderGcTarget2 {
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static int Compute() {
         return 1;
     }
 }
 
 public static class BuilderReturnTarget2 {
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static int Compute() {
         return 1;
     }
 }
 
 public static class BuilderAroundTarget2 {
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static void Step() {
         BuilderLog.Entries.Add("spine");
     }
@@ -61,6 +68,7 @@ public static class BuilderInvokeHelper2 {
 }
 
 public class BuilderInvokeTarget2 {
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public void Run() {
         BuilderLog.Entries.Add("before");
         BuilderInvokeHelper2.Step();

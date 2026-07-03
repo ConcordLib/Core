@@ -6,10 +6,12 @@ namespace Concord.Orchestration.Tests;
 
 // Overload disambiguation fixtures.
 internal class OverloadDisambiguationTarget {
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static int Compute(int x) {
         return x + 10;
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static int Compute(string s) {
         return s.Length;
     }
@@ -34,6 +36,7 @@ internal static class OverloadedHelper {
 }
 
 internal static class InvokeDisambiguationCallsite {
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static int Run() {
         return OverloadedHelper.Process(7) + OverloadedHelper.Process("hello");
     }

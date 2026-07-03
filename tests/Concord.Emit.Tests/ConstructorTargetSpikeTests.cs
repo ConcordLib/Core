@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using Concord.Detour;
 using Xunit;
 
@@ -7,6 +8,7 @@ namespace Concord.Emit.Tests;
 public class CtorTarget {
     public int Seed;
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public CtorTarget(int seed) {
         Seed = seed;
     }
