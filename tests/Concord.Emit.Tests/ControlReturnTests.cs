@@ -1,0 +1,106 @@
+using System.Reflection;
+using Xunit;
+
+namespace Concord.Emit.Tests;
+
+public static class ControlReturnTargets {
+    public static int SpineRuns;
+
+    public static void VoidWork() {
+        SpineRuns++;
+    }
+
+    public static int IntWork() {
+        SpineRuns++;
+        return 5;
+    }
+}
+
+public static class ControlReturnInjectionMethods {
+    public static Control CancelAlways() {
+        return Control.Cancel;
+    }
+
+    public static Control ContinueAlways() {
+        return Control.Continue;
+    }
+
+    public static Control CancelWithValue(ControlHandle<int> ch) {
+        ch.ReturnValue = 42;
+        return Control.Cancel;
+    }
+}
+
+public sealed class ControlReturnTests {
+    [Fact]
+    public void Compose_ControlCancel_SkipsSpine() {
+        MethodBase target = typeof(ControlReturnTargets).GetMethod(nameof(ControlReturnTargets.VoidWork))!;
+        MethodBase injectionMethod = typeof(ControlReturnInjectionMethods).GetMethod(nameof(ControlReturnInjectionMethods.CancelAlways))!;
+        Injection head = new Injection(injectionMethod, new InjectAt.Head(), "test", 0);
+
+        ControlReturnTargets.SpineRuns = 0;
+        ComposeResult result = WrapperComposer.Compose(target, [head]);
+        result.Wrapper.Invoke(null, []);
+
+        Assert.Equal(0, ControlReturnTargets.SpineRuns);
+    }
+
+    [Fact]
+    public void Compose_ControlContinue_RunsSpine() {
+        MethodBase target = typeof(ControlReturnTargets).GetMethod(nameof(ControlReturnTargets.VoidWork))!;
+        MethodBase injectionMethod = typeof(ControlReturnInjectionMethods).GetMethod(nameof(ControlReturnInjectionMethods.ContinueAlways))!;
+        Injection head = new Injection(injectionMethod, new InjectAt.Head(), "test", 0);
+
+        ControlReturnTargets.SpineRuns = 0;
+        ComposeResult result = WrapperComposer.Compose(target, [head]);
+        result.Wrapper.Invoke(null, []);
+
+        Assert.Equal(1, ControlReturnTargets.SpineRuns);
+    }
+
+    [Fact]
+    public void Compose_ControlCancelWithReturnValue_ReturnsValueSkipsSpine() {
+        MethodBase target = typeof(ControlReturnTargets).GetMethod(nameof(ControlReturnTargets.IntWork))!;
+        MethodBase injectionMethod = typeof(ControlReturnInjectionMethods).GetMethod(nameof(ControlReturnInjectionMethods.CancelWithValue))!;
+        Injection head = new Injection(injectionMethod, new InjectAt.Head(), "test", 0);
+
+        ControlReturnTargets.SpineRuns = 0;
+        ComposeResult result = WrapperComposer.Compose(target, [head]);
+        object? value = result.Wrapper.Invoke(null, []);
+
+        Assert.Equal(42, value);
+        Assert.Equal(0, ControlReturnTargets.SpineRuns);
+    }
+
+    [Fact]
+    public void Compose_StackedHeads_ContinueDoesNotUncancel() {
+        MethodBase target = typeof(ControlReturnTargets).GetMethod(nameof(ControlReturnTargets.VoidWork))!;
+        MethodBase cancel = typeof(ControlReturnInjectionMethods).GetMethod(nameof(ControlReturnInjectionMethods.CancelAlways))!;
+        MethodBase cont = typeof(ControlReturnInjectionMethods).GetMethod(nameof(ControlReturnInjectionMethods.ContinueAlways))!;
+        Injection first = new Injection(cancel, new InjectAt.Head(), "test", 0);
+        Injection second = new Injection(cont, new InjectAt.Head(), "test", 1);
+
+        ControlReturnTargets.SpineRuns = 0;
+        ComposeResult result = WrapperComposer.Compose(target, [first, second]);
+        result.Wrapper.Invoke(null, []);
+
+        Assert.Equal(0, ControlReturnTargets.SpineRuns);
+    }
+
+    [Fact]
+    public void Compose_ControlReturn_ZeroAllocOnWarmInvocation() {
+        MethodBase target = typeof(ControlReturnTargets).GetMethod(nameof(ControlReturnTargets.VoidWork))!;
+        MethodBase injectionMethod = typeof(ControlReturnInjectionMethods).GetMethod(nameof(ControlReturnInjectionMethods.ContinueAlways))!;
+        Injection head = new Injection(injectionMethod, new InjectAt.Head(), "test", 0);
+
+        ComposeResult result = WrapperComposer.Compose(target, [head]);
+        Action invoke = result.Wrapper.CreateDelegate<Action>();
+        invoke();
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        invoke();
+        long after = GC.GetAllocatedBytesForCurrentThread();
+
+        Assert.Equal(0, after - before);
+    }
+}

@@ -265,6 +265,15 @@ internal static class BodyCopier {
                 };
             }
 
+            if (ControlHandleLowering.ReturnsControl(injectionMethod)) {
+                return new List<Instruction> {
+                    Instruction.Create(OpCodes.Ldloc, locals.Cancel),
+                    Instruction.Create(OpCodes.Or),
+                    Instruction.Create(OpCodes.Stloc, locals.Cancel),
+                    Instruction.Create(OpCodes.Br, returnBranchTarget),
+                };
+            }
+
             return new List<Instruction> { Instruction.Create(OpCodes.Br, returnBranchTarget) };
         }
 

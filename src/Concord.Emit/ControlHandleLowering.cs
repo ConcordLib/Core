@@ -165,6 +165,10 @@ internal static class ControlHandleLowering {
         return false;
     }
 
+    internal static bool ReturnsControl(MethodBase injectionMethod) {
+        return injectionMethod is MethodInfo info && info.ReturnType == typeof(Control);
+    }
+
     internal static int GetLoadArgIndex(Instruction instruction) {
         if (instruction.OpCode == OpCodes.Ldarg_0) {
             return 0;
