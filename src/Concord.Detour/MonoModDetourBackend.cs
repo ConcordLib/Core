@@ -13,8 +13,13 @@ namespace Concord.Detour;
 public sealed class MonoModDetourBackend : IDetourBackend {
     /// <inheritdoc />
     public IDetourHandle Apply(MethodBase original, MethodInfo replacement) {
-        ArgumentNullException.ThrowIfNull(original);
-        ArgumentNullException.ThrowIfNull(replacement);
+        if (original is null) {
+            throw new ArgumentNullException(nameof(original));
+        }
+
+        if (replacement is null) {
+            throw new ArgumentNullException(nameof(replacement));
+        }
 
         ICoreDetour detour = DetourFactory.Current.CreateDetour(original, replacement);
         return new Handle(original, detour);
@@ -22,8 +27,14 @@ public sealed class MonoModDetourBackend : IDetourBackend {
 
     /// <inheritdoc />
     public IDetourHandle ApplyComposed(MethodBase target, IReadOnlyList<Injection> added) {
-        ArgumentNullException.ThrowIfNull(target);
-        ArgumentNullException.ThrowIfNull(added);
+        if (target is null) {
+            throw new ArgumentNullException(nameof(target));
+        }
+
+        if (added is null) {
+            throw new ArgumentNullException(nameof(added));
+        }
+
         return TargetDetourRegistry.Add(target, added);
     }
 
