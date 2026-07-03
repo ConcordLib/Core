@@ -19,7 +19,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     public const string MissingMemberDiagnosticId = "CONCORD002";
 
     /// <summary>
-    ///     Diagnostic id for injected member declarations whose target member has an incompatible shape.
+    ///     Diagnostic id for injected member declarations whose target member has an incompatible signature.
     /// </summary>
     public const string MismatchedMemberDiagnosticId = "CONCORD003";
 
@@ -44,7 +44,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     public const string InvalidInjectionSignatureDiagnosticId = "CONCORD007";
 
     /// <summary>
-    ///     Diagnostic id for patch members with invalid static or instance shape.
+    ///     Diagnostic id for patch members with mismatched static or instance usage.
     /// </summary>
     public const string StaticInstanceMismatchDiagnosticId = "CONCORD008";
 
@@ -59,9 +59,9 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     public const string DuplicateInjectionDiagnosticId = "CONCORD010";
 
     /// <summary>
-    ///     Diagnostic id for unsupported Concord declaration member shapes.
+    ///     Diagnostic id for unsupported Concord declaration member forms.
     /// </summary>
-    public const string UnsupportedDeclarationShapeDiagnosticId = "CONCORD011";
+    public const string UnsupportedDeclarationFormDiagnosticId = "CONCORD011";
 
     /// <summary>
     ///     Diagnostic id for string patch targets that can be written as typeof.
@@ -164,14 +164,14 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         true,
         "Duplicate injection declarations at the same target and position are usually accidental.");
 
-    private static readonly DiagnosticDescriptor UnsupportedDeclarationShapeRule = new(
-        UnsupportedDeclarationShapeDiagnosticId,
+    private static readonly DiagnosticDescriptor UnsupportedDeclarationFormRule = new(
+        UnsupportedDeclarationFormDiagnosticId,
         "Unsupported Concord declaration member",
-        "Patch member '{0}' uses unsupported Concord declaration shape: {1}",
+        "Patch member '{0}' uses unsupported Concord declaration form: {1}",
         "Concord.Patches",
         DiagnosticSeverity.Error,
         true,
-        "Concord declaration members must use supported declaration shapes.");
+        "Concord declaration members must use supported declaration forms.");
 
     private static readonly DiagnosticDescriptor PreferTypeofPatchTargetRule = new(
         PreferTypeofPatchTargetDiagnosticId,
@@ -227,7 +227,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             StaticInstanceMismatchRule,
             AttachedFieldCouldBeInjectFieldRule,
             DuplicateInjectionRule,
-            UnsupportedDeclarationShapeRule,
+            UnsupportedDeclarationFormRule,
             PreferTypeofPatchTargetRule,
             PreferNameofMemberTargetRule,
             PreferInheritedPatchTargetRule,
@@ -1104,7 +1104,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         AttributeData attribute,
         string reason) {
         context.ReportDiagnostic(Diagnostic.Create(
-            UnsupportedDeclarationShapeRule,
+            UnsupportedDeclarationFormRule,
             LocationOf(attribute, patchMember, context.CancellationToken),
             patchMember.Name,
             reason));

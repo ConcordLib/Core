@@ -737,7 +737,7 @@ public sealed class InjectedMemberAnalyzerTests {
             """);
 
         Diagnostic diagnostic = Assert.Single(diagnostics);
-        Assert.Equal(InjectedMemberAnalyzer.UnsupportedDeclarationShapeDiagnosticId, diagnostic.Id);
+        Assert.Equal(InjectedMemberAnalyzer.UnsupportedDeclarationFormDiagnosticId, diagnostic.Id);
         Assert.Contains("generic", diagnostic.GetMessage());
     }
 
@@ -758,7 +758,7 @@ public sealed class InjectedMemberAnalyzerTests {
             """);
 
         Diagnostic diagnostic = Assert.Single(diagnostics);
-        Assert.Equal(InjectedMemberAnalyzer.UnsupportedDeclarationShapeDiagnosticId, diagnostic.Id);
+        Assert.Equal(InjectedMemberAnalyzer.UnsupportedDeclarationFormDiagnosticId, diagnostic.Id);
         Assert.Contains("get-only", diagnostic.GetMessage());
     }
 

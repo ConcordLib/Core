@@ -41,8 +41,8 @@
     <BuildOutputTargetFolder>ref</BuildOutputTargetFolder>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
     <!-- A ref-only package intentionally ships no dependency group and a doc file alongside
-         the assembly; the SDK flags both as NU5128/NU5131, which are false positives for this
-         shape. Downgrade them to (non-fatal) warnings rather than suppress, so they stay visible. -->
+         the assembly; the SDK flags both as NU5128/NU5131, which are false positives here.
+         Downgrade them to (non-fatal) warnings rather than suppress, so they stay visible. -->
     <WarningsNotAsErrors>NU5128;NU5131</WarningsNotAsErrors>
   </PropertyGroup>
 

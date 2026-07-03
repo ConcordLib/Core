@@ -149,7 +149,7 @@ internal static class InjectedMemberResolver {
                     targetType.Name +
                     "." +
                     targetName +
-                    "'. Return type, static-ness, generic shape, and parameter types must match exactly.");
+                    "'. Return type, static-ness, generic arity, and parameter types must match exactly.");
             }
 
             methods[InjectedMemberMap.MethodKey(declarationMethod)] = targetMethod;

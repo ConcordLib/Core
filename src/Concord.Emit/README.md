@@ -10,7 +10,7 @@ The IL composition layer, one of the core libraries internal to Concord.
 - `BodyCopier` owns the IL-copying mechanics: cloning instructions and handlers, remapping arguments, mapping shadow fields to real target fields, and splicing.
 - `At` is the public injection-position enum. `InjectAt` is the low-level representation used by composition.
 - `InjectAttribute` is the `[Inject]` attribute mods write.
-- Invalid patch shapes fail with a `ConcordEmitException` carrying a stable `CONCxxx` diagnostic code.
+- Invalid patch declarations fail with a `ConcordEmitException` carrying a stable `CONCxxx` diagnostic code.
 
 ## When to use this
 

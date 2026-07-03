@@ -22,8 +22,8 @@ checks `[InjectField]`, `[InjectProperty]`, and `[InjectMethod]` declarations
 against the target type. It validates `[Inject]` target methods and constructors,
 overload disambiguation, injection method parameters, `ControlHandle<T>` return types,
 static target usage, duplicate injection declarations, and unsupported declaration
-shapes such as generic `[Inject]` methods or invalid `[InjectInstance]`
-properties. It also warns when a plain patch field has the same shape as a target
+forms such as generic `[Inject]` methods or invalid `[InjectInstance]`
+properties. It also warns when a plain patch field mirrors a target
 field, since that usually means `[InjectField]` was intended. Injection methods
 may return `Control` only at the head position; a `Control` return anywhere else
 is reported as CONCORD015.
