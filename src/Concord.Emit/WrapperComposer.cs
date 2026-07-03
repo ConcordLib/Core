@@ -92,6 +92,15 @@ public static class WrapperComposer {
     }
 
     private static void Assemble(MethodDefinition wrapperDefinition, MethodBase target, IReadOnlyList<Injection> ordered, Type returnType) {
+        for (int i = 0; i < ordered.Count; i++) {
+            Injection injection = ordered[i];
+            if (injection.At is not InjectAt.Head && ControlHandleLowering.ReturnsControl(injection.InjectionMethod)) {
+                throw new ConcordEmitException(
+                    "CONC014",
+                    $"Injection '{injection.InjectionMethod.DeclaringType?.Name}.{injection.InjectionMethod.Name}' returns Control; a Control return is only valid on a head injection.");
+            }
+        }
+
         MethodBody body = wrapperDefinition.Body;
         ModuleDefinition module = wrapperDefinition.Module;
         bool isVoid = returnType == typeof(void);
@@ -226,7 +235,11 @@ public static class WrapperComposer {
         hasHead = true;
         InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
         using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
-        GuardCancelWithoutReturn(injectionMethodDefinition.Definition.Body, target, isVoid);
+        GuardCancelWithoutReturn(
+            injectionMethodDefinition.Definition.Body,
+            target,
+            isVoid,
+            ControlHandleLowering.ReturnsControl(injection.InjectionMethod));
         heads.Add(
             BodyCopier.CopyInjection(
                 injectionMethodDefinition.Definition,
@@ -634,15 +647,16 @@ public static class WrapperComposer {
         return false;
     }
 
-    private static void GuardCancelWithoutReturn(MethodBody injectionMethodBody, MethodBase target, bool isVoid) {
+    private static void GuardCancelWithoutReturn(MethodBody injectionMethodBody, MethodBase target, bool isVoid, bool returnsControl) {
         if (isVoid) {
             return;
         }
 
-        if (ControlHandleLowering.InjectionMethodCancels(injectionMethodBody) && !ControlHandleLowering.InjectionMethodSetsReturnValue(injectionMethodBody)) {
+        bool cancels = returnsControl || ControlHandleLowering.InjectionMethodCancels(injectionMethodBody);
+        if (cancels && !ControlHandleLowering.InjectionMethodSetsReturnValue(injectionMethodBody)) {
             throw new ConcordEmitException(
                 "CONC012",
-                $"Injection on non-void target '{target.DeclaringType?.Name}.{target.Name}' calls Cancel() without setting ReturnValue; a return value is required when the original method is skipped.");
+                $"Injection on non-void target '{target.DeclaringType?.Name}.{target.Name}' cancels without setting ReturnValue; a return value is required when the original method is skipped.");
         }
     }
 

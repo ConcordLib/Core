@@ -29,6 +29,10 @@ public static class ControlReturnInjectionMethods {
         ch.ReturnValue = 42;
         return Control.Cancel;
     }
+
+    public static Control CancelWithoutValue(ControlHandle<int> ch) {
+        return Control.Cancel;
+    }
 }
 
 public sealed class ControlReturnTests {
@@ -102,5 +106,41 @@ public sealed class ControlReturnTests {
         long after = GC.GetAllocatedBytesForCurrentThread();
 
         Assert.Equal(0, after - before);
+    }
+
+    [Fact]
+    public void Compose_ControlOnTail_ThrowsCONC014() {
+        MethodBase target = typeof(ControlReturnTargets).GetMethod(nameof(ControlReturnTargets.IntWork))!;
+        MethodBase injectionMethod = typeof(ControlReturnInjectionMethods).GetMethod(nameof(ControlReturnInjectionMethods.CancelAlways))!;
+        Injection tail = new Injection(injectionMethod, new InjectAt.Tail(), "test", 0);
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() =>
+            WrapperComposer.Compose(target, [tail]));
+
+        Assert.Equal("CONC014", ex.Code);
+    }
+
+    [Fact]
+    public void Compose_ControlOnReturnSite_ThrowsCONC014() {
+        MethodBase target = typeof(ControlReturnTargets).GetMethod(nameof(ControlReturnTargets.IntWork))!;
+        MethodBase injectionMethod = typeof(ControlReturnInjectionMethods).GetMethod(nameof(ControlReturnInjectionMethods.CancelAlways))!;
+        Injection returnSite = new Injection(injectionMethod, new InjectAt.Return(0), "test", 0);
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() =>
+            WrapperComposer.Compose(target, [returnSite]));
+
+        Assert.Equal("CONC014", ex.Code);
+    }
+
+    [Fact]
+    public void Compose_ControlCancelWithoutReturnValueOnNonVoid_ThrowsCONC012() {
+        MethodBase target = typeof(ControlReturnTargets).GetMethod(nameof(ControlReturnTargets.IntWork))!;
+        MethodBase injectionMethod = typeof(ControlReturnInjectionMethods).GetMethod(nameof(ControlReturnInjectionMethods.CancelWithoutValue))!;
+        Injection head = new Injection(injectionMethod, new InjectAt.Head(), "test", 0);
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() =>
+            WrapperComposer.Compose(target, [head]));
+
+        Assert.Equal("CONC012", ex.Code);
     }
 }
