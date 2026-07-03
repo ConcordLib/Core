@@ -96,7 +96,7 @@ public static class WrapperComposer {
             Injection injection = ordered[i];
             if (injection.At is not InjectAt.Head && ControlHandleLowering.ReturnsControl(injection.InjectionMethod)) {
                 throw new ConcordEmitException(
-                    "CONC014",
+                    "CONC015",
                     $"Injection '{injection.InjectionMethod.DeclaringType?.Name}.{injection.InjectionMethod.Name}' returns Control; a Control return is only valid on a head injection.");
             }
         }

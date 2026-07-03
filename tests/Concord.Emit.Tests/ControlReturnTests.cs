@@ -17,6 +17,8 @@ public static class ControlReturnTargets {
 }
 
 public static class ControlReturnInjectionMethods {
+    public static int FinallyRan;
+
     public static Control CancelAlways() {
         return Control.Cancel;
     }
@@ -32,6 +34,26 @@ public static class ControlReturnInjectionMethods {
 
     public static Control CancelWithoutValue(ControlHandle<int> ch) {
         return Control.Cancel;
+    }
+
+    public static Control CancelWithFinally() {
+        try {
+            return Control.Cancel;
+        }
+        finally {
+            FinallyRan++;
+        }
+    }
+}
+
+public static class ControlInvokeScratchHelper {
+    public static void Step() {
+    }
+}
+
+public class ControlInvokeScratchTarget {
+    public void Run() {
+        ControlInvokeScratchHelper.Step();
     }
 }
 
@@ -109,7 +131,7 @@ public sealed class ControlReturnTests {
     }
 
     [Fact]
-    public void Compose_ControlOnTail_ThrowsCONC014() {
+    public void Compose_ControlOnTail_ThrowsCONC015() {
         MethodBase target = typeof(ControlReturnTargets).GetMethod(nameof(ControlReturnTargets.IntWork))!;
         MethodBase injectionMethod = typeof(ControlReturnInjectionMethods).GetMethod(nameof(ControlReturnInjectionMethods.CancelAlways))!;
         Injection tail = new Injection(injectionMethod, new InjectAt.Tail(), "test", 0);
@@ -117,11 +139,11 @@ public sealed class ControlReturnTests {
         ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() =>
             WrapperComposer.Compose(target, [tail]));
 
-        Assert.Equal("CONC014", ex.Code);
+        Assert.Equal("CONC015", ex.Code);
     }
 
     [Fact]
-    public void Compose_ControlOnReturnSite_ThrowsCONC014() {
+    public void Compose_ControlOnReturnSite_ThrowsCONC015() {
         MethodBase target = typeof(ControlReturnTargets).GetMethod(nameof(ControlReturnTargets.IntWork))!;
         MethodBase injectionMethod = typeof(ControlReturnInjectionMethods).GetMethod(nameof(ControlReturnInjectionMethods.CancelAlways))!;
         Injection returnSite = new Injection(injectionMethod, new InjectAt.Return(0), "test", 0);
@@ -129,7 +151,46 @@ public sealed class ControlReturnTests {
         ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() =>
             WrapperComposer.Compose(target, [returnSite]));
 
-        Assert.Equal("CONC014", ex.Code);
+        Assert.Equal("CONC015", ex.Code);
+    }
+
+    [Fact]
+    public void Compose_ControlOnAround_ThrowsCONC015() {
+        MethodBase target = typeof(ControlReturnTargets).GetMethod(nameof(ControlReturnTargets.IntWork))!;
+        MethodBase injectionMethod = typeof(ControlReturnInjectionMethods).GetMethod(nameof(ControlReturnInjectionMethods.CancelAlways))!;
+        Injection around = new Injection(injectionMethod, new InjectAt.Around(), "test", 0);
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() =>
+            WrapperComposer.Compose(target, [around]));
+
+        Assert.Equal("CONC015", ex.Code);
+    }
+
+    [Fact]
+    public void Compose_ControlOnInvoke_ThrowsCONC015() {
+        MethodBase target = typeof(ControlReturnTargets).GetMethod(nameof(ControlReturnTargets.IntWork))!;
+        MethodBase injectionMethod = typeof(ControlReturnInjectionMethods).GetMethod(nameof(ControlReturnInjectionMethods.CancelAlways))!;
+        Injection invoke = new Injection(injectionMethod, new InjectAt.Invoke(typeof(ControlInvokeScratchHelper), nameof(ControlInvokeScratchHelper.Step), At.Head, 0), "test", 0);
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() =>
+            WrapperComposer.Compose(target, [invoke]));
+
+        Assert.Equal("CONC015", ex.Code);
+    }
+
+    [Fact]
+    public void Compose_ControlCancelWithFinally_RunsFinallyAndSkipsSpine() {
+        MethodBase target = typeof(ControlReturnTargets).GetMethod(nameof(ControlReturnTargets.VoidWork))!;
+        MethodBase injectionMethod = typeof(ControlReturnInjectionMethods).GetMethod(nameof(ControlReturnInjectionMethods.CancelWithFinally))!;
+        Injection head = new Injection(injectionMethod, new InjectAt.Head(), "test", 0);
+
+        ControlReturnTargets.SpineRuns = 0;
+        ControlReturnInjectionMethods.FinallyRan = 0;
+        ComposeResult result = WrapperComposer.Compose(target, [head]);
+        result.Wrapper.Invoke(null, []);
+
+        Assert.Equal(0, ControlReturnTargets.SpineRuns);
+        Assert.Equal(1, ControlReturnInjectionMethods.FinallyRan);
     }
 
     [Fact]

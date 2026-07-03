@@ -4,9 +4,9 @@ namespace Concord;
 ///     Flow decision returned from a head injection method: continue into the original target body or cancel it.
 /// </summary>
 /// <remarks>
-///     The numeric values are part of the lowering contract: <see cref="Continue" /> must stay <c>0</c> and any
-///     nonzero value cancels. Concord lowers the returned value into the wrapper's cancel local, so no enum value
-///     is boxed or allocated on the patched hot path.
+///     The numeric values are part of the lowering contract: only <see cref="Continue" /> (<c>0</c>) and
+///     <see cref="Cancel" /> (<c>1</c>) are supported values. Concord lowers the returned value into the wrapper's
+///     cancel local, so no enum value is boxed or allocated on the patched hot path.
 /// </remarks>
 public enum Control {
     /// <summary>Run the original target body.</summary>
