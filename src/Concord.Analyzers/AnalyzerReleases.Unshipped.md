@@ -18,3 +18,4 @@ CONCORD011 | Concord.Patches | Error | Concord declaration members must use supp
 CONCORD012 | Concord.Patches | Warning | String patch targets should use typeof when the target type is available at compile time.
 CONCORD013 | Concord.Patches | Warning | String member targets should use nameof when the target member is available at compile time.
 CONCORD014 | Concord.Patches | Warning | Explicit patch targets should be inferred through inheritance when the target type can be inherited.
+CONCORD015 | Concord.Patches | Error | Control return types are only valid on head injection methods.

@@ -78,6 +78,11 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     /// </summary>
     public const string PreferInheritedPatchTargetDiagnosticId = "CONCORD014";
 
+    /// <summary>
+    ///     Diagnostic id for [Inject] methods that return Control outside the head position.
+    /// </summary>
+    public const string ControlReturnPositionDiagnosticId = "CONCORD015";
+
     private static readonly DiagnosticDescriptor MissingMemberRule = new(
         MissingMemberDiagnosticId,
         "Injected member target was not found",
@@ -195,6 +200,15 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         true,
         "When a target type can be inherited, deriving the patch declaration from the target lets C# bind visible members directly and lets Concord infer the patch target.");
 
+    private static readonly DiagnosticDescriptor ControlReturnPositionRule = new(
+        ControlReturnPositionDiagnosticId,
+        "Control return is only valid on head injections",
+        "[Inject] method '{0}' returns Control at the {1} position; a Control return is only valid on a head injection",
+        "Concord.Patches",
+        DiagnosticSeverity.Error,
+        true,
+        "Returning Control decides whether the original method runs, which only makes sense before it does. Move the injection to At.Head or return void.");
+
     private enum MetadataMemberKind {
         Field,
         Property,
@@ -216,7 +230,8 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             UnsupportedDeclarationShapeRule,
             PreferTypeofPatchTargetRule,
             PreferNameofMemberTargetRule,
-            PreferInheritedPatchTargetRule);
+            PreferInheritedPatchTargetRule,
+            ControlReturnPositionRule);
 
     /// <inheritdoc />
     public override void Initialize(AnalysisContext context) {
@@ -653,7 +668,17 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             }
         }
 
-        if (!injection.TargetsInvoke) {
+        if (IsControlType(injection.Method.ReturnType)) {
+            if (injection.TargetsInvoke || injection.AtValue != 0) {
+                string position = injection.TargetsInvoke ? "invoke" : PositionName(injection).ToLowerInvariant();
+                context.ReportDiagnostic(
+                    Diagnostic.Create(
+                        ControlReturnPositionRule,
+                        injection.Method.Locations.FirstOrDefault(),
+                        injection.Method.Name,
+                        position));
+            }
+        } else if (!injection.TargetsInvoke) {
             ValidateInjectionReturnType(context, injection, target, targetType);
         }
     }
@@ -1356,6 +1381,12 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         }
 
         return false;
+    }
+
+    private static bool IsControlType(ITypeSymbol? type) {
+        return type is INamedTypeSymbol named
+            && named.Name == "Control"
+            && named.ContainingNamespace?.ToDisplayString() == "Concord";
     }
 
     private static bool IsOperationType(ITypeSymbol type) {

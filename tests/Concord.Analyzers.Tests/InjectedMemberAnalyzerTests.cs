@@ -762,6 +762,133 @@ public sealed class InjectedMemberAnalyzerTests {
         Assert.Contains("get-only", diagnostic.GetMessage());
     }
 
+    [Fact]
+    public async Task Inject_ControlReturnOnHead_ReportsNothing() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public sealed class Target {
+                private void Tick() {
+                }
+            }
+
+            [Concord.Patch(typeof(Target))]
+            public abstract class Patch {
+                [Concord.Inject(Concord.At.Head, "Tick")]
+                private Concord.Control Before() {
+                    return Concord.Control.Continue;
+                }
+            }
+            """);
+
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
+    public async Task Inject_ControlReturnOnTail_ReportsControlReturnPosition() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public sealed class Target {
+                private void Tick() {
+                }
+            }
+
+            [Concord.Patch(typeof(Target))]
+            public abstract class Patch {
+                [Concord.Inject(Concord.At.Tail, "Tick")]
+                private Concord.Control After() {
+                    return Concord.Control.Continue;
+                }
+            }
+            """);
+
+        Diagnostic diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(InjectedMemberAnalyzer.ControlReturnPositionDiagnosticId, diagnostic.Id);
+        Assert.Contains("tail", diagnostic.GetMessage(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Inject_ControlReturnOnAround_ReportsControlReturnPosition() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public sealed class Target {
+                private void Tick() {
+                }
+            }
+
+            [Concord.Patch(typeof(Target))]
+            public abstract class Patch {
+                [Concord.Inject(Concord.At.Around, "Tick")]
+                private Concord.Control Wrap() {
+                    return Concord.Control.Continue;
+                }
+            }
+            """);
+
+        Diagnostic diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(InjectedMemberAnalyzer.ControlReturnPositionDiagnosticId, diagnostic.Id);
+    }
+
+    [Fact]
+    public async Task Inject_ControlReturnOnInvokeForm_ReportsControlReturnPosition() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public static class Helper {
+                public static void Step() {
+                }
+            }
+
+            public sealed class Target {
+                private void Tick() {
+                    Helper.Step();
+                }
+            }
+
+            [Concord.Patch(typeof(Target))]
+            public abstract class Patch {
+                [Concord.Inject("Tick", typeof(Helper), "Step", Concord.At.Head)]
+                private Concord.Control BeforeStep() {
+                    return Concord.Control.Continue;
+                }
+            }
+            """);
+
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Id == InjectedMemberAnalyzer.ControlReturnPositionDiagnosticId);
+    }
+
+    [Fact]
+    public async Task NonInjectionMethod_ControlReturn_ReportsNothing() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public sealed class Target {
+                private void Tick() {
+                }
+            }
+
+            [Concord.Patch(typeof(Target))]
+            public abstract class Patch {
+                [Concord.Inject(Concord.At.Head, "Tick")]
+                private void Before() {
+                }
+
+                private Concord.Control Helper() {
+                    return Concord.Control.Cancel;
+                }
+            }
+            """);
+
+        Assert.Empty(diagnostics);
+    }
+
     private const string AttributeSource = """
     using System;
 
@@ -832,6 +959,11 @@ public sealed class InjectedMemberAnalyzerTests {
         }
 
         public sealed class ControlHandle<T> {
+        }
+
+        public enum Control {
+            Continue = 0,
+            Cancel = 1,
         }
 
         public sealed class Operation {

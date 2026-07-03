@@ -24,7 +24,9 @@ overload disambiguation, injection method parameters, `ControlHandle<T>` return 
 static target usage, duplicate injection declarations, and unsupported declaration
 shapes such as generic `[Inject]` methods or invalid `[InjectInstance]`
 properties. It also warns when a plain patch field has the same shape as a target
-field, since that usually means `[InjectField]` was intended.
+field, since that usually means `[InjectField]` was intended. Injection methods
+may return `Control` only at the head position; a `Control` return anywhere else
+is reported as CONCORD015.
 
 Resolvable targets include `[Patch(typeof(Target))]`, inherited patch targets,
 and string targets such as `[Patch("Game.Target, GameAssembly")]` when that type
