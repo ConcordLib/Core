@@ -50,7 +50,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: concord-runtime
-          path: Assemblies/Concord.dll
+          path: |
+            Assemblies/net10.0/Concord.dll
+            Assemblies/netstandard2.0/Concord.dll
           if-no-files-found: error
 
       - name: Upload ref package
@@ -98,7 +100,15 @@ jobs:
         run: dotnet restore Concord.ci.slnx
 
       - name: Test
-        run: dotnet test Concord.ci.slnx -c Release --no-restore --logger trx --results-directory test-results
+        run: dotnet test Concord.ci.slnx -c Release --no-restore -f net10.0 --logger trx --results-directory test-results
+
+      - name: Test (net472)
+        if: startsWith(matrix.runner, 'windows')
+        run: |
+          dotnet test tests/Concord.Detour.Tests/Concord.Detour.Tests.csproj -c Release --no-restore -f net472
+          dotnet test tests/Concord.Emit.Tests/Concord.Emit.Tests.csproj -c Release --no-restore -f net472
+          dotnet test tests/Concord.AttachedData.Tests/Concord.AttachedData.Tests.csproj -c Release --no-restore -f net472
+          dotnet test tests/Concord.Orchestration.Tests/Concord.Orchestration.Tests.csproj -c Release --no-restore -f net472
 
       - name: Upload test results
         if: always()
@@ -106,3 +116,41 @@ jobs:
         with:
           name: test-results-${{ matrix.label }}
           path: test-results/**/*.trx
+
+  test-mono:
+    name: Test · mono (net472)
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install mono
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mono-complete
+
+      - name: Cache NuGet
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', 'global.json') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      - name: Restore
+        run: dotnet restore Concord.ci.slnx
+
+      - name: Build net472 test assemblies
+        run: dotnet build Concord.ci.slnx -c Release --no-restore
+
+      - name: Run suites under mono
+        run: |
+          set -e
+          RUNNER=$(find ~/.nuget/packages/xunit.runner.console -name xunit.console.exe -path '*net472*' | head -1)
+          for dll in Detour Emit AttachedData Orchestration; do
+            mono "$RUNNER" "tests/Concord.$dll.Tests/bin/Release/net472/Concord.$dll.Tests.dll"
+          done

@@ -49,7 +49,20 @@ jobs:
         run: dotnet build Concord.ci.slnx -c Release --no-restore
 
       - name: Test
-        run: dotnet test Concord.ci.slnx -c Release --no-restore
+        run: dotnet test Concord.ci.slnx -c Release --no-restore -f net10.0
+
+      - name: Install mono
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mono-complete
+
+      - name: Test under mono (net472)
+        run: |
+          set -e
+          RUNNER=$(find ~/.nuget/packages/xunit.runner.console -name xunit.console.exe -path '*net472*' | head -1)
+          for dll in Detour Emit AttachedData Orchestration; do
+            mono "$RUNNER" "tests/Concord.$dll.Tests/bin/Release/net472/Concord.$dll.Tests.dll"
+          done
 
       - name: Setup Node
         uses: actions/setup-node@v4
