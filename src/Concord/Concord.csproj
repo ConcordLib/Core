@@ -1,10 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <TargetFramework></TargetFramework>
+    <TargetFrameworks>net10.0;netstandard2.0</TargetFrameworks>
     <AssemblyName>Concord</AssemblyName>
     <RootNamespace>Concord</RootNamespace>
     <OutputPath>../../Assemblies</OutputPath>
-    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <GenerateDependencyFile>false</GenerateDependencyFile>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
@@ -23,7 +24,8 @@
 
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath=""/>
-    <None Include="$(OutputPath)Concord.dll" Pack="true" PackagePath="lib/net10.0" Visible="false"/>
+    <None Include="../../Assemblies/net10.0/Concord.dll" Pack="true" PackagePath="lib/net10.0" Visible="false"/>
+    <None Include="../../Assemblies/netstandard2.0/Concord.dll" Pack="true" PackagePath="lib/netstandard2.0" Visible="false"/>
   </ItemGroup>
 
   <ItemGroup>
@@ -35,6 +37,10 @@
 
   <ItemGroup>
     <PackageReference Include="ILRepack.Lib.MSBuild.Task" Version="2.0.45" PrivateAssets="all"/>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+    <PackageReference Include="NETStandard.Library" Version="2.0.3" PrivateAssets="all"/>
   </ItemGroup>
 
 </Project>

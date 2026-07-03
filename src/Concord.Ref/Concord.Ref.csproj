@@ -6,9 +6,9 @@
        the Concord Assembly at runtime. The package contributes no runtime assets. -->
 
   <PropertyGroup>
-    <!-- Match the rest of the repo: net10, CoreCLR. Not netstandard — Concord is a
-         single-runtime library and there is no old-toolchain modder to accommodate. -->
-    <TargetFramework>net10.0</TargetFramework>
+    <!-- net10 for CoreCLR mods, netstandard2.0 as the floor for net472 mods (RimWorld). -->
+    <TargetFramework></TargetFramework>
+    <TargetFrameworks>net10.0;netstandard2.0</TargetFrameworks>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -64,6 +64,7 @@
     <Compile Include="..\Concord.Emit\*.cs"               Link="Emit\%(Filename)"/>
     <Compile Include="..\Concord.AttachedData\*.cs"       Link="AttachedData\%(Filename)"/>
     <Compile Include="..\Concord.Orchestration\*.cs"      Link="Orchestration\%(Filename)"/>
+    <Compile Include="..\Shared\Polyfills.cs" Link="Polyfills.cs"/>
   </ItemGroup>
 
   <!-- MonoMod is referenced only so the source type-checks during the ref compile. Because the
