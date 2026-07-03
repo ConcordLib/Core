@@ -1,7 +1,7 @@
 # Concord
 
 <p align="center">
-  <img src="templates/concord/assets/logo.png" alt="Concord" width="480">
+  <img src="https://github.com/ConcordLib/Docs/blob/main/templates/concord/assets/logo.png?raw=true" alt="Concord" width="480">
 </p>
 
 Concord lets a mod change target runtime behavior while it is running. No runtime files
