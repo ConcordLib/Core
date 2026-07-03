@@ -20,6 +20,7 @@
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
     <WarningsNotAsErrors>NU5128</WarningsNotAsErrors>
+    <NoWarn>$(NoWarn);NETSDK1023</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
