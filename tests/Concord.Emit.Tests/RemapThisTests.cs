@@ -30,9 +30,9 @@ public sealed class RemapThisTests {
         Func<Counterish, int, int> invoke = result.Wrapper.CreateDelegate<Func<Counterish, int, int>>();
         invoke(instance, 1);
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestPolyfills.GetAllocatedBytes();
         invoke(instance, 1);
-        long after = GC.GetAllocatedBytesForCurrentThread();
+        long after = TestPolyfills.GetAllocatedBytes();
 
         Assert.Equal(0, after - before);
     }

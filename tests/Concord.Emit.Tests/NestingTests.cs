@@ -256,9 +256,9 @@ public sealed class NestingTests {
         Action invoke = result.Wrapper.CreateDelegate<Action>();
         invoke();
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestPolyfills.GetAllocatedBytes();
         invoke();
-        long after = GC.GetAllocatedBytesForCurrentThread();
+        long after = TestPolyfills.GetAllocatedBytes();
 
         Assert.Equal(0, after - before);
     }

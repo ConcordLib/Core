@@ -126,12 +126,12 @@ public sealed class InvokeSpliceTests {
         Action<InvokeAllocTarget> invoke = result.Wrapper.CreateDelegate<Action<InvokeAllocTarget>>();
         invoke(instance);
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestPolyfills.GetAllocatedBytes();
         for (int i = 0; i < 10; i++) {
             invoke(instance);
         }
 
-        long after = GC.GetAllocatedBytesForCurrentThread();
+        long after = TestPolyfills.GetAllocatedBytes();
 
         Assert.Equal(0, after - before);
     }

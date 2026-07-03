@@ -109,9 +109,9 @@ public sealed class InjectedMemberTests {
         SealedProjectionTarget instance = new SealedProjectionTarget();
         invoke(instance, 1);
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestPolyfills.GetAllocatedBytes();
         invoke(instance, 1);
-        long after = GC.GetAllocatedBytesForCurrentThread();
+        long after = TestPolyfills.GetAllocatedBytes();
 
         Assert.Equal(0, after - before);
     }

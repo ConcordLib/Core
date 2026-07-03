@@ -66,12 +66,12 @@ public sealed class GenericsTests {
         Func<Box<int>, int> invoke = result.Wrapper.CreateDelegate<Func<Box<int>, int>>();
         invoke(instance);
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestPolyfills.GetAllocatedBytes();
         for (int i = 0; i < 10; i++) {
             invoke(instance);
         }
 
-        long after = GC.GetAllocatedBytesForCurrentThread();
+        long after = TestPolyfills.GetAllocatedBytes();
 
         Assert.Equal(0, after - before);
     }
@@ -85,12 +85,12 @@ public sealed class GenericsTests {
         Func<Box<string>, string> invoke = result.Wrapper.CreateDelegate<Func<Box<string>, string>>();
         invoke(instance);
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestPolyfills.GetAllocatedBytes();
         for (int i = 0; i < 10; i++) {
             invoke(instance);
         }
 
-        long after = GC.GetAllocatedBytesForCurrentThread();
+        long after = TestPolyfills.GetAllocatedBytes();
 
         Assert.Equal(0, after - before);
     }

@@ -59,9 +59,9 @@ public sealed class ReversePatchTests {
         ReversePatchTarget instance = new ReversePatchTarget();
         reverse(instance);
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestPolyfills.GetAllocatedBytes();
         reverse(instance);
-        long after = GC.GetAllocatedBytesForCurrentThread();
+        long after = TestPolyfills.GetAllocatedBytes();
 
         Assert.Equal(0, after - before);
     }

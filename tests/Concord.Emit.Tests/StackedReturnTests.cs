@@ -71,9 +71,9 @@ public sealed class StackedReturnTests {
         Func<int> invoke = result.Wrapper.CreateDelegate<Func<int>>();
         invoke();
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = TestPolyfills.GetAllocatedBytes();
         invoke();
-        long after = GC.GetAllocatedBytesForCurrentThread();
+        long after = TestPolyfills.GetAllocatedBytes();
 
         Assert.Equal(0, after - before);
     }
