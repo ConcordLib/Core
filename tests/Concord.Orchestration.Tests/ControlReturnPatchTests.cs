@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Concord.Detour;
 using Xunit;
 
@@ -10,6 +11,7 @@ public static class ControlGateState {
 public class ControlGateTarget {
     public int Hits;
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public void Bump() {
         Hits++;
     }
@@ -24,6 +26,7 @@ public static class ControlGateDeclaration {
 }
 
 public class ControlFluentTarget {
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public int GetValue() {
         return 5;
     }
