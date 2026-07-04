@@ -3,6 +3,7 @@ using Xunit;
 
 namespace Concord.Orchestration.Tests;
 
+[Collection(SharedAssemblyApplyCollection.Name)]
 public sealed class PatchDeclarationScannerTests {
     [Fact]
     public void ScanType_InjectMethod_CallsPatchApplierWithBaseMethod() {

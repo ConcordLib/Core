@@ -110,6 +110,7 @@ public static class BuilderInvokeInjectionMethod2 {
     }
 }
 
+[Collection(SharedAssemblyApplyCollection.Name)]
 public sealed class PatchBuilderTests {
     [Fact]
     public void For_MethodBase_HeadPatch_ChangesReturnValue_DisposeReverts() {

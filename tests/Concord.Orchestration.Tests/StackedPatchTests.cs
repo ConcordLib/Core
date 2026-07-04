@@ -48,6 +48,7 @@ public static class PrioritySecondHigh {
     }
 }
 
+[Collection(SharedAssemblyApplyCollection.Name)]
 public sealed class StackedPatchTests {
     [Fact]
     public void TwoInjectionsOnOneTarget_BothRun() {

@@ -113,6 +113,7 @@ internal static class MissingMethodDeclaration {
     public static void OnMissing(ControlHandle ch) { }
 }
 
+[Collection(SharedAssemblyApplyCollection.Name)]
 public sealed class StringTargetTests {
     internal static int InvokeInjectionMethodHits;
 

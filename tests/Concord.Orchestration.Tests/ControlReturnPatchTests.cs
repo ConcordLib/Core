@@ -39,6 +39,7 @@ public abstract class ControlFluentPatch : ControlFluentTarget {
     }
 }
 
+[Collection(SharedAssemblyApplyCollection.Name)]
 public class ControlReturnPatchTests {
     [Fact]
     public void AttributeForm_ControlReturn_GatesTargetLive() {
