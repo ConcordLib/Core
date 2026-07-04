@@ -1,9 +1,16 @@
 name: CI
 
-# Build, test, and pack. Private: produces workflow artifacts only — no push,
-# no publish, no release. The full game-dependent solution (Concord.slnx) is not
-# buildable on hosted runners, so CI exercises Concord.ci.slnx, which excludes the
-# runtime adapters and TestMod (they reference game assemblies via a local GameDir).
+# Build, test, pack, and release in one pipeline. The full game-dependent solution
+# (Concord.slnx) is not buildable on hosted runners, so CI exercises Concord.ci.slnx,
+# which excludes the runtime adapters and TestMod (they reference game assemblies via
+# a local GameDir).
+#
+# The release job depends on the full test matrix (test) and the mono leg (test-mono),
+# so a release cannot cut or publish unless every required test leg passes. It only runs
+# on pushes to main (not PRs): semantic-release cuts the v* tag + GitHub Release, then the
+# job packs Concord.Ref, Concord.Analyzers, and Concord.Runtime (versions stamped from the
+# tag by MinVer) and publishes to nuget.org via Trusted Publishing (OIDC -> short-lived
+# API key; no stored key). --skip-duplicate makes a re-run on the same commit idempotent.
 
 on:
   push:
@@ -154,3 +161,100 @@ jobs:
           for dll in Detour Emit AttachedData Orchestration; do
             mono "$RUNNER" "tests/Concord.$dll.Tests/bin/Release/net472/Concord.$dll.Tests.dll"
           done
+
+  release:
+    name: Release & Publish
+    needs: [test, test-mono]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # semantic-release: push tag, create GitHub Release
+      issues: write          # semantic-release: comment on resolved issues
+      pull-requests: write   # semantic-release: comment on merged PRs
+      id-token: write        # Trusted Publishing: GitHub OIDC token for NuGet login
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0     # semantic-release walks commit history; MinVer reads tags
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', 'global.json') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      # A build for packing only; the test/test-mono jobs already gated correctness.
+      - name: Build
+        run: dotnet build Concord.ci.slnx -c Release
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Semantic release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # conventionalcommits preset: the angular default ignores the `!`
+        # breaking-change shorthand; the preset package must be installed alongside.
+        run: npx -y -p semantic-release@24 -p conventional-changelog-conventionalcommits@9 semantic-release
+
+      # semantic-release tags HEAD when it cuts a release; no tag means nothing to publish.
+      - name: Detect release tag
+        id: tag
+        run: |
+          TAG=$(git tag --points-at HEAD | grep '^v' | head -1 || true)
+          if [ -n "$TAG" ]; then
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+            echo "Publishing $TAG"
+          else
+            echo "No release tag on HEAD; skipping publish."
+          fi
+
+      - name: Pack
+        if: steps.tag.outputs.tag != ''
+        run: |
+          dotnet pack src/Concord.Ref/Concord.Ref.csproj -c Release -o artifacts
+          dotnet pack src/Concord.Analyzers/Concord.Analyzers.csproj -c Release -o artifacts
+          dotnet pack src/Concord/Concord.csproj -c Release -o artifacts
+
+      - name: NuGet login
+        if: steps.tag.outputs.tag != ''
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      - name: Publish to nuget.org
+        if: steps.tag.outputs.tag != ''
+        run: >
+          dotnet nuget push "artifacts/*.nupkg"
+          --api-key ${{ steps.login.outputs.NUGET_API_KEY }}
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
+
+      - name: Announce on Discord
+        if: steps.tag.outputs.tag != ''
+        continue-on-error: true
+        env:
+          WEBHOOK: ${{ secrets.NEO_MODS_DISCORD_WEBHOOK_URL }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          NOTES=$(gh release view "${{ steps.tag.outputs.tag }}" --json body -q .body | head -c 1600)
+          URL=$(gh release view "${{ steps.tag.outputs.tag }}" --json url -q .url)
+          CONTENT=$(printf '**Concord %s** — now on NuGet\n\n%s\n\n%s' "${{ steps.tag.outputs.tag }}" "$NOTES" "$URL")
+          STATUS=$(curl -sS -o response.txt -w '%{http_code}' -X POST "${WEBHOOK}?thread_id=1522736349583638711&wait=true" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg c "$CONTENT" '{content:$c, allowed_mentions:{parse:[]}}')")
+          echo "Discord HTTP $STATUS"
+          cat response.txt
+          if [ "$STATUS" -ge 400 ]; then
+            echo "::warning::Discord announce failed with HTTP $STATUS (release itself is unaffected)"
+          fi
