@@ -1,9 +1,12 @@
-name: CI
+name: CI & Release
 
 # Build, test, pack, and release in one pipeline. The full game-dependent solution
-# (Concord.slnx) is not buildable on hosted runners, so CI exercises Concord.ci.slnx,
+# (Concord.slnx) is not buildable on hosted runners, so this exercises Concord.ci.slnx,
 # which excludes the runtime adapters and TestMod (they reference game assemblies via
 # a local GameDir).
+#
+# The file is named release.yml because nuget.org Trusted Publishing pins the OIDC policy
+# to a workflow filename; the publish job must live in release.yml for the token to validate.
 #
 # The release job depends on the full test matrix (test) and the mono leg (test-mono),
 # so a release cannot cut or publish unless every required test leg passes. It only runs
