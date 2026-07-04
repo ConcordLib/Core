@@ -269,8 +269,8 @@ jobs:
 
       # Runtime bundles Core's Concord.dll, so a new Core release must rebuild and re-release it.
       # GITHUB_TOKEN cannot trigger workflows in another repo, so mint a short-lived token from a
-      # GitHub App installed on both repos. If the App secrets are absent the step no-ops, so the
-      # dispatch stays dormant until they are configured (see release.yml comment above the job).
+      # GitHub App installed on both repos. The App id is a var, the private key a secret. If the
+      # App var is absent the dispatch steps no-op, so this stays dormant until configured.
       - name: Generate cross-repo token
         if: steps.tag.outputs.tag != '' && vars.RUNTIME_DISPATCH_APP_ID != ''
         id: apptoken
