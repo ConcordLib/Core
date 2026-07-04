@@ -160,7 +160,10 @@ jobs:
       - name: Run suites under mono
         run: |
           set -e
-          RUNNER=$(find ~/.nuget/packages/xunit.runner.console -name xunit.console.exe -path '*net472*' | head -1)
+          # Pick the newest cached runner. A stale older xunit.runner.console (e.g. 2.9.2)
+          # left in the cache would make mono fail to load the tests' xunit.assert 2.9.3 with
+          # a FileNotFoundException; sort -V | tail -1 selects the version the restore pulled.
+          RUNNER=$(find ~/.nuget/packages/xunit.runner.console -name xunit.console.exe -path '*net472*' | sort -V | tail -1)
           for dll in Detour Emit AttachedData Orchestration; do
             mono "$RUNNER" "tests/Concord.$dll.Tests/bin/Release/net472/Concord.$dll.Tests.dll"
           done
