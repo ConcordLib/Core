@@ -266,3 +266,27 @@ jobs:
           if [ "$STATUS" -ge 400 ]; then
             echo "::warning::Discord announce failed with HTTP $STATUS (release itself is unaffected)"
           fi
+
+      # Runtime bundles Core's Concord.dll, so a new Core release must rebuild and re-release it.
+      # GITHUB_TOKEN cannot trigger workflows in another repo, so mint a short-lived token from a
+      # GitHub App installed on both repos. If the App secrets are absent the step no-ops, so the
+      # dispatch stays dormant until they are configured (see release.yml comment above the job).
+      - name: Generate cross-repo token
+        if: steps.tag.outputs.tag != '' && vars.RUNTIME_DISPATCH_APP_ID != ''
+        id: apptoken
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.RUNTIME_DISPATCH_APP_ID }}
+          private-key: ${{ secrets.RUNTIME_DISPATCH_APP_PRIVATE_KEY }}
+          owner: ConcordLib
+          repositories: Runtime
+
+      - name: Trigger Runtime rebuild
+        if: steps.tag.outputs.tag != '' && vars.RUNTIME_DISPATCH_APP_ID != ''
+        env:
+          GH_TOKEN: ${{ steps.apptoken.outputs.token }}
+        run: |
+          set -euo pipefail
+          gh api repos/ConcordLib/Runtime/dispatches \
+            -f event_type=core-released \
+            -F "client_payload[core_version]=${{ steps.tag.outputs.tag }}"
