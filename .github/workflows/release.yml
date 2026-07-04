@@ -88,9 +88,11 @@ jobs:
           - { label: windows-x64,  runner: windows-latest, experimental: false }
           - { label: macos-arm64,  runner: macos-latest,   experimental: false }
           # Extended coverage — informational until green, then flip experimental to false.
+          # macos-x64 (macos-13, Intel) is dropped: GitHub is retiring Intel mac runners, so
+          # it is slow/scarce to allocate and stalled every release without ever completing.
+          # Apple Silicon macOS is still covered by the required macos-arm64 cell.
           - { label: linux-arm64,  runner: ubuntu-24.04-arm, experimental: true }
           - { label: windows-arm64,runner: windows-11-arm,   experimental: true }
-          - { label: macos-x64,    runner: macos-13,        experimental: true }
     steps:
       - uses: actions/checkout@v4
 
