@@ -30,6 +30,8 @@
       <ConcordLeftovers Include="$(OutputPath)MonoMod.*.pdb;$(OutputPath)MonoMod.*.xml;$(OutputPath)Mono.Cecil*.pdb;$(OutputPath)Mono.Cecil*.xml"/>
       <ConcordLeftovers Include="$(OutputPath)Concord.AttachedData.dll;$(OutputPath)Concord.Orchestration.dll"/>
       <ConcordLeftovers Include="$(OutputPath)Concord.AttachedData.pdb;$(OutputPath)Concord.AttachedData.xml;$(OutputPath)Concord.Orchestration.pdb;$(OutputPath)Concord.Orchestration.xml"/>
+      <ConcordLeftovers Include="$(OutputPath)System.Reflection.Emit.Lightweight.dll;$(OutputPath)System.Reflection.Emit.ILGeneration.dll" Condition="'$(TargetFramework)' == 'netstandard2.0'"/>
+      <ConcordLeftovers Include="$(OutputPath)System.ValueTuple.dll" Condition="'$(TargetFramework)' == 'net472'"/>
     </ItemGroup>
     <Delete Files="@(ConcordLeftovers)"/>
   </Target>
