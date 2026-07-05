@@ -11,6 +11,7 @@
       <ConcordMergeLib Include="$(TargetRuntimeDir)" Condition="'$(TargetRuntimeDir)' != ''"/>
       <ConcordMergeLib Include="$(OutputPath)"/>
       <ConcordMergeLib Include="$(NuGetPackageRoot)netstandard.library/2.0.3/build/netstandard2.0/ref" Condition="'$(TargetFramework)' == 'netstandard2.0'"/>
+      <ConcordMergeLib Include="$(NuGetPackageRoot)microsoft.netframework.referenceassemblies.net472/1.0.3/build/.NETFramework/v4.7.2" Condition="'$(TargetFramework)' == 'net472'"/>
       <ConcordInternalizeExclude Include="^Concord[.]"/>
     </ItemGroup>
     <ILRepack
