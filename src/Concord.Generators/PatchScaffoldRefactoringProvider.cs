@@ -152,7 +152,7 @@ public sealed class PatchScaffoldRefactoringProvider : CodeRefactoringProvider {
 
             bool isShadowable = member.DeclaredAccessibility == Accessibility.Private && member switch {
                 IFieldSymbol { IsImplicitlyDeclared: false } => true,
-                IPropertySymbol => true,
+                IPropertySymbol { IsIndexer: false } => true,
                 IMethodSymbol { MethodKind: MethodKind.Ordinary, IsImplicitlyDeclared: false } => true,
                 _ => false,
             };

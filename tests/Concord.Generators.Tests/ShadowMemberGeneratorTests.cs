@@ -153,11 +153,13 @@ public sealed class ShadowMemberGeneratorTests {
                 private int Recalculate(int add, bool clamp) { return clamp ? add : mood; }
                 private string ReadOnlyName { get; } = "x";
                 private static void Reset() { }
+                private int this[int i] { get => mood + i; }
 
                 public void Tick() {
                     Mood = Recalculate(1);
                     _ = ReadOnlyName;
                     Reset();
+                    _ = this[0];
                 }
             }
         }
@@ -261,6 +263,25 @@ public sealed class ShadowMemberGeneratorTests {
 
                 [Patch]
                 [Shadow("Reset")]
+                internal abstract partial class PawnPatch : Game.Pawn {
+                }
+            }
+            """);
+
+        Assert.Contains(diagnostics, d => d.Id == "CONC105");
+    }
+
+    [Fact]
+    public void ShadowIndexer_ReportsConc105() {
+        (Compilation _, ImmutableArray<Diagnostic> diagnostics) = GeneratorTestHarness.Run(
+            new ShadowMemberGenerator(),
+            RichTarget + """
+
+            namespace Mod {
+                using Concord;
+
+                [Patch]
+                [Shadow("this[]")]
                 internal abstract partial class PawnPatch : Game.Pawn {
                 }
             }

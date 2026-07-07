@@ -187,6 +187,12 @@ public sealed class ShadowMemberGenerator : IIncrementalGenerator {
                 return;
             }
 
+            if (property.IsIndexer) {
+                context.ReportDiagnostic(Diagnostic.Create(
+                    UnsupportedMember, location, target.Name, memberName, "indexers are not supported"));
+                return;
+            }
+
             string accessors = (property.GetMethod is not null ? "get; " : string.Empty) +
                                (property.SetMethod is not null ? "set; " : string.Empty);
             members.AppendLine("    [global::Concord.InjectProperty(\"" + property.Name + "\")]");

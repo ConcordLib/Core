@@ -13,7 +13,8 @@ public sealed class AddShadowRefactoringTests {
             public class Oven {
                 private int heat;
                 private void Vent() { }
-                public void Bake() { Vent(); heat++; }
+                private int this[int i] { get => heat + i; }
+                public void Bake() { Vent(); heat++; _ = this[0]; }
             }
         }
 
@@ -32,6 +33,16 @@ public sealed class AddShadowRefactoringTests {
         CodeAction addShadow = Assert.Single(actions, a => a.Title.StartsWith("Concord: add shadow"));
         Assert.Contains(addShadow.NestedActions, n => n.Title.Contains("heat"));
         Assert.Contains(addShadow.NestedActions, n => n.Title.Contains("Vent"));
+    }
+
+    [Fact]
+    public async Task OnPatchClass_DoesNotOfferAddShadowForIndexers() {
+        (Document _, ImmutableArray<CodeAction> actions) =
+            await RefactoringTestHarness.ComputeActions(Source, "$$");
+
+        CodeAction addShadow = Assert.Single(actions, a => a.Title.StartsWith("Concord: add shadow"));
+        Assert.Contains(addShadow.NestedActions, n => n.Title.Contains("heat"));
+        Assert.DoesNotContain(addShadow.NestedActions, n => n.Title.Contains("this["));
     }
 
     [Fact]
