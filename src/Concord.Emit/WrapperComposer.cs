@@ -81,6 +81,43 @@ public static class WrapperComposer {
         return moveNext;
     }
 
+    /// <summary>
+    ///     Rejects a target that is a reference-type generic instantiation. The runtime shares one
+    ///     compiled body across all reference-type instantiations of a generic method, so a detour
+    ///     installed for one instantiation runs for every other one. Value-type instantiations each
+    ///     get their own body and are safe.
+    /// </summary>
+    /// <param name="target">The method a detour is about to be installed for.</param>
+    /// <exception cref="ConcordEmitException">Thrown with <c>CONC061</c> when the target is a reference-type instantiation.</exception>
+    public static void RejectSharedGenericInstantiation(MethodBase target) {
+        foreach (Type argument in EnumerateGenericArguments(target)) {
+            if (argument.IsGenericParameter || argument.IsValueType) {
+                continue;
+            }
+
+            throw new ConcordEmitException(
+                "CONC061",
+                $"'{target.DeclaringType?.Name}.{target.Name}' is a generic instantiation with reference-type argument '{argument.Name}'. " +
+                "The runtime shares one compiled body across all reference-type instantiations, so a detour would leak to every other one. " +
+                "Patch generic targets only at value-type instantiations.");
+        }
+    }
+
+    private static IEnumerable<Type> EnumerateGenericArguments(MethodBase target) {
+        Type? declaringType = target.DeclaringType;
+        if (declaringType is { IsConstructedGenericType: true }) {
+            foreach (Type argument in declaringType.GetGenericArguments()) {
+                yield return argument;
+            }
+        }
+
+        if (target is MethodInfo { IsGenericMethod: true } method) {
+            foreach (Type argument in method.GetGenericArguments()) {
+                yield return argument;
+            }
+        }
+    }
+
     private static Type? ReadStateMachineType(MethodBase target) {
         AsyncStateMachineAttribute? asyncAttr = target.GetCustomAttribute<AsyncStateMachineAttribute>();
         if (asyncAttr is not null) {
