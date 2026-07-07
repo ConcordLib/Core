@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace Concord.Orchestration.Tests.RegistryAssembly;
 
 /// <summary>Detour target for the registry fast-path tests.</summary>
@@ -6,6 +8,7 @@ public class RegistryTarget {
     public int Count;
 
     /// <summary>The patched method.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public void Bump() {
         Count++;
     }
