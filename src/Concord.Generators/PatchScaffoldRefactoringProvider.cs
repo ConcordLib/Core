@@ -22,14 +22,24 @@ public sealed class PatchScaffoldRefactoringProvider : CodeRefactoringProvider {
     /// <inheritdoc />
     public override async Task ComputeRefactoringsAsync(CodeRefactoringContext context) {
         SyntaxNode? root = await context.Document.GetSyntaxRootAsync(context.CancellationToken).ConfigureAwait(false);
-        ClassDeclarationSyntax? classDeclaration =
-            root?.FindNode(context.Span).FirstAncestorOrSelf<ClassDeclarationSyntax>();
-        if (classDeclaration is null) {
+        if (root is null) {
             return;
         }
 
         SemanticModel? model = await context.Document.GetSemanticModelAsync(context.CancellationToken).ConfigureAwait(false);
-        if (model?.GetDeclaredSymbol(classDeclaration, context.CancellationToken) is not INamedTypeSymbol declaration) {
+        if (model is null) {
+            return;
+        }
+
+        SyntaxNode node = root.FindNode(context.Span);
+        RegisterCreatePatchFromReference(context, root, model, node);
+
+        ClassDeclarationSyntax? classDeclaration = node.FirstAncestorOrSelf<ClassDeclarationSyntax>();
+        if (classDeclaration is null) {
+            return;
+        }
+
+        if (model.GetDeclaredSymbol(classDeclaration, context.CancellationToken) is not INamedTypeSymbol declaration) {
             return;
         }
 
@@ -55,6 +65,43 @@ public sealed class PatchScaffoldRefactoringProvider : CodeRefactoringProvider {
                 yield return method;
             }
         }
+    }
+
+    private static void RegisterCreatePatchFromReference(
+        CodeRefactoringContext context, SyntaxNode root, SemanticModel model, SyntaxNode node) {
+        if (node.FirstAncestorOrSelf<InvocationExpressionSyntax>() is not { } invocation) {
+            return;
+        }
+
+        if (model.GetSymbolInfo(invocation, context.CancellationToken).Symbol is not IMethodSymbol
+            { MethodKind: MethodKind.Ordinary, ContainingType: { TypeKind: TypeKind.Class } containingType } method) {
+            return;
+        }
+
+        context.RegisterRefactoring(CodeAction.Create(
+            "Concord: create patch for " + method.Name + "()",
+            token => CreatePatchAsync(context.Document, root, containingType, method, token),
+            equivalenceKey: "ConcordCreatePatch:" + method.ToDisplayString()));
+    }
+
+    private static Task<Document> CreatePatchAsync(
+        Document document, SyntaxNode root, INamedTypeSymbol target, IMethodSymbol method, CancellationToken token) {
+        string targetType = target.ToDisplayString(TypeFormat);
+        string handle = method.ReturnsVoid
+            ? "global::Concord.ControlHandle"
+            : "global::Concord.ControlHandle<" + method.ReturnType.ToDisplayString(TypeFormat) + ">";
+        string declaration =
+            "[global::Concord.Patch(typeof(" + targetType + "))]\n" +
+            "internal abstract partial class " + target.Name + "Patch\n{\n" +
+            "    [global::Concord.Inject(global::Concord.At.Head, \"" + method.Name + "\")]\n" +
+            "    private void " + method.Name + "Head(" + handle + " ch)\n    {\n    }\n}\n";
+
+        MemberDeclarationSyntax parsed = Microsoft.CodeAnalysis.CSharp.SyntaxFactory.ParseMemberDeclaration(declaration)!
+            .WithAdditionalAnnotations(Microsoft.CodeAnalysis.Formatting.Formatter.Annotation);
+
+        CompilationUnitSyntax unit = (CompilationUnitSyntax)root;
+        SyntaxNode newRoot = unit.AddMembers(parsed);
+        return Task.FromResult(document.WithSyntaxRoot(newRoot));
     }
 
     private static void RegisterAddInjection(
