@@ -172,9 +172,114 @@ public sealed class ShadowMemberGenerator : IIncrementalGenerator {
         ImmutableArray<TypedConstant> parameterTypes,
         Location location,
         StringBuilder members) {
-        // Task 6 replaces this stub with property/method emission.
-        context.ReportDiagnostic(Diagnostic.Create(
-            UnsupportedMember, location, target.Name, memberName, "only fields are supported so far"));
+        if (!declaration.IsAbstract) {
+            context.ReportDiagnostic(Diagnostic.Create(
+                NotPartial, location, declaration.Name, " and abstract for method/property shadows"));
+            return;
+        }
+
+        if (candidates[0] is IPropertySymbol property) {
+            if (property.IsStatic) {
+                context.ReportDiagnostic(Diagnostic.Create(
+                    UnsupportedMember, location, target.Name, memberName, "static properties are not supported"));
+                return;
+            }
+
+            string accessors = (property.GetMethod is not null ? "get; " : string.Empty) +
+                               (property.SetMethod is not null ? "set; " : string.Empty);
+            members.AppendLine("    [global::Concord.InjectProperty(\"" + property.Name + "\")]");
+            members.AppendLine(
+                "    protected abstract " + property.Type.ToDisplayString(TypeFormat) + " " + property.Name +
+                " { " + accessors.TrimEnd() + " }");
+            return;
+        }
+
+        List<IMethodSymbol> methods = [];
+        foreach (ISymbol candidate in candidates) {
+            if (candidate is IMethodSymbol { MethodKind: MethodKind.Ordinary } method) {
+                methods.Add(method);
+            }
+        }
+
+        if (methods.Count == 0) {
+            context.ReportDiagnostic(Diagnostic.Create(
+                UnsupportedMember, location, target.Name, memberName, "only fields, properties, and ordinary methods are supported"));
+            return;
+        }
+
+        IMethodSymbol? selected = SelectOverload(methods, parameterTypes);
+        if (selected is null) {
+            context.ReportDiagnostic(Diagnostic.Create(
+                AmbiguousMember, location, target.Name, memberName, methods.Count));
+            return;
+        }
+
+        if (selected.IsStatic || selected.IsGenericMethod) {
+            context.ReportDiagnostic(Diagnostic.Create(
+                UnsupportedMember, location, target.Name, memberName, "static and generic methods are not supported"));
+            return;
+        }
+
+        StringBuilder signature = new StringBuilder();
+        signature.Append("    protected abstract ");
+        signature.Append(selected.ReturnsVoid ? "void" : selected.ReturnType.ToDisplayString(TypeFormat));
+        signature.Append(' ').Append(selected.Name).Append('(');
+        for (int index = 0; index < selected.Parameters.Length; index++) {
+            IParameterSymbol parameter = selected.Parameters[index];
+            if (index > 0) {
+                signature.Append(", ");
+            }
+
+            signature.Append(RefKindPrefix(parameter.RefKind));
+            signature.Append(parameter.Type.ToDisplayString(TypeFormat));
+            signature.Append(' ');
+            signature.Append(string.IsNullOrEmpty(parameter.Name) ? "arg" + index : parameter.Name);
+        }
+
+        signature.Append(");");
+
+        members.AppendLine("    [global::Concord.InjectMethod(\"" + selected.Name + "\")]");
+        members.AppendLine(signature.ToString());
+    }
+
+    private static string RefKindPrefix(RefKind refKind) {
+        return refKind switch {
+            RefKind.Ref => "ref ",
+            RefKind.Out => "out ",
+            RefKind.In => "in ",
+            _ => string.Empty,
+        };
+    }
+
+    private static IMethodSymbol? SelectOverload(List<IMethodSymbol> methods, ImmutableArray<TypedConstant> parameterTypes) {
+        if (methods.Count == 1 && parameterTypes.IsDefaultOrEmpty) {
+            return methods[0];
+        }
+
+        if (parameterTypes.IsDefaultOrEmpty) {
+            return null;
+        }
+
+        foreach (IMethodSymbol method in methods) {
+            if (method.Parameters.Length != parameterTypes.Length) {
+                continue;
+            }
+
+            bool matches = true;
+            for (int index = 0; index < parameterTypes.Length; index++) {
+                if (parameterTypes[index].Value is not ITypeSymbol requested ||
+                    !SymbolEqualityComparer.Default.Equals(requested, method.Parameters[index].Type)) {
+                    matches = false;
+                    break;
+                }
+            }
+
+            if (matches) {
+                return method;
+            }
+        }
+
+        return null;
     }
 
     private static string WrapInContainers(INamedTypeSymbol declaration, string members) {
