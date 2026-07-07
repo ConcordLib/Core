@@ -11,9 +11,9 @@ name: CI & Release
 # The release job depends on the full test matrix (test) and the mono leg (test-mono),
 # so a release cannot cut or publish unless every required test leg passes. It only runs
 # on pushes to main (not PRs): semantic-release cuts the v* tag + GitHub Release, then the
-# job packs Concord.Ref, Concord.Analyzers, and Concord.Runtime (versions stamped from the
-# tag by MinVer) and publishes to nuget.org via Trusted Publishing (OIDC -> short-lived
-# API key; no stored key). --skip-duplicate makes a re-run on the same commit idempotent.
+# job packs Concord.Ref, Concord.Analyzers, Concord.Generators, and Concord.Runtime (versions
+# stamped from the tag by MinVer) and publishes to nuget.org via Trusted Publishing (OIDC ->
+# short-lived API key; no stored key). --skip-duplicate makes a re-run on the same commit idempotent.
 
 on:
   push:
@@ -230,6 +230,7 @@ jobs:
         run: |
           dotnet pack src/Concord.Ref/Concord.Ref.csproj -c Release -o artifacts
           dotnet pack src/Concord.Analyzers/Concord.Analyzers.csproj -c Release -o artifacts
+          dotnet pack src/Concord.Generators/Concord.Generators.csproj -c Release -o artifacts
           dotnet pack src/Concord/Concord.csproj -c Release -o artifacts
 
       - name: NuGet login

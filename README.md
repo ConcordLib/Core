@@ -39,6 +39,13 @@ Everything's at **[concordlib.dev](https://concordlib.dev)**:
 - [How Patches Work](https://concordlib.dev/docs/patch-model.html), what's happening underneath
 - [API Reference](https://concordlib.dev/api/Concord.html), generated from source
 
+## Packages
+
+- `Concord.Ref` — compile-time reference assembly for authoring mods against the Concord API.
+- `Concord.Analyzers` — build-time Roslyn analyzers that validate patch declarations.
+- `Concord.Generators` — optional source generators + IDE refactorings (patch registry, `[Shadow]` members, scaffolding).
+- `Concord` — the runtime assembly a target ships to load and apply patches.
+
 ## Where things stand
 
 Concord 1.0 covers the whole patch model: head, tail, return, around, and
