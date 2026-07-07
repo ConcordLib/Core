@@ -32,7 +32,11 @@ public static class Patcher {
 
             CollectingPatchApplier applier = new CollectingPatchApplier();
             try {
-                PatchDeclarationScanner.ScanAssembly(assembly, applier, Properties);
+                if (PatchDeclarationScanner.TryGetRegistryDeclarations(assembly, out IReadOnlyList<Type> registryDeclarations)) {
+                    PatchDeclarationScanner.ScanDeclarations(registryDeclarations, applier, Properties);
+                } else {
+                    PatchDeclarationScanner.ScanAssembly(assembly, applier, Properties);
+                }
             } catch {
                 foreach (IDetourHandle handle in applier.Handles) {
                     try {

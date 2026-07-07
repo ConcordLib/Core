@@ -21,6 +21,7 @@
     <Project Path="tests/Concord.Emit.Tests.ForeignTargets/Concord.Emit.Tests.ForeignTargets.csproj"/>
     <Project Path="tests/Concord.AttachedData.Tests/Concord.AttachedData.Tests.csproj"/>
     <Project Path="tests/Concord.Orchestration.Tests/Concord.Orchestration.Tests.csproj"/>
+    <Project Path="tests/Concord.Orchestration.Tests.RegistryAssembly/Concord.Orchestration.Tests.RegistryAssembly.csproj"/>
   </Folder>
   <Folder Name="/bench/">
     <Project Path="bench/Concord.Benchmarks/Concord.Benchmarks.csproj"/>

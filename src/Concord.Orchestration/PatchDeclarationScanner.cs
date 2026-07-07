@@ -21,7 +21,18 @@ public static class PatchDeclarationScanner {
     /// <param name="patches">The applier that applies patches.</param>
     /// <param name="props">The registry that registers attached-properties.</param>
     public static void ScanAssembly(Assembly assembly, IPatchApplier patches, IAttachedPropertyRegistry props) {
-        foreach (Type type in assembly.GetTypes()) {
+        ScanDeclarations(assembly.GetTypes(), patches, props);
+    }
+
+    /// <summary>
+    ///     Scans the given declaration types, tolerating per-declaration failures exactly like
+    ///     <see cref="ScanAssembly" />.
+    /// </summary>
+    /// <param name="declarations">The declaration types to scan.</param>
+    /// <param name="patches">The applier that applies patches.</param>
+    /// <param name="props">The registry that registers attached-properties.</param>
+    public static void ScanDeclarations(IEnumerable<Type> declarations, IPatchApplier patches, IAttachedPropertyRegistry props) {
+        foreach (Type type in declarations) {
             try {
                 ScanType(type, patches, props);
             } catch (ConcordDeclarationException ex) {
@@ -29,6 +40,31 @@ public static class PatchDeclarationScanner {
                 Console.Error.WriteLine("[Concord] declaration error in " + type.FullName + ": " + ex.Message);
             }
         }
+    }
+
+    /// <summary>
+    ///     Resolves the assembly's generated patch registry, when one is present.
+    /// </summary>
+    /// <param name="assembly">The assembly to inspect.</param>
+    /// <param name="declarations">The registry's declaration list, or empty when absent.</param>
+    /// <returns><see langword="true" /> when a registry was found and resolved.</returns>
+    /// <exception cref="ConcordDeclarationException">
+    ///     Thrown when the registry type does not implement <see cref="IPatchDeclarationProvider" />.
+    /// </exception>
+    public static bool TryGetRegistryDeclarations(Assembly assembly, out IReadOnlyList<Type> declarations) {
+        PatchRegistryAttribute? attribute = assembly.GetCustomAttribute<PatchRegistryAttribute>();
+        if (attribute is null) {
+            declarations = [];
+            return false;
+        }
+
+        if (Activator.CreateInstance(attribute.RegistryType) is not IPatchDeclarationProvider provider) {
+            throw new ConcordDeclarationException(
+                "[PatchRegistry] type '" + attribute.RegistryType.FullName + "' does not implement IPatchDeclarationProvider.");
+        }
+
+        declarations = provider.Declarations;
+        return true;
     }
 
     /// <summary>
