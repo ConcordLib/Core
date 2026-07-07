@@ -155,8 +155,10 @@ public sealed class ShadowMemberGenerator : IIncrementalGenerator {
 
         if (candidates[0] is IFieldSymbol field) {
             string staticModifier = field.IsStatic ? "static " : string.Empty;
+            members.AppendLine("    #pragma warning disable CS0649");
             members.AppendLine("    [global::Concord.InjectField(\"" + field.Name + "\")]");
             members.AppendLine("    private " + staticModifier + field.Type.ToDisplayString(TypeFormat) + " " + field.Name + ";");
+            members.AppendLine("    #pragma warning restore CS0649");
             return;
         }
 
