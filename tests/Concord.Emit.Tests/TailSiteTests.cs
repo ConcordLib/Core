@@ -69,6 +69,62 @@ public static class MixedReturnInjectionMethods {
     }
 }
 
+public static class NestedTryFinallyLog {
+    public static int FinallyRuns;
+}
+
+public static class NestedTryFinallyTarget {
+    public static int PickNested(int which) {
+        try {
+            try {
+                if (which == 0) {
+                    return 5;
+                }
+            } finally {
+                NestedTryFinallyLog.FinallyRuns++;
+            }
+
+            return 11;
+        } finally {
+            NestedTryFinallyLog.FinallyRuns++;
+        }
+    }
+}
+
+public static class NestedTryFinallyInjectionMethods {
+    public static void Double(ControlHandle<int> ch) {
+        ch.ReturnValue *= 2;
+    }
+}
+
+public static class MultiReturnInTryLog {
+    public static int FinallyRuns;
+}
+
+public static class MultiReturnInTryTarget {
+    public static int PickMulti(int which) {
+        try {
+            if (which == 0) {
+                return 1;
+            }
+
+            if (which == 1) {
+                return 2;
+            }
+
+            return 3;
+        } finally {
+            MultiReturnInTryLog.FinallyRuns++;
+        }
+    }
+}
+
+public static class MultiReturnInTryInjectionMethods {
+    public static void Double(ControlHandle<int> ch) {
+        ch.ReturnValue *= 2;
+    }
+}
+
 public sealed class TailSiteTests {
     [Theory]
     [InlineData(0, 10)]
@@ -161,5 +217,54 @@ public sealed class TailSiteTests {
 
         Assert.Equal(expected, value);
         Assert.Equal(which == 0 ? 1 : 0, MixedReturnLog.FinallyRuns);
+    }
+
+    [Theory]
+    [InlineData(0, 5)]
+    [InlineData(1, 22)]
+    public void Tail_NestedTryFinally_FiresOnlyAtLastReturn(int which, int expected) {
+        NestedTryFinallyLog.FinallyRuns = 0;
+        MethodBase target = typeof(NestedTryFinallyTarget).GetMethod(nameof(NestedTryFinallyTarget.PickNested))!;
+        MethodBase injectionMethod = typeof(NestedTryFinallyInjectionMethods).GetMethod(nameof(NestedTryFinallyInjectionMethods.Double))!;
+        Injection tail = new Injection(injectionMethod, new InjectAt.Tail(), "test", 0);
+
+        ComposeResult result = WrapperComposer.Compose(target, [tail]);
+        object? value = result.Wrapper.Invoke(null, [which]);
+
+        Assert.Equal(expected, value);
+        Assert.Equal(2, NestedTryFinallyLog.FinallyRuns);
+    }
+
+    [Theory]
+    [InlineData(0, 10)]
+    [InlineData(1, 22)]
+    public void Return_NestedTryFinally_TransformsEverySite(int which, int expected) {
+        NestedTryFinallyLog.FinallyRuns = 0;
+        MethodBase target = typeof(NestedTryFinallyTarget).GetMethod(nameof(NestedTryFinallyTarget.PickNested))!;
+        MethodBase injectionMethod = typeof(NestedTryFinallyInjectionMethods).GetMethod(nameof(NestedTryFinallyInjectionMethods.Double))!;
+        Injection ret = new Injection(injectionMethod, new InjectAt.Return(0), "test", 0);
+
+        ComposeResult result = WrapperComposer.Compose(target, [ret]);
+        object? value = result.Wrapper.Invoke(null, [which]);
+
+        Assert.Equal(expected, value);
+        Assert.Equal(2, NestedTryFinallyLog.FinallyRuns);
+    }
+
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(1, 2)]
+    [InlineData(2, 6)]
+    public void Tail_MultipleReturnsInOneTry_FiresOnlyAtLastReturn(int which, int expected) {
+        MultiReturnInTryLog.FinallyRuns = 0;
+        MethodBase target = typeof(MultiReturnInTryTarget).GetMethod(nameof(MultiReturnInTryTarget.PickMulti))!;
+        MethodBase injectionMethod = typeof(MultiReturnInTryInjectionMethods).GetMethod(nameof(MultiReturnInTryInjectionMethods.Double))!;
+        Injection tail = new Injection(injectionMethod, new InjectAt.Tail(), "test", 0);
+
+        ComposeResult result = WrapperComposer.Compose(target, [tail]);
+        object? value = result.Wrapper.Invoke(null, [which]);
+
+        Assert.Equal(expected, value);
+        Assert.Equal(1, MultiReturnInTryLog.FinallyRuns);
     }
 }
