@@ -65,6 +65,27 @@ public class WrongOperationInjection {
     }
 }
 
+public class NoOperationInjection {
+    public int NoOperationParam(int x) {
+        return x * 2;
+    }
+}
+
+public readonly struct ValueTypeTarget {
+    public readonly int Value;
+
+    public ValueTypeTarget(int value) => Value = value;
+
+    public int Double => Value * 2;
+}
+
+public class ValueTypeHost {
+    public int CallOnStruct() {
+        var target = new ValueTypeTarget(5);
+        return target.Double;
+    }
+}
+
 public sealed class CallSiteShapeValidationTests {
     [Fact]
     public void ValidateOperationShape_ThrowsConc039_OnMismatchedDeclaration() {
@@ -75,5 +96,39 @@ public sealed class CallSiteShapeValidationTests {
         ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() => WrapperComposer.Compose(target, [wrap]));
         Assert.Equal("CONC039", ex.Code);
         Assert.Contains("declares", ex.Message);
+    }
+
+    [Fact]
+    public void ValidateOperationShape_ThrowsConc039_OnNoOperationParameter() {
+        MethodBase target = typeof(ValidateShapeHost).GetMethod(nameof(ValidateShapeHost.Run))!;
+        MethodBase injection = typeof(NoOperationInjection).GetMethod(nameof(NoOperationInjection.NoOperationParam))!;
+        Injection wrap = new Injection(injection, new InjectAt.Invoke(typeof(ValidateShapeTarget), nameof(ValidateShapeTarget.Compute), At.Around, 0), "test", 0);
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() => WrapperComposer.Compose(target, [wrap]));
+        Assert.Equal("CONC039", ex.Code);
+        Assert.Contains("no Operation", ex.Message);
+    }
+
+    [Fact]
+    public void ValidateOperationShape_ThrowsConc039_OnValueTypeReceiver() {
+        // Direct unit test: value-type receiver call sites are hard to construct naturally
+        // during composition (other validations fail first), so call ValidateOperationShape directly.
+        MethodBase injectionMethod = typeof(NoOperationInjection).GetMethod(nameof(NoOperationInjection.NoOperationParam))!;
+        MethodBase target = typeof(ValueTypeHost).GetMethod(nameof(ValueTypeHost.CallOnStruct))!;
+
+        var shape = new CallSiteShape(true, typeof(ValueTypeTarget), [], typeof(int));
+
+        var method = typeof(WrapperComposer).GetMethod(
+            "ValidateOperationShape",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static,
+            null,
+            [typeof(MethodBase), typeof(CallSiteShape), typeof(MethodBase)],
+            null)!;
+
+        var ex = Assert.Throws<System.Reflection.TargetInvocationException>(
+            () => method.Invoke(null, [injectionMethod, shape, target]));
+        var inner = Assert.IsType<ConcordEmitException>(ex.InnerException);
+        Assert.Equal("CONC039", inner.Code);
+        Assert.Contains("value type", inner.Message, StringComparison.OrdinalIgnoreCase);
     }
 }
