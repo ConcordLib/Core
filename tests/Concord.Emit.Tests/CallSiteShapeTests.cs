@@ -81,7 +81,7 @@ public readonly struct ValueTypeTarget {
 
 public class ValueTypeHost {
     public int CallOnStruct() {
-        var target = new ValueTypeTarget(5);
+        ValueTypeTarget target = new ValueTypeTarget(5);
         return target.Double;
     }
 }
@@ -111,24 +111,16 @@ public sealed class CallSiteShapeValidationTests {
 
     [Fact]
     public void ValidateOperationShape_ThrowsConc039_OnValueTypeReceiver() {
-        // Direct unit test: value-type receiver call sites are hard to construct naturally
-        // during composition (other validations fail first), so call ValidateOperationShape directly.
+        // Value-type receiver call sites are not naturally reachable through composition
+        // (other validations fail first), so the branch is unit-tested directly.
         MethodBase injectionMethod = typeof(NoOperationInjection).GetMethod(nameof(NoOperationInjection.NoOperationParam))!;
         MethodBase target = typeof(ValueTypeHost).GetMethod(nameof(ValueTypeHost.CallOnStruct))!;
 
-        var shape = new CallSiteShape(true, typeof(ValueTypeTarget), [], typeof(int));
+        CallSiteShape shape = new CallSiteShape(true, typeof(ValueTypeTarget), [], typeof(int));
 
-        var method = typeof(WrapperComposer).GetMethod(
-            "ValidateOperationShape",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static,
-            null,
-            [typeof(MethodBase), typeof(CallSiteShape), typeof(MethodBase)],
-            null)!;
-
-        var ex = Assert.Throws<System.Reflection.TargetInvocationException>(
-            () => method.Invoke(null, [injectionMethod, shape, target]));
-        var inner = Assert.IsType<ConcordEmitException>(ex.InnerException);
-        Assert.Equal("CONC039", inner.Code);
-        Assert.Contains("value type", inner.Message, StringComparison.OrdinalIgnoreCase);
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(
+            () => WrapperComposer.ValidateOperationShape(injectionMethod, shape, target));
+        Assert.Equal("CONC039", ex.Code);
+        Assert.Contains("value type", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 }

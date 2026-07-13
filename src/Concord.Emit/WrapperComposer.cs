@@ -103,6 +103,30 @@ public static class WrapperComposer {
         }
     }
 
+    internal static void ValidateOperationShape(MethodBase injectionMethod, CallSiteShape shape, MethodBase target) {
+        if (shape.HasThis && shape.ReceiverType is { IsValueType: true }) {
+            throw new ConcordEmitException(
+                "CONC039",
+                $"Around-invoke on '{target.DeclaringType?.Name}.{target.Name}' matches a call on value type '{shape.ReceiverType.Name}'. Value-type receivers are not supported.");
+        }
+
+        int operationArgIndex = ControlHandleLowering.FindOperationArgIndex(injectionMethod);
+        if (operationArgIndex < 0) {
+            throw new ConcordEmitException(
+                "CONC039",
+                $"Around-invoke injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' declares no Operation parameter.");
+        }
+
+        Type expected = shape.ExpectedOperationType();
+        int offset = injectionMethod.IsStatic ? 0 : 1;
+        Type declared = injectionMethod.GetParameters()[operationArgIndex - offset].ParameterType;
+        if (declared != expected) {
+            throw new ConcordEmitException(
+                "CONC039",
+                $"Around-invoke injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' declares '{declared.Name}' but the matched call requires '{expected.Name}'.");
+        }
+    }
+
     private static IEnumerable<Type> EnumerateGenericArguments(MethodBase target) {
         Type? declaringType = target.DeclaringType;
         if (declaringType is { IsConstructedGenericType: true }) {
@@ -410,30 +434,6 @@ public static class WrapperComposer {
             epilogueStart,
             spine);
         RetargetAroundSpineBranches(aroundBody, spine, afterSpine, epilogueStart, locals);
-    }
-
-    private static void ValidateOperationShape(MethodBase injectionMethod, CallSiteShape shape, MethodBase target) {
-        if (shape.HasThis && shape.ReceiverType is { IsValueType: true }) {
-            throw new ConcordEmitException(
-                "CONC039",
-                $"Around-invoke on '{target.DeclaringType?.Name}.{target.Name}' matches a call on value type '{shape.ReceiverType.Name}'. Value-type receivers are not supported.");
-        }
-
-        int operationArgIndex = ControlHandleLowering.FindOperationArgIndex(injectionMethod);
-        if (operationArgIndex < 0) {
-            throw new ConcordEmitException(
-                "CONC039",
-                $"Around-invoke injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' declares no Operation parameter.");
-        }
-
-        Type expected = shape.ExpectedOperationType();
-        int offset = injectionMethod.IsStatic ? 0 : 1;
-        Type declared = injectionMethod.GetParameters()[operationArgIndex - offset].ParameterType;
-        if (declared != expected) {
-            throw new ConcordEmitException(
-                "CONC039",
-                $"Around-invoke injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' declares '{declared.Name}' but the matched call requires '{expected.Name}'.");
-        }
     }
 
     private static void WrapCallSite(
