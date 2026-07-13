@@ -445,6 +445,16 @@ internal static class BodyCopier {
             return new List<Instruction> { Instruction.Create(OpCodes.Ldloc, valueLocal) };
         }
 
+        int argIndex = GetArgIndex(source);
+        bool isAddressOfValue = (source.OpCode == OpCodes.Ldarga || source.OpCode == OpCodes.Ldarga_S) && argIndex == valueArgIndex;
+        bool isReassignValue = (source.OpCode == OpCodes.Starg || source.OpCode == OpCodes.Starg_S) && argIndex == valueArgIndex;
+
+        if (isAddressOfValue || isReassignValue) {
+            throw new ConcordEmitException(
+                "CONC039",
+                $"Value injection cannot take the address of or reassign its 'original' parameter; only by-value reads are supported.");
+        }
+
         if (source.OpCode == OpCodes.Ret) {
             return new List<Instruction> {
                 Instruction.Create(OpCodes.Stloc, resultLocal), Instruction.Create(OpCodes.Br, spliceEnd),

@@ -47,6 +47,14 @@ public class ConstantInjectionMethods {
     public int BumpFive(int original) {
         return original + 1;
     }
+
+    public int ReassignOriginal(int original) {
+        original = original + 1;
+        SideEffect();
+        return original;
+    }
+
+    private static void SideEffect() { }
 }
 
 public sealed class ConstantInjectionTests {
@@ -124,5 +132,16 @@ public sealed class ConstantInjectionTests {
         ConstantInjectionMethods.LiveEjectAge = 20f;
         Assert.True(run(new ConstantHost(), 21f));
         Assert.False(run(new ConstantHost(), 20f));
+    }
+
+    [Fact]
+    public void ValueInjection_ReassignOriginal_ThrowsConc039() {
+        MethodBase target = typeof(ConstantHost).GetMethod(nameof(ConstantHost.SmallInt))!;
+        MethodBase injection = typeof(ConstantInjectionMethods).GetMethod(nameof(ConstantInjectionMethods.ReassignOriginal))!;
+        Injection constant = new Injection(injection, new InjectAt.Constant(8, 0), "test", 0);
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(
+            () => WrapperComposer.Compose(target, [constant]));
+        Assert.Equal("CONC039", ex.Code);
     }
 }
