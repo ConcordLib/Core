@@ -36,7 +36,7 @@ public abstract record InjectAt {
     /// <param name="Shift">
     ///     Where the injection method runs relative to the matched call: <see cref="At.Head" /> before the
     ///     call, <see cref="At.Tail" /> after the call, or <see cref="At.Around" /> wrapping
-    ///     the call (the injection method receives an <see cref="Operation{T}" /> handle).
+    ///     the call (the injection method receives an <see cref="Operation" /> family handle matching the call's shape).
     /// </param>
     /// <param name="By">
     ///     The 1-based occurrence of the matched call to target, or <c>0</c> to target every matching call.

@@ -9,4 +9,4 @@ public sealed class Operation {
     /// </summary>
     public void Invoke() {
     }
-} // NOSONAR control parameter type; recognized by lowering via typeof(Operation), intentionally empty
+} // NOSONAR control parameter type; recognized by lowering via typeof(Operation)

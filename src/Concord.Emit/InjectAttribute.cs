@@ -59,7 +59,7 @@ public sealed class InjectAttribute : Attribute {
     /// <param name="shift">
     ///     Where the injection method runs relative to the matched call: <see cref="At.Head" /> before the
     ///     call, <see cref="At.Tail" /> after the call, or <see cref="At.Around" /> wrapping
-    ///     the call (the injection method receives an <see cref="Operation{T}" /> handle).
+    ///     the call (the injection method receives an <see cref="Operation" /> family handle matching the call's shape).
     /// </param>
     /// <param name="by">The 1-based occurrence of the matched call to target, or <c>0</c> for every matching call.</param>
     /// <param name="targetParameterTypes">
