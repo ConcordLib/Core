@@ -377,6 +377,11 @@ public static class WrapperComposer {
         MethodBase target,
         ProtocolLocals locals,
         List<Instruction> spine) {
+        if (invoke.Shift is At.Argument) {
+            ProcessArgumentInjection(injection, invoke, wrapperDefinition, target, spine);
+            return;
+        }
+
         string effectiveName = AccessorNameResolver.ResolveAccessorName(
             invoke.DeclaringType,
             invoke.Method,
@@ -416,6 +421,114 @@ public static class WrapperComposer {
             int siteIndex = spine.IndexOf(site);
             spine.InsertRange(after ? siteIndex + 1 : siteIndex, invokeBody);
         }
+    }
+
+    private static void ProcessArgumentInjection(
+        Injection injection,
+        InjectAt.Invoke invoke,
+        MethodDefinition wrapperDefinition,
+        MethodBase target,
+        List<Instruction> spine) {
+        string effectiveName = AccessorNameResolver.ResolveAccessorName(invoke.DeclaringType, invoke.Method, injection.InjectionMethod, false);
+        List<Instruction> allSites = ControlHandleLowering.FindInvokeCallSites(spine, invoke.DeclaringType, effectiveName, invoke.ParameterTypes);
+        if (allSites.Count == 0) {
+            throw new ConcordEmitException(
+                "CONC031",
+                $"Injection on '{target.DeclaringType?.Name}.{target.Name}' targets call site '{invoke.DeclaringType.Name}.{invoke.Method}' which does not occur in the method body.");
+        }
+
+        List<Instruction> sites = SelectInvokeSites(allSites, invoke.By, target, invoke);
+        InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
+        using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
+
+        ModuleDefinition module = wrapperDefinition.Module;
+        MethodBody body = wrapperDefinition.Body;
+
+        foreach (Instruction site in sites) {
+            MethodBase resolvedOriginal = ((MethodReference)site.Operand).ResolveReflection();
+            CallSiteShape shape = CallSiteShape.Resolve(resolvedOriginal);
+            int argIndex = ResolveArgumentIndex(invoke, injection.InjectionMethod, shape, target);
+            ValidateValueInjectionShape(injection.InjectionMethod, shape.ParameterTypes[argIndex], target);
+
+            List<VariableDefinition> argLocals = new List<VariableDefinition>(shape.ParameterTypes.Length);
+            for (int i = 0; i < shape.ParameterTypes.Length; i++) {
+                VariableDefinition local = new VariableDefinition(module.ImportReference(shape.ParameterTypes[i]));
+                body.Variables.Add(local);
+                argLocals.Add(local);
+            }
+
+            VariableDefinition? receiverLocal = null;
+            if (shape.HasThis) {
+                receiverLocal = new VariableDefinition(module.ImportReference(shape.ReceiverType!));
+                body.Variables.Add(receiverLocal);
+            }
+
+            List<Instruction> block = new List<Instruction>();
+            for (int i = argLocals.Count - 1; i >= 0; i--) {
+                block.Add(Instruction.Create(OpCodes.Stloc, argLocals[i]));
+            }
+
+            if (receiverLocal is not null) {
+                block.Add(Instruction.Create(OpCodes.Stloc, receiverLocal));
+            }
+
+            block.AddRange(BodyCopier.CopyValueInjection(
+                injectionMethodDefinition.Definition,
+                wrapperDefinition,
+                target,
+                injection.InjectionMethod,
+                injectedMembers,
+                argLocals[argIndex]));
+            block.Add(Instruction.Create(OpCodes.Stloc, argLocals[argIndex]));
+
+            if (receiverLocal is not null) {
+                block.Add(Instruction.Create(OpCodes.Ldloc, receiverLocal));
+            }
+
+            for (int i = 0; i < argLocals.Count; i++) {
+                block.Add(Instruction.Create(OpCodes.Ldloc, argLocals[i]));
+            }
+
+            int siteIndex = spine.IndexOf(site);
+            spine.InsertRange(siteIndex, block);
+        }
+    }
+
+    private static int ResolveArgumentIndex(InjectAt.Invoke invoke, MethodBase injectionMethod, CallSiteShape shape, MethodBase target) {
+        if (invoke.Arg > 0) {
+            if (invoke.Arg > shape.ParameterTypes.Length) {
+                throw new ConcordEmitException(
+                    "CONC039",
+                    $"Argument injection on '{target.DeclaringType?.Name}.{target.Name}' selects arg {invoke.Arg}, but the call has {shape.ParameterTypes.Length} argument(s).");
+            }
+
+            return (int)(invoke.Arg - 1);
+        }
+
+        ParameterInfo[] parameters = injectionMethod.GetParameters();
+        Type valueType = parameters[0].ParameterType;
+        int found = -1;
+        for (int i = 0; i < shape.ParameterTypes.Length; i++) {
+            if (shape.ParameterTypes[i] != valueType) {
+                continue;
+            }
+
+            if (found >= 0) {
+                throw new ConcordEmitException(
+                    "CONC039",
+                    $"Argument injection on '{target.DeclaringType?.Name}.{target.Name}' matches more than one '{valueType.Name}' argument; pass arg: to select one.");
+            }
+
+            found = i;
+        }
+
+        if (found < 0) {
+            throw new ConcordEmitException(
+                "CONC039",
+                $"Argument injection on '{target.DeclaringType?.Name}.{target.Name}' matches no '{valueType.Name}' argument.");
+        }
+
+        return found;
     }
 
     private static void ProcessConstantInjection(
