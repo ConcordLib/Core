@@ -60,7 +60,7 @@ public sealed class RealIlWrapTarget {
 }
 
 public sealed class RealIlWrapInjectionMethod {
-    public int WrapManyArgs(int a, int b, int c, int d, Operation<int> op) {
+    public int WrapManyArgs(int a, int b, int c, int d, Operation<int, int> op) {
         int combined = (a * 1000) + (b * 100) + (c * 10) + d;
         return op.Invoke(combined);
     }

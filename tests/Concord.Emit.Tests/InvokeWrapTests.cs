@@ -19,11 +19,11 @@ public class WrapTarget {
 }
 
 public class WrapInjectionMethods {
-    public int SubstituteArg(int x, Operation<int> op) {
+    public int SubstituteArg(int x, Operation<int, int> op) {
         return op.Invoke(x * 2);
     }
 
-    public int SkipOriginal(int x, Operation<int> op) {
+    public int SkipOriginal(int x, Operation<int, int> op) {
         return 0;
     }
 }

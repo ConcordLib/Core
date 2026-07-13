@@ -64,6 +64,24 @@ internal static class ControlHandleLowering {
         return loaded == operationArgIndex;
     }
 
+    internal static bool IsOperationType(Type type) {
+        if (type == typeof(Operation)) {
+            return true;
+        }
+
+        if (!type.IsGenericType) {
+            return false;
+        }
+
+        Type definition = type.GetGenericTypeDefinition();
+        return definition == typeof(Operation<>)
+               || definition == typeof(Operation<,>)
+               || definition == typeof(Operation<,,>)
+               || definition == typeof(Operation<,,,>)
+               || definition == typeof(VoidOperation<>)
+               || definition == typeof(VoidOperation<,>);
+    }
+
     internal static bool IsOperationInvoke(Instruction instruction) {
         if (instruction.OpCode != OpCodes.Call && instruction.OpCode != OpCodes.Callvirt) {
             return false;
@@ -218,14 +236,6 @@ internal static class ControlHandleLowering {
         }
 
         return type.IsGenericType && type.GetGenericTypeDefinition() == typeof(ControlHandle<>);
-    }
-
-    private static bool IsOperationType(Type type) {
-        if (type == typeof(Operation)) {
-            return true;
-        }
-
-        return type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Operation<>);
     }
 
     private static int ArgIndexOperand(object? operand) {

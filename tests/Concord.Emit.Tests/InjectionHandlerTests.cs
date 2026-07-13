@@ -53,7 +53,7 @@ public class ThrowingWrapTarget {
 }
 
 public class WrapCatchInjectionMethods {
-    public int GuardedInvoke(int x, Operation<int> op) {
+    public int GuardedInvoke(int x, Operation<int, int> op) {
         try {
             return op.Invoke(x);
         }

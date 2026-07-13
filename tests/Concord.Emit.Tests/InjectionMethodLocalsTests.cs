@@ -64,7 +64,7 @@ public class WrapLocalsTarget {
 }
 
 public class WrapLocalsInjectionMethods {
-    public int AccumulateThenInvoke(int x, Operation<int> op) {
+    public int AccumulateThenInvoke(int x, Operation<int, int> op) {
         int acc = 0;
         for (int i = 0; i < 3; i++) {
             acc += x;
