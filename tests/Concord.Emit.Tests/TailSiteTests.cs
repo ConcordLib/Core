@@ -38,6 +38,11 @@ public static class TailInjectionMethods {
     public static void Bump(ControlHandle ch) {
         TailVoidTarget.Calls += 100;
     }
+
+    public static int AroundPick(int which, ControlHandle<int> ch) {
+        int result = TailSiteTarget.Pick(which);
+        return result * 10;
+    }
 }
 
 public sealed class TailSiteTests {
@@ -82,5 +87,23 @@ public sealed class TailSiteTests {
         result.Wrapper.Invoke(null, [which]);
 
         Assert.Equal(expectedCalls, TailVoidTarget.Calls);
+    }
+
+    [Theory]
+    [InlineData(0, 100)]
+    [InlineData(1, 200)]
+    [InlineData(2, 300)]
+    public void Tail_WithAround_TailIsCurrentlyDropped(int which, int expected) {
+        MethodBase target = typeof(TailSiteTarget).GetMethod(nameof(TailSiteTarget.Pick))!;
+        MethodBase aroundInjectionMethod = typeof(TailInjectionMethods).GetMethod(nameof(TailInjectionMethods.AroundPick))!;
+        MethodBase tailInjectionMethod = typeof(TailInjectionMethods).GetMethod(nameof(TailInjectionMethods.Double))!;
+
+        Injection around = new Injection(aroundInjectionMethod, new InjectAt.Around(), "test", 0);
+        Injection tail = new Injection(tailInjectionMethod, new InjectAt.Tail(), "test", 1);
+
+        ComposeResult result = WrapperComposer.Compose(target, [around, tail]);
+        object? value = result.Wrapper.Invoke(null, [which]);
+
+        Assert.Equal(expected, value);
     }
 }
