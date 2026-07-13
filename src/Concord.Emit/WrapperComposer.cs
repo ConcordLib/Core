@@ -372,7 +372,13 @@ public static class WrapperComposer {
         MethodBase target,
         ProtocolLocals locals,
         List<Instruction> spine) {
-        List<Instruction> allSites = ControlHandleLowering.FindInvokeCallSites(spine, invoke.DeclaringType, invoke.Method, invoke.ParameterTypes);
+        string effectiveName = AccessorNameResolver.ResolveAccessorName(
+            invoke.DeclaringType,
+            invoke.Method,
+            injection.InjectionMethod,
+            invoke.Shift is At.Around);
+
+        List<Instruction> allSites = ControlHandleLowering.FindInvokeCallSites(spine, invoke.DeclaringType, effectiveName, invoke.ParameterTypes);
         if (allSites.Count == 0) {
             throw new ConcordEmitException(
                 "CONC031",

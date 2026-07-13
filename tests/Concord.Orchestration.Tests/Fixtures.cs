@@ -6,6 +6,8 @@ namespace Concord.Orchestration.Tests;
 
 public class GameBase {
     public virtual void Step() { }
+
+    public int Score => 7;
 }
 
 public sealed class SealedGame {
@@ -24,6 +26,12 @@ public abstract class GoodDeclaration : GameBase {
 
     [Inject(At.Head, nameof(Step))]
     public void OnStep(ControlHandle ch) { }
+}
+
+[Patch]
+public abstract class PropertyTargetDeclaration : GameBase {
+    [Inject(At.Tail, nameof(Score))]
+    public void OnScore(ControlHandle<int> ch) { }
 }
 
 [Patch]

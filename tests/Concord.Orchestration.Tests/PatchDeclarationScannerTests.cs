@@ -20,6 +20,17 @@ public sealed class PatchDeclarationScannerTests {
     }
 
     [Fact]
+    public void ScanType_InjectTargetsPropertyName_ResolvesToGetter() {
+        FakePatchApplier patches = new FakePatchApplier();
+        FakeAttachedPropertyRegistry props = new FakeAttachedPropertyRegistry();
+
+        PatchDeclarationScanner.ScanType(typeof(PropertyTargetDeclaration), patches, props);
+
+        PatchCall call = Assert.Single(patches.Calls);
+        Assert.Equal(typeof(GameBase).GetProperty(nameof(GameBase.Score))!.GetGetMethod(), call.Target);
+    }
+
+    [Fact]
     public void ScanType_DeclaredField_CallsPropertyRegistry() {
         FakePatchApplier patches = new FakePatchApplier();
         FakeAttachedPropertyRegistry props = new FakeAttachedPropertyRegistry();

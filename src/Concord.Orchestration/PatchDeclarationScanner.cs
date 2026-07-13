@@ -173,9 +173,16 @@ public static class PatchDeclarationScanner {
             return ctor;
         }
 
+        string methodName;
+        try {
+            methodName = AccessorNameResolver.ResolveAccessorName(baseType, inject.Method!, null, false);
+        } catch (ConcordEmitException ex) {
+            throw new ConcordDeclarationException(InjectOnPrefix + declaration.FullName + ": " + ex.Message);
+        }
+
         if (inject.ParameterTypes != null) {
             MethodInfo? baseMethod = baseType.GetMethod(
-                inject.Method!,
+                methodName,
                 BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static, // NOSONAR concord reaches private target members by design; validated at resolve time
                 null,
                 inject.ParameterTypes,
@@ -197,7 +204,7 @@ public static class PatchDeclarationScanner {
         MethodInfo? byName;
         try {
             byName = baseType.GetMethod(
-                inject.Method!,
+                methodName,
                 BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static); // NOSONAR concord reaches private target members by design; validated at resolve time
         } catch (AmbiguousMatchException) {
             throw new ConcordDeclarationException(
