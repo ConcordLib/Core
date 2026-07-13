@@ -19,7 +19,8 @@ public abstract record InjectAt {
     public sealed record Return(uint By = 0) : InjectAt;
 
     /// <summary>
-    ///     Inserts the injection after the target method body and before the wrapper returns.
+    ///     Inserts the injection before the last <c>return</c> in the target body (Mixin <c>@At("TAIL")</c>
+    ///     semantics). Early returns are not affected; use <see cref="Return" /> to target every return site.
     /// </summary>
     public sealed record Tail : InjectAt;
 
