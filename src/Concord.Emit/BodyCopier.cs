@@ -120,6 +120,7 @@ internal static class BodyCopier {
     /// <param name="receiverLocal">The spilled receiver local, or <see langword="null" /> for a static call site.</param>
     /// <param name="argLocals">The spilled argument locals, in call-site parameter order.</param>
     /// <param name="originalOpCode">The original call site's opcode (<c>call</c> or <c>callvirt</c>).</param>
+    /// <param name="shape">The matched call site's resolved shape.</param>
     /// <returns>The copied and lowered instruction sequence.</returns>
     public static List<Instruction> CopyWrapInjection(
         MethodDefinition injectionDefinition,
@@ -131,11 +132,13 @@ internal static class BodyCopier {
         MethodReference originalCall,
         VariableDefinition? receiverLocal,
         IReadOnlyList<VariableDefinition> argLocals,
-        OpCode originalOpCode) {
+        OpCode originalOpCode,
+        CallSiteShape shape) {
         MethodBody injectionBody = injectionDefinition.Body;
         ModuleDefinition module = destination.Module;
 
-        Dictionary<int, int> argRemap = BuildArgRemap(target, injectionMethod);
+        Dictionary<int, VariableDefinition> wrapArgBinding = BuildWrapArgBinding(injectionMethod, argLocals, shape);
+        Dictionary<int, int> thisRemap = injectionMethod.IsStatic ? new Dictionary<int, int>() : new Dictionary<int, int> { [0] = 0 };
         int operationArgIndex = ControlHandleLowering.FindOperationArgIndex(injectionMethod);
 
         MethodBase resolvedOriginal = originalCall.ResolveReflection();
@@ -150,7 +153,7 @@ internal static class BodyCopier {
         }
 
         Dictionary<VariableDefinition, VariableDefinition> variableMap = CopyInjectionLocals(injectionBody, destination.Body, module);
-        LoweringContext ctx = new LoweringContext(module, variableMap, injectionBody.Variables, injectedMembers, argRemap, destination.Body.Variables);
+        LoweringContext ctx = new LoweringContext(module, variableMap, injectionBody.Variables, injectedMembers, thisRemap, destination.Body.Variables);
 
         List<(Instruction Source, List<Instruction> Emitted)> entries =
             new List<(Instruction Source, List<Instruction> Emitted)>(injectionBody.Instructions.Count);
@@ -164,7 +167,8 @@ internal static class BodyCopier {
                 importedOriginal,
                 receiverLocal,
                 invokeParameterTypes,
-                originalOpCode);
+                originalOpCode,
+                wrapArgBinding);
             entries.Add((source_instruction, emitted));
         }
 
@@ -201,7 +205,8 @@ internal static class BodyCopier {
         MethodReference importedOriginal,
         VariableDefinition? receiverLocal,
         IReadOnlyList<Type> invokeParameterTypes,
-        OpCode originalOpCode) {
+        OpCode originalOpCode,
+        Dictionary<int, VariableDefinition> wrapArgBinding) {
         if (ControlHandleLowering.IsOperationReceiverLoad(source, operationArgIndex)) {
             return new List<Instruction>(0);
         }
@@ -212,6 +217,10 @@ internal static class BodyCopier {
 
         if (source.OpCode == OpCodes.Ret) {
             return new List<Instruction> { Instruction.Create(OpCodes.Br, wrapEnd) };
+        }
+
+        if (TryLowerWrapArgBinding(source, wrapArgBinding, out Instruction? bound)) {
+            return new List<Instruction> { bound! };
         }
 
         if (TryLowerProjectedMethodCall(source, ctx, out List<Instruction>? projectedCall)) {
@@ -225,6 +234,33 @@ internal static class BodyCopier {
         Instruction copy = CloneInstruction(source, ctx.Module, ctx.VariableMap, ctx.InjectedMembers);
         RemapArgInstruction(copy, ctx.ArgRemap);
         return new List<Instruction> { copy };
+    }
+
+    private static bool TryLowerWrapArgBinding(Instruction source, Dictionary<int, VariableDefinition> wrapArgBinding, out Instruction? lowered) {
+        lowered = null;
+
+        bool isAddress = source.OpCode == OpCodes.Ldarga || source.OpCode == OpCodes.Ldarga_S;
+        bool isLoad = IsLoadArgOpCode(source.OpCode);
+        if (!isAddress && !isLoad) {
+            return false;
+        }
+
+        int argIndex = GetArgIndex(source);
+        if (argIndex < 0 || !wrapArgBinding.TryGetValue(argIndex, out VariableDefinition? local)) {
+            return false;
+        }
+
+        lowered = Instruction.Create(isAddress ? OpCodes.Ldloca : OpCodes.Ldloc, local);
+        return true;
+    }
+
+    private static bool IsLoadArgOpCode(OpCode opCode) {
+        return opCode == OpCodes.Ldarg
+            || opCode == OpCodes.Ldarg_S
+            || opCode == OpCodes.Ldarg_0
+            || opCode == OpCodes.Ldarg_1
+            || opCode == OpCodes.Ldarg_2
+            || opCode == OpCodes.Ldarg_3;
     }
 
     /// <summary>
@@ -481,6 +517,40 @@ internal static class BodyCopier {
         }
 
         return remap;
+    }
+
+    private static Dictionary<int, VariableDefinition> BuildWrapArgBinding(
+        MethodBase injectionMethod,
+        IReadOnlyList<VariableDefinition> argLocals,
+        CallSiteShape shape) {
+        ParameterInfo[] parameters = injectionMethod.GetParameters();
+        int offset = injectionMethod.IsStatic ? 0 : 1;
+
+        Dictionary<int, VariableDefinition> binding = new Dictionary<int, VariableDefinition>();
+        int siteArg = 0;
+        for (int i = 0; i < parameters.Length; i++) {
+            if (ControlHandleLowering.IsOperationType(parameters[i].ParameterType)) {
+                break;
+            }
+
+            if (siteArg >= argLocals.Count) {
+                throw new ConcordEmitException(
+                    "CONC039",
+                    $"Around-invoke injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' declares more leading parameters than the matched call has arguments.");
+            }
+
+            if (parameters[i].ParameterType != shape.ParameterTypes[siteArg]) {
+                throw new ConcordEmitException(
+                    "CONC039",
+                    $"Around-invoke injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' declares leading parameter '{parameters[i].Name}' " +
+                    $"of type '{parameters[i].ParameterType.Name}' but the matched call's argument {siteArg} is of type '{shape.ParameterTypes[siteArg].Name}'.");
+            }
+
+            binding[i + offset] = argLocals[siteArg];
+            siteArg++;
+        }
+
+        return binding;
     }
 
     private static void RemapArgInstruction(Instruction instruction, Dictionary<int, int> argRemap) {

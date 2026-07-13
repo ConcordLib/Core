@@ -485,7 +485,8 @@ public static class WrapperComposer {
             originalCall,
             receiverLocal,
             argLocals,
-            site.OpCode);
+            site.OpCode,
+            shape);
 
         int siteIndex = spine.IndexOf(site);
         spine.RemoveAt(siteIndex);

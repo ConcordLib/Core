@@ -47,22 +47,21 @@ public sealed class RealIlInstanceInjectionMethod : RealIlInstanceTarget {
 public sealed class RealIlWrapFoo {
     public static int BarCalls;
 
-    public static int Bar(int x) {
+    public static int Bar(int x, int y, int z) {
         BarCalls++;
-        return x + 1;
+        return x + y + z + 1;
     }
 }
 
 public sealed class RealIlWrapTarget {
     public int Run(int a, int b, int c, int d) {
-        return RealIlWrapFoo.Bar(a) * 10;
+        return RealIlWrapFoo.Bar(d, c, b) * 10;
     }
 }
 
 public sealed class RealIlWrapInjectionMethod {
-    public int WrapManyArgs(int a, int b, int c, int d, Operation<int, int> op) {
-        int combined = (a * 1000) + (b * 100) + (c * 10) + d;
-        return op.Invoke(combined);
+    public int WrapManyArgs(int a, int b, int c, Operation<int, int, int, int> op) {
+        return op.Invoke(a * 1000, b * 100, c * 10);
     }
 }
 
@@ -183,7 +182,7 @@ public sealed class RealMethodIlTests {
             result.Wrapper.CreateDelegate<Func<RealIlWrapTarget, int, int, int, int, int>>();
         int value = run(instance, 1, 2, 3, 4);
 
-        Assert.Equal(12350, value);
+        Assert.Equal(43210, value);
         Assert.Equal(1, RealIlWrapFoo.BarCalls);
     }
 
