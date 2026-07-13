@@ -194,7 +194,7 @@ public static class WrapperComposer {
             }
 
             if (hasReturnSite) {
-                NormalizeReturnSites(spine, locals, afterSpine);
+                NormalizeReturnSites(spine, locals, afterSpine, body.ExceptionHandlers);
             }
         }
 
@@ -823,7 +823,7 @@ public static class WrapperComposer {
         }
     }
 
-    private static void NormalizeReturnSites(List<Instruction> spine, ProtocolLocals locals, Instruction afterSpine) {
+    private static void NormalizeReturnSites(List<Instruction> spine, ProtocolLocals locals, Instruction afterSpine, IList<ExceptionHandler> handlers) {
         Instruction? exitStore = FindExitStore(spine, locals, afterSpine);
         if (exitStore is null) {
             return;
@@ -846,7 +846,8 @@ public static class WrapperComposer {
 
         List<Instruction> branchSites = new List<Instruction>();
         foreach (Instruction instruction in spine) {
-            if ((instruction.OpCode == OpCodes.Br || instruction.OpCode == OpCodes.Br_S)
+            if ((instruction.OpCode == OpCodes.Br || instruction.OpCode == OpCodes.Br_S
+                || instruction.OpCode == OpCodes.Leave || instruction.OpCode == OpCodes.Leave_S)
                 && ReferenceEquals(instruction.Operand, sharedLoad)) {
                 branchSites.Add(instruction);
             }
@@ -858,10 +859,13 @@ public static class WrapperComposer {
 
         foreach (Instruction branch in branchSites) {
             int branchIndex = spine.IndexOf(branch);
+            OpCode exit = IsInsideProtectedRegion(branch, handlers) ? OpCodes.Leave : OpCodes.Br;
             spine[branchIndex] = CloneLoadLocal(sharedLoad);
             spine.Insert(branchIndex + 1, Instruction.Create(OpCodes.Stloc, locals.ReturnValue!));
-            spine.Insert(branchIndex + 2, Instruction.Create(OpCodes.Br, afterSpine));
+            spine.Insert(branchIndex + 2, Instruction.Create(exit, afterSpine));
         }
+
+        RetargetHandlerBoundaries(handlers, sharedLoad, afterSpine);
 
         int deadTailIndex = spine.IndexOf(sharedLoad);
         spine.RemoveAt(deadTailIndex + 2);
@@ -906,7 +910,25 @@ public static class WrapperComposer {
             || opCode == OpCodes.Throw
             || opCode == OpCodes.Rethrow
             || opCode == OpCodes.Leave
-            || opCode == OpCodes.Leave_S;
+            || opCode == OpCodes.Leave_S
+            || opCode == OpCodes.Endfinally
+            || opCode == OpCodes.Endfilter;
+    }
+
+    private static void RetargetHandlerBoundaries(IList<ExceptionHandler> handlers, Instruction from, Instruction to) {
+        foreach (ExceptionHandler handler in handlers) { // NOSONAR project forbids LINQ in loops (perf/determinism); for-loop is intentional
+            if (ReferenceEquals(handler.TryEnd, from)) {
+                handler.TryEnd = to;
+            }
+
+            if (ReferenceEquals(handler.HandlerEnd, from)) {
+                handler.HandlerEnd = to;
+            }
+
+            if (ReferenceEquals(handler.FilterStart, from)) {
+                handler.FilterStart = to;
+            }
+        }
     }
 
     private static bool IsInsideProtectedRegion(Instruction instruction, IList<ExceptionHandler> handlers) {

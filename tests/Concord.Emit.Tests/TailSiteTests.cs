@@ -45,6 +45,30 @@ public static class TailInjectionMethods {
     }
 }
 
+public static class MixedReturnLog {
+    public static int FinallyRuns;
+}
+
+public static class MixedReturnTarget {
+    public static int PickMixed(int which) {
+        if (which != 0) {
+            return 1;
+        }
+
+        try {
+            return 5;
+        } finally {
+            MixedReturnLog.FinallyRuns++;
+        }
+    }
+}
+
+public static class MixedReturnInjectionMethods {
+    public static void Double(ControlHandle<int> ch) {
+        ch.ReturnValue *= 2;
+    }
+}
+
 public sealed class TailSiteTests {
     [Theory]
     [InlineData(0, 10)]
@@ -105,5 +129,37 @@ public sealed class TailSiteTests {
         object? value = result.Wrapper.Invoke(null, [which]);
 
         Assert.Equal(expected, value);
+    }
+
+    [Theory]
+    [InlineData(0, 10)]
+    [InlineData(1, 1)]
+    public void Tail_MixedProtectedAndUnprotectedReturns_FiresOnlyOnLastReturn(int which, int expected) {
+        MixedReturnLog.FinallyRuns = 0;
+        MethodBase target = typeof(MixedReturnTarget).GetMethod(nameof(MixedReturnTarget.PickMixed))!;
+        MethodBase injectionMethod = typeof(MixedReturnInjectionMethods).GetMethod(nameof(MixedReturnInjectionMethods.Double))!;
+        Injection tail = new Injection(injectionMethod, new InjectAt.Tail(), "test", 0);
+
+        ComposeResult result = WrapperComposer.Compose(target, [tail]);
+        object? value = result.Wrapper.Invoke(null, [which]);
+
+        Assert.Equal(expected, value);
+        Assert.Equal(which == 0 ? 1 : 0, MixedReturnLog.FinallyRuns);
+    }
+
+    [Theory]
+    [InlineData(0, 10)]
+    [InlineData(1, 2)]
+    public void Return_MixedProtectedAndUnprotectedReturns_TransformsEverySite(int which, int expected) {
+        MixedReturnLog.FinallyRuns = 0;
+        MethodBase target = typeof(MixedReturnTarget).GetMethod(nameof(MixedReturnTarget.PickMixed))!;
+        MethodBase injectionMethod = typeof(MixedReturnInjectionMethods).GetMethod(nameof(MixedReturnInjectionMethods.Double))!;
+        Injection ret = new Injection(injectionMethod, new InjectAt.Return(0), "test", 0);
+
+        ComposeResult result = WrapperComposer.Compose(target, [ret]);
+        object? value = result.Wrapper.Invoke(null, [which]);
+
+        Assert.Equal(expected, value);
+        Assert.Equal(which == 0 ? 1 : 0, MixedReturnLog.FinallyRuns);
     }
 }
