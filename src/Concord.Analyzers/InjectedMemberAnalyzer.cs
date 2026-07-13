@@ -83,6 +83,33 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     /// </summary>
     public const string ControlReturnPositionDiagnosticId = "CONCORD015";
 
+    /// <summary>
+    ///     Diagnostic id for around-invoke Operation parameters whose shape does not match the resolved call site.
+    /// </summary>
+    public const string OperationShapeMismatchDiagnosticId = "CONCORD016";
+
+    /// <summary>
+    ///     Diagnostic id for At.Constant/At.Argument injection methods that are not shaped 'T M(T original)'.
+    /// </summary>
+    public const string InvalidValueInjectionShapeDiagnosticId = "CONCORD017";
+
+    /// <summary>
+    ///     Diagnostic id for [Inject] declarations that pair a constant constructor with a non-Constant position,
+    ///     or pair At.Constant/At.Argument with a non-dedicated constructor.
+    /// </summary>
+    public const string InvalidConstantPositionDiagnosticId = "CONCORD018";
+
+    /// <summary>
+    ///     Diagnostic id for At.Argument injections with arg: 0 that cannot infer a unique argument by type.
+    /// </summary>
+    public const string AmbiguousArgumentInjectionDiagnosticId = "CONCORD019";
+
+    /// <summary>
+    ///     Diagnostic id for target or call-site names that resolve to a property with both accessors and
+    ///     nothing to disambiguate which one is meant.
+    /// </summary>
+    public const string AmbiguousAccessorNameDiagnosticId = "CONCORD020";
+
     private static readonly DiagnosticDescriptor MissingMemberRule = new(
         MissingMemberDiagnosticId,
         "Injected member target was not found",
@@ -209,6 +236,51 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         true,
         "Returning Control decides whether the original method runs, which only makes sense before it does. Move the injection to At.Head or return void.");
 
+    private static readonly DiagnosticDescriptor OperationShapeMismatchRule = new(
+        OperationShapeMismatchDiagnosticId,
+        "Operation parameter shape does not match the call site",
+        "[Inject] method '{0}' declares '{1}', but call site '{2}' requires '{3}'",
+        "Concord.Patches",
+        DiagnosticSeverity.Error,
+        true,
+        "An around-invoke Operation parameter must match the shape of the matched call: leading parameter types, then the result type last, or VoidOperation/Operation for void calls.");
+
+    private static readonly DiagnosticDescriptor InvalidValueInjectionShapeRule = new(
+        InvalidValueInjectionShapeDiagnosticId,
+        "Value injection signature is invalid",
+        "[Inject] method '{0}' must be shaped '{1} M({1} original)'",
+        "Concord.Patches",
+        DiagnosticSeverity.Error,
+        true,
+        "At.Constant and At.Argument injection methods must take and return the matched value's type unchanged in shape.");
+
+    private static readonly DiagnosticDescriptor InvalidConstantPositionRule = new(
+        InvalidConstantPositionDiagnosticId,
+        "Constant or argument position is invalid",
+        "[Inject] method '{0}': {1}",
+        "Concord.Patches",
+        DiagnosticSeverity.Error,
+        true,
+        "Constant-targeting constructors require At.Constant, and At.Constant/At.Argument require their dedicated [Inject] constructor.");
+
+    private static readonly DiagnosticDescriptor AmbiguousArgumentInjectionRule = new(
+        AmbiguousArgumentInjectionDiagnosticId,
+        "Argument injection cannot infer a unique argument",
+        "[Inject] method '{0}' on call site '{1}' cannot infer a unique '{2}' argument; pass arg: to select one",
+        "Concord.Patches",
+        DiagnosticSeverity.Error,
+        true,
+        "At.Argument with arg: 0 infers the argument by matching the injection method's parameter type against the call site's parameter types. Pass arg: when more than one parameter shares that type.");
+
+    private static readonly DiagnosticDescriptor AmbiguousAccessorNameRule = new(
+        AmbiguousAccessorNameDiagnosticId,
+        "Accessor name is ambiguous",
+        "'{0}' is a property with both accessors and nothing selects one; write '{1}' or '{2}' explicitly",
+        "Concord.Patches",
+        DiagnosticSeverity.Error,
+        true,
+        "When a target or call-site name resolves to a property with both a getter and a setter, name it explicitly (get_X/set_X) unless an around-invoke Operation parameter disambiguates it.");
+
     private enum MetadataMemberKind {
         Field,
         Property,
@@ -231,7 +303,12 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             PreferTypeofPatchTargetRule,
             PreferNameofMemberTargetRule,
             PreferInheritedPatchTargetRule,
-            ControlReturnPositionRule);
+            ControlReturnPositionRule,
+            OperationShapeMismatchRule,
+            InvalidValueInjectionShapeRule,
+            InvalidConstantPositionRule,
+            AmbiguousArgumentInjectionRule,
+            AmbiguousAccessorNameRule);
 
     /// <inheritdoc />
     public override void Initialize(AnalysisContext context) {
@@ -395,6 +472,8 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
                 seen[injection.DuplicateKey] = injection;
             }
 
+            ValidateConstantPosition(context, injection);
+
             InjectionTarget? target = ResolveInjectionTarget(context, injection, targetType);
             if (target is null || !target.SignatureValidated) {
                 continue;
@@ -482,6 +561,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     private static bool TryGetInjectionInfo(IMethodSymbol method, AttributeData attribute, out InjectionInfo? injection) {
         injection = null;
 
+        bool hasConstant = ConstructorHasParameter(attribute, "constant");
         bool targetsConstructor = !ConstructorHasParameter(attribute, "method");
         bool targetsInvoke = ConstructorHasParameter(attribute, "invokeDeclaringType");
         string targetName = ".ctor";
@@ -499,6 +579,26 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             attribute,
             targetsInvoke ? "targetParameterTypes" : "parameterTypes");
 
+        TypedConstant? constantValue = null;
+        if (hasConstant && TryGetConstructorArgument(attribute, "constant", out TypedConstant constantArgument)) {
+            constantValue = constantArgument;
+        }
+
+        ITypeSymbol? invokeDeclaringType = null;
+        string? invokeMethodName = null;
+        ImmutableArray<ITypeSymbol>? invokeParameterTypes = null;
+        uint arg = 0;
+        if (targetsInvoke) {
+            if (TryGetConstructorArgument(attribute, "invokeDeclaringType", out TypedConstant invokeTypeArgument) &&
+                invokeTypeArgument.Value is ITypeSymbol invokeType) {
+                invokeDeclaringType = invokeType;
+            }
+
+            TryGetStringConstructorArgument(attribute, "invokeDeclaringMethod", out invokeMethodName);
+            invokeParameterTypes = TryGetTypeArrayConstructorArgument(attribute, "invokeParameterTypes");
+            TryGetUIntConstructorArgument(attribute, "arg", out arg);
+        }
+
         injection = new InjectionInfo(
             method,
             attribute,
@@ -508,7 +608,13 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             atValue,
             by,
             parameterTypes,
-            DuplicateKey(targetName, targetsConstructor, targetsInvoke, atValue, by, parameterTypes));
+            DuplicateKey(targetName, targetsConstructor, targetsInvoke, atValue, by, parameterTypes),
+            hasConstant,
+            constantValue,
+            invokeDeclaringType,
+            invokeMethodName,
+            invokeParameterTypes,
+            arg);
         return true;
     }
 
@@ -618,13 +724,55 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             : parameters.Length == 0;
     }
 
+    private static bool IsValueInjection(InjectionInfo injection) {
+        return injection.HasConstant || (injection.TargetsInvoke && injection.AtValue == 5);
+    }
+
+    private static void ValidateConstantPosition(SymbolAnalysisContext context, InjectionInfo injection) {
+        if (injection.HasConstant && injection.AtValue != 4) {
+            context.ReportDiagnostic(Diagnostic.Create(
+                InvalidConstantPositionRule,
+                LocationOf(injection.Attribute, injection.Method, context.CancellationToken),
+                injection.Method.Name,
+                "passes a constant but position is not At.Constant; constant injections require At.Constant"));
+            return;
+        }
+
+        if (!injection.HasConstant && !injection.TargetsInvoke && (injection.AtValue == 4 || injection.AtValue == 5)) {
+            string position = injection.AtValue == 4 ? "At.Constant" : "At.Argument";
+            context.ReportDiagnostic(Diagnostic.Create(
+                InvalidConstantPositionRule,
+                LocationOf(injection.Attribute, injection.Method, context.CancellationToken),
+                injection.Method.Name,
+                "uses position " + position + " without its dedicated constructor form"));
+        }
+    }
+
     private static void ValidateInjectionSignature(
         SymbolAnalysisContext context,
         InjectionInfo injection,
         InjectionTarget target,
         INamedTypeSymbol targetType) {
+        if (IsValueInjection(injection)) {
+            ValidateValueInjectionSignature(context, injection, target, targetType);
+            return;
+        }
+
         bool hasControlHandle = false;
         bool hasOperation = false;
+
+        foreach (IParameterSymbol parameter in injection.Method.Parameters) {
+            if (IsOperationType(parameter.Type)) {
+                hasOperation = true;
+                break;
+            }
+        }
+
+        if (injection.TargetsInvoke && !(injection.AtValue == 3 && hasOperation)) {
+            ValidateInvokeCallSiteName(context, injection);
+        }
+
+        hasOperation = false;
 
         foreach (IParameterSymbol parameter in injection.Method.Parameters) {
             if (IsControlHandleType(parameter.Type, out ITypeSymbol? controlHandleReturnType)) {
@@ -652,6 +800,8 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
                         target,
                         targetType,
                         "Operation parameters are only supported on call-site [Inject] declarations with At.Around");
+                } else {
+                    ValidateOperationShape(context, injection, target, targetType, parameter);
                 }
 
                 continue;
@@ -680,6 +830,17 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             }
         } else if (!injection.TargetsInvoke) {
             ValidateInjectionReturnType(context, injection, target, targetType);
+        }
+    }
+
+    private static void ValidateInvokeCallSiteName(SymbolAnalysisContext context, InjectionInfo injection) {
+        if (injection.InvokeDeclaringType is not INamedTypeSymbol invokeDeclaringType || injection.InvokeMethodName is null) {
+            return;
+        }
+
+        ResolveAccessorName(invokeDeclaringType, injection.InvokeMethodName, injection.Method, false, out bool ambiguousAccessor);
+        if (ambiguousAccessor) {
+            ReportAmbiguousAccessorName(context, injection, invokeDeclaringType);
         }
     }
 
@@ -720,6 +881,136 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
                 targetType,
                 "ControlHandle<T> type argument must match the target return type");
         }
+    }
+
+    private static void ValidateOperationShape(
+        SymbolAnalysisContext context,
+        InjectionInfo injection,
+        InjectionTarget target,
+        INamedTypeSymbol targetType,
+        IParameterSymbol operationParameter) {
+        if (injection.InvokeDeclaringType is not INamedTypeSymbol invokeDeclaringType || injection.InvokeMethodName is null) {
+            return;
+        }
+
+        string? effectiveName = ResolveAccessorName(invokeDeclaringType, injection.InvokeMethodName, injection.Method, true, out bool ambiguousAccessor);
+        if (ambiguousAccessor) {
+            ReportAmbiguousAccessorName(context, injection, invokeDeclaringType);
+            return;
+        }
+
+        if (effectiveName is null) {
+            return;
+        }
+
+        ImmutableArray<IMethodSymbol> candidates = FindMethodCandidates(invokeDeclaringType, effectiveName)
+            .Where(method => ParameterTypesMatch(injection.InvokeParameterTypes, method.Parameters))
+            .ToImmutableArray();
+
+        if (candidates.Length != 1) {
+            return;
+        }
+
+        IMethodSymbol callSite = candidates[0];
+        ImmutableArray<ITypeSymbol> parameterTypes = callSite.Parameters.Select(parameter => parameter.Type).ToImmutableArray();
+        ITypeSymbol returnType = callSite.ReturnType;
+
+        if (!OperationTypeMatchesExpected(operationParameter.Type, parameterTypes, returnType)) {
+            string expected = ExpectedOperationTypeName(parameterTypes, returnType);
+            context.ReportDiagnostic(Diagnostic.Create(
+                OperationShapeMismatchRule,
+                LocationOf(operationParameter),
+                injection.Method.Name,
+                operationParameter.Type.ToDisplayString(),
+                callSite.Name,
+                expected));
+        }
+    }
+
+    private static void ReportAmbiguousAccessorName(SymbolAnalysisContext context, InjectionInfo injection, INamedTypeSymbol declaringType) {
+        string name = injection.InvokeMethodName!;
+        context.ReportDiagnostic(Diagnostic.Create(
+            AmbiguousAccessorNameRule,
+            ArgumentLocation(injection.Attribute, "invokeDeclaringMethod", context.CancellationToken) ??
+            LocationOf(injection.Attribute, injection.Method, context.CancellationToken),
+            declaringType.ToDisplayString() + "." + name,
+            "get_" + name,
+            "set_" + name));
+    }
+
+    private static void ValidateValueInjectionSignature(
+        SymbolAnalysisContext context,
+        InjectionInfo injection,
+        InjectionTarget target,
+        INamedTypeSymbol targetType) {
+        if (injection.TargetsInvoke && injection.AtValue == 5) {
+            ValidateInvokeCallSiteName(context, injection);
+        }
+
+        ITypeSymbol? valueType = injection.HasConstant
+            ? injection.ConstantValue?.Type
+            : ResolveArgumentValueType(injection);
+
+        if (valueType is not null) {
+            if (injection.Method.Parameters.Length != 1 ||
+                !SymbolEqualityComparer.Default.Equals(injection.Method.Parameters[0].Type, valueType) ||
+                !SymbolEqualityComparer.Default.Equals(injection.Method.ReturnType, valueType)) {
+                context.ReportDiagnostic(Diagnostic.Create(
+                    InvalidValueInjectionShapeRule,
+                    LocationOf(injection.Attribute, injection.Method, context.CancellationToken),
+                    injection.Method.Name,
+                    valueType.ToDisplayString()));
+            }
+        } else if (injection.Method.Parameters.Length != 1 ||
+                   !SymbolEqualityComparer.Default.Equals(injection.Method.Parameters[0].Type, injection.Method.ReturnType)) {
+            context.ReportDiagnostic(Diagnostic.Create(
+                InvalidValueInjectionShapeRule,
+                LocationOf(injection.Attribute, injection.Method, context.CancellationToken),
+                injection.Method.Name,
+                injection.Method.Parameters.Length == 1 ? injection.Method.Parameters[0].Type.ToDisplayString() : "T"));
+        }
+
+        if (injection.TargetsInvoke && injection.AtValue == 5 && injection.Arg == 0 && injection.Method.Parameters.Length == 1) {
+            ValidateArgumentInference(context, injection);
+        }
+    }
+
+    private static void ValidateArgumentInference(SymbolAnalysisContext context, InjectionInfo injection) {
+        IMethodSymbol? callSite = ResolveUniqueCallSite(injection, out bool ambiguousAccessor);
+        if (callSite is null || ambiguousAccessor) {
+            return;
+        }
+
+        ITypeSymbol valueType = injection.Method.Parameters[0].Type;
+        int matches = 0;
+        foreach (IParameterSymbol parameter in callSite.Parameters) {
+            if (SymbolEqualityComparer.Default.Equals(parameter.Type, valueType)) {
+                matches++;
+            }
+        }
+
+        if (matches != 1) {
+            context.ReportDiagnostic(Diagnostic.Create(
+                AmbiguousArgumentInjectionRule,
+                LocationOf(injection.Attribute, injection.Method, context.CancellationToken),
+                injection.Method.Name,
+                callSite.Name,
+                valueType.ToDisplayString()));
+        }
+    }
+
+    private static ITypeSymbol? ResolveArgumentValueType(InjectionInfo injection) {
+        if (injection.Arg == 0) {
+            return null;
+        }
+
+        IMethodSymbol? callSite = ResolveUniqueCallSite(injection, out bool ambiguousAccessor);
+        if (callSite is null || ambiguousAccessor) {
+            return null;
+        }
+
+        ImmutableArray<IParameterSymbol> parameters = callSite.Parameters;
+        return injection.Arg <= parameters.Length ? parameters[(int)(injection.Arg - 1)].Type : null;
     }
 
     private static void ValidateInjectionReturnType(
@@ -1395,11 +1686,159 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             return false;
         }
 
-        return named.Name == "Operation" && (!named.IsGenericType || named.TypeArguments.Length == 1);
+        if (named.Name == "Operation") {
+            return !named.IsGenericType || named.TypeArguments.Length is >= 1 and <= 4;
+        }
+
+        if (named.Name == "VoidOperation") {
+            return named.IsGenericType && named.TypeArguments.Length is 1 or 2;
+        }
+
+        return false;
     }
 
     private static bool IsVoid(ITypeSymbol type) {
         return type.SpecialType == SpecialType.System_Void;
+    }
+
+    private static bool IsVoidOperationFamily(ITypeSymbol type) {
+        return type is INamedTypeSymbol named &&
+               named.ContainingNamespace.ToDisplayString() == "Concord" &&
+               named.Name == "VoidOperation" &&
+               named.IsGenericType;
+    }
+
+    private static IParameterSymbol? FindOperationParameter(IMethodSymbol method) {
+        foreach (IParameterSymbol parameter in method.Parameters) {
+            if (IsOperationType(parameter.Type)) {
+                return parameter;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? ResolveAccessorName(
+        INamedTypeSymbol declaringType,
+        string name,
+        IMethodSymbol? injectionMethod,
+        bool allowOperationDisambiguation,
+        out bool ambiguous) {
+        ambiguous = false;
+
+        if (declaringType.GetMembers(name).OfType<IMethodSymbol>().Any(candidate => candidate.MethodKind == MethodKind.Ordinary)) {
+            return name;
+        }
+
+        IPropertySymbol? property = declaringType.GetMembers(name).OfType<IPropertySymbol>().FirstOrDefault();
+        if (property is null) {
+            return name;
+        }
+
+        bool hasGetter = property.GetMethod is not null;
+        bool hasSetter = property.SetMethod is not null;
+
+        if (hasGetter && !hasSetter) {
+            return "get_" + name;
+        }
+
+        if (hasSetter && !hasGetter) {
+            return "set_" + name;
+        }
+
+        if (allowOperationDisambiguation && injectionMethod is not null) {
+            IParameterSymbol? operationParameter = FindOperationParameter(injectionMethod);
+            if (operationParameter is not null) {
+                return IsVoidOperationFamily(operationParameter.Type) ? "set_" + name : "get_" + name;
+            }
+        }
+
+        ambiguous = true;
+        return null;
+    }
+
+    private static IMethodSymbol? ResolveUniqueCallSite(InjectionInfo injection, out bool ambiguousAccessor) {
+        ambiguousAccessor = false;
+
+        if (injection.InvokeDeclaringType is not INamedTypeSymbol invokeDeclaringType || injection.InvokeMethodName is null) {
+            return null;
+        }
+
+        bool allowOperationDisambiguation = injection.AtValue == 3;
+        string? effectiveName = ResolveAccessorName(
+            invokeDeclaringType,
+            injection.InvokeMethodName,
+            injection.Method,
+            allowOperationDisambiguation,
+            out ambiguousAccessor);
+
+        if (effectiveName is null) {
+            return null;
+        }
+
+        ImmutableArray<IMethodSymbol> candidates = FindMethodCandidates(invokeDeclaringType, effectiveName)
+            .Where(method => ParameterTypesMatch(injection.InvokeParameterTypes, method.Parameters))
+            .ToImmutableArray();
+
+        return candidates.Length == 1 ? candidates[0] : null;
+    }
+
+    private static string ExpectedOperationTypeName(ImmutableArray<ITypeSymbol> parameterTypes, ITypeSymbol returnType) {
+        bool isVoid = IsVoid(returnType);
+        string[] displayNames = parameterTypes.Select(type => type.ToDisplayString()).ToArray();
+
+        if (isVoid) {
+            return displayNames.Length switch {
+                0 => "Operation",
+                1 => "VoidOperation<" + displayNames[0] + ">",
+                2 => "VoidOperation<" + string.Join(", ", displayNames) + ">",
+                _ => "VoidOperation<...>",
+            };
+        }
+
+        string[] withResult = displayNames.Concat(new[] { returnType.ToDisplayString() }).ToArray();
+        return displayNames.Length switch {
+            0 or 1 or 2 or 3 => "Operation<" + string.Join(", ", withResult) + ">",
+            _ => "Operation<...>",
+        };
+    }
+
+    private static bool OperationTypeMatchesExpected(ITypeSymbol declared, ImmutableArray<ITypeSymbol> parameterTypes, ITypeSymbol returnType) {
+        if (declared is not INamedTypeSymbol named) {
+            return false;
+        }
+
+        bool isVoid = IsVoid(returnType);
+
+        if (isVoid) {
+            if (parameterTypes.Length == 0) {
+                return named.Name == "Operation" && !named.IsGenericType;
+            }
+
+            if (named.Name != "VoidOperation" || named.TypeArguments.Length != parameterTypes.Length) {
+                return false;
+            }
+
+            for (int i = 0; i < parameterTypes.Length; i++) {
+                if (!SymbolEqualityComparer.Default.Equals(named.TypeArguments[i], parameterTypes[i])) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        if (named.Name != "Operation" || named.TypeArguments.Length != parameterTypes.Length + 1) {
+            return false;
+        }
+
+        for (int i = 0; i < parameterTypes.Length; i++) {
+            if (!SymbolEqualityComparer.Default.Equals(named.TypeArguments[i], parameterTypes[i])) {
+                return false;
+            }
+        }
+
+        return SymbolEqualityComparer.Default.Equals(named.TypeArguments[parameterTypes.Length], returnType);
     }
 
     private static bool CanAssignTargetToProperty(INamedTypeSymbol targetType, ITypeSymbol propertyType) {
@@ -1518,7 +1957,13 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             int atValue,
             uint by,
             ImmutableArray<ITypeSymbol>? parameterTypes,
-            string duplicateKey) {
+            string duplicateKey,
+            bool hasConstant,
+            TypedConstant? constantValue,
+            ITypeSymbol? invokeDeclaringType,
+            string? invokeMethodName,
+            ImmutableArray<ITypeSymbol>? invokeParameterTypes,
+            uint arg) {
             Method = method;
             Attribute = attribute;
             TargetName = targetName;
@@ -1528,6 +1973,12 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             By = by;
             ParameterTypes = parameterTypes;
             DuplicateKey = duplicateKey;
+            HasConstant = hasConstant;
+            ConstantValue = constantValue;
+            InvokeDeclaringType = invokeDeclaringType;
+            InvokeMethodName = invokeMethodName;
+            InvokeParameterTypes = invokeParameterTypes;
+            Arg = arg;
         }
 
         public IMethodSymbol Method { get; }
@@ -1547,6 +1998,18 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         public ImmutableArray<ITypeSymbol>? ParameterTypes { get; }
 
         public string DuplicateKey { get; }
+
+        public bool HasConstant { get; }
+
+        public TypedConstant? ConstantValue { get; }
+
+        public ITypeSymbol? InvokeDeclaringType { get; }
+
+        public string? InvokeMethodName { get; }
+
+        public ImmutableArray<ITypeSymbol>? InvokeParameterTypes { get; }
+
+        public uint Arg { get; }
     }
 
     private sealed class InjectionTarget {

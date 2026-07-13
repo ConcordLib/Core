@@ -889,7 +889,7 @@ public sealed class InjectedMemberAnalyzerTests {
         Assert.Empty(diagnostics);
     }
 
-    private const string AttributeSource = """
+    internal const string AttributeSource = """
     using System;
 
     namespace Concord {
@@ -897,7 +897,9 @@ public sealed class InjectedMemberAnalyzerTests {
             Head,
             Return,
             Tail,
-            Around
+            Around,
+            Constant,
+            Argument
         }
 
         [AttributeUsage(AttributeTargets.Class)]
@@ -920,7 +922,13 @@ public sealed class InjectedMemberAnalyzerTests {
             public InjectAttribute(At at, Type[] parameterTypes = null) {
             }
 
-            public InjectAttribute(string method, Type invokeDeclaringType, string invokeDeclaringMethod, At shift, uint by = 0, Type[] targetParameterTypes = null, Type[] invokeParameterTypes = null) {
+            public InjectAttribute(string method, object constant, At at, uint by = 0, Type[] parameterTypes = null) {
+            }
+
+            public InjectAttribute(object constant, At at, uint by = 0, Type[] parameterTypes = null) {
+            }
+
+            public InjectAttribute(string method, Type invokeDeclaringType, string invokeDeclaringMethod, At shift, uint by = 0, Type[] targetParameterTypes = null, Type[] invokeParameterTypes = null, uint arg = 0) {
             }
         }
 
@@ -967,14 +975,39 @@ public sealed class InjectedMemberAnalyzerTests {
         }
 
         public sealed class Operation {
+            public void Invoke() {
+            }
         }
 
         public sealed class Operation<T> {
+            public T Invoke() => default;
+        }
+
+        public sealed class Operation<T1, T2> {
+            public T2 Invoke(T1 arg1) => default;
+        }
+
+        public sealed class Operation<T1, T2, T3> {
+            public T3 Invoke(T1 arg1, T2 arg2) => default;
+        }
+
+        public sealed class Operation<T1, T2, T3, T4> {
+            public T4 Invoke(T1 arg1, T2 arg2, T3 arg3) => default;
+        }
+
+        public sealed class VoidOperation<T1> {
+            public void Invoke(T1 arg1) {
+            }
+        }
+
+        public sealed class VoidOperation<T1, T2> {
+            public void Invoke(T1 arg1, T2 arg2) {
+            }
         }
     }
     """;
 
-    private static async Task<ImmutableArray<Diagnostic>> GetAnalyzerDiagnosticsAsync(
+    internal static async Task<ImmutableArray<Diagnostic>> GetAnalyzerDiagnosticsAsync(
         string source,
         params MetadataReference[] references) {
         CSharpCompilation compilation = CSharpCompilation.Create(
@@ -991,7 +1024,7 @@ public sealed class InjectedMemberAnalyzerTests {
         return await compilationWithAnalyzers.GetAnalyzerDiagnosticsAsync();
     }
 
-    private static MetadataReference CreateReference(string assemblyName, string source) {
+    internal static MetadataReference CreateReference(string assemblyName, string source) {
         CSharpCompilation compilation = CSharpCompilation.Create(
             assemblyName,
             new[] {

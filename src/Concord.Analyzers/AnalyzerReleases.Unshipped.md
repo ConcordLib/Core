@@ -19,3 +19,8 @@ CONCORD012 | Concord.Patches | Warning | String patch targets should use typeof 
 CONCORD013 | Concord.Patches | Warning | String member targets should use nameof when the target member is available at compile time.
 CONCORD014 | Concord.Patches | Warning | Explicit patch targets should be inferred through inheritance when the target type can be inherited.
 CONCORD015 | Concord.Patches | Error | Control return types are only valid on head injection methods.
+CONCORD016 | Concord.Patches | Error | Around-invoke Operation parameters must match the shape the resolved call site requires.
+CONCORD017 | Concord.Patches | Error | At.Constant and At.Argument injection methods must be shaped 'T M(T original)' for the matched value type.
+CONCORD018 | Concord.Patches | Error | Constant [Inject] constructors require At.Constant, and At.Constant/At.Argument require their dedicated constructor.
+CONCORD019 | Concord.Patches | Error | At.Argument with arg: 0 must infer a unique argument by type on the resolved call site.
+CONCORD020 | Concord.Patches | Error | Target and call-site names resolving to a two-accessor property must be disambiguated.
