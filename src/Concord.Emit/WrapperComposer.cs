@@ -412,6 +412,30 @@ public static class WrapperComposer {
         RetargetAroundSpineBranches(aroundBody, spine, afterSpine, epilogueStart, locals);
     }
 
+    private static void ValidateOperationShape(MethodBase injectionMethod, CallSiteShape shape, MethodBase target) {
+        if (shape.HasThis && shape.ReceiverType is { IsValueType: true }) {
+            throw new ConcordEmitException(
+                "CONC039",
+                $"Around-invoke on '{target.DeclaringType?.Name}.{target.Name}' matches a call on value type '{shape.ReceiverType.Name}'. Value-type receivers are not supported.");
+        }
+
+        int operationArgIndex = ControlHandleLowering.FindOperationArgIndex(injectionMethod);
+        if (operationArgIndex < 0) {
+            throw new ConcordEmitException(
+                "CONC039",
+                $"Around-invoke injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' declares no Operation parameter.");
+        }
+
+        Type expected = shape.ExpectedOperationType();
+        int offset = injectionMethod.IsStatic ? 0 : 1;
+        Type declared = injectionMethod.GetParameters()[operationArgIndex - offset].ParameterType;
+        if (declared != expected) {
+            throw new ConcordEmitException(
+                "CONC039",
+                $"Around-invoke injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' declares '{declared.Name}' but the matched call requires '{expected.Name}'.");
+        }
+    }
+
     private static void WrapCallSite(
         List<Instruction> spine,
         Instruction site,
@@ -420,14 +444,17 @@ public static class WrapperComposer {
         MethodBase target,
         MethodBase injectionMethod,
         InjectedMemberMap injectedMembers) {
+        MethodReference originalCall = (MethodReference)site.Operand;
+        MethodBase resolvedOriginal = originalCall.ResolveReflection();
+        CallSiteShape shape = CallSiteShape.Resolve(resolvedOriginal);
+        ValidateOperationShape(injectionMethod, shape, target);
+
         int siteIndex = spine.IndexOf(site);
         if (siteIndex <= 0) {
             throw new ConcordEmitException(
                 "CONC032",
                 $"Wrapping call site '{site.Operand}' has no preceding argument-setup instruction to drop.");
         }
-
-        MethodReference originalCall = (MethodReference)site.Operand;
 
         Instruction wrapEnd = Instruction.Create(OpCodes.Nop);
         List<Instruction> wrapBody = BodyCopier.CopyWrapInjection(
