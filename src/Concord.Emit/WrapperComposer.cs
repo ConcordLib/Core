@@ -187,7 +187,7 @@ public static class WrapperComposer {
         if (!isVoid && !hasAround) {
             bool hasReturnSite = false;
             for (int i = 0; i < ordered.Count; i++) {
-                if (ordered[i].At is InjectAt.Return) {
+                if (ordered[i].At is InjectAt.Return or InjectAt.Tail) {
                     hasReturnSite = true;
                     break;
                 }
@@ -204,7 +204,9 @@ public static class WrapperComposer {
         bool hasHead = false;
         List<List<Instruction>> headBodies = new List<List<Instruction>>();
         List<List<Instruction>> returnBodies = new List<List<Instruction>>();
+        List<List<Instruction>> tailBodies = new List<List<Instruction>>();
         List<Instruction>? aroundBody = null;
+        Instruction? lastExit = null;
 
         for (int i = ordered.Count - 1; i >= 0; i--) {
             Injection injection = ordered[i];
@@ -215,7 +217,7 @@ public static class WrapperComposer {
             }
 
             if (injection.At is InjectAt.Tail) {
-                ProcessTailInjection(injection, wrapperDefinition, target, locals, epilogueStart, returnBodies);
+                lastExit = ProcessTailInjection(injection, wrapperDefinition, target, locals, afterSpine, spine, tailBodies);
                 continue;
             }
 
@@ -237,6 +239,12 @@ public static class WrapperComposer {
             if (injection.At is InjectAt.Around) {
                 ProcessAroundInjection(injection, wrapperDefinition, target, locals, epilogueStart, afterSpine, spine, ref aroundBody);
             }
+        }
+
+        if (lastExit is not null) {
+            List<Instruction> tails = ChainBodies(tailBodies, lastExit);
+            int exitIndex = spine.IndexOf(lastExit);
+            spine.InsertRange(exitIndex, tails);
         }
 
         List<Instruction> heads = ChainBodies(headBodies, guardStart);
@@ -317,24 +325,34 @@ public static class WrapperComposer {
                 guardStart));
     }
 
-    private static void ProcessTailInjection(
+    private static Instruction ProcessTailInjection(
         Injection injection,
         MethodDefinition wrapperDefinition,
         MethodBase target,
         ProtocolLocals locals,
-        Instruction epilogueStart,
-        List<List<Instruction>> returns) {
+        Instruction afterSpine,
+        List<Instruction> spine,
+        List<List<Instruction>> tailBodies) {
+        List<Instruction> allExits = FindReturnExits(spine, afterSpine);
+        if (allExits.Count == 0) {
+            throw new ConcordEmitException(
+                "CONC106",
+                $"Tail injection on '{target.DeclaringType?.Name}.{target.Name}' found no return in the target body.");
+        }
+
+        Instruction lastExit = allExits[allExits.Count - 1];
         InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
         using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
-        returns.Add(
-            BodyCopier.CopyInjection(
-                injectionMethodDefinition.Definition,
-                wrapperDefinition,
-                target,
-                injection.InjectionMethod,
-                injectedMembers,
-                locals,
-                epilogueStart));
+        List<Instruction> siteBody = BodyCopier.CopyInjection(
+            injectionMethodDefinition.Definition,
+            wrapperDefinition,
+            target,
+            injection.InjectionMethod,
+            injectedMembers,
+            locals,
+            lastExit);
+        tailBodies.Add(siteBody);
+        return lastExit;
     }
 
     private static void ProcessReturnInjection(
