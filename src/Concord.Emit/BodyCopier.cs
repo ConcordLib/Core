@@ -74,7 +74,7 @@ internal static class BodyCopier {
         int controlHandleArgIndex = ControlHandleLowering.FindControlHandleArgIndex(injectionMethod);
 
         Dictionary<VariableDefinition, VariableDefinition> variableMap = CopyInjectionLocals(injectionBody, destination.Body, module);
-        LoweringContext ctx = new LoweringContext(module, variableMap, injectionBody.Variables, injectedMembers, argRemap);
+        LoweringContext ctx = new LoweringContext(module, variableMap, injectionBody.Variables, injectedMembers, argRemap, destination.Body.Variables);
 
         List<(Instruction Source, List<Instruction> Emitted)> entries =
             new List<(Instruction Source, List<Instruction> Emitted)>(injectionBody.Instructions.Count);
@@ -117,6 +117,9 @@ internal static class BodyCopier {
     /// <param name="injectedMembers">The resolved injected-member map for the injection's declaring type.</param>
     /// <param name="wrapEnd">The instruction to branch to when the wrap injection method returns.</param>
     /// <param name="originalCall">The original call-site method reference.</param>
+    /// <param name="receiverLocal">The spilled receiver local, or <see langword="null" /> for a static call site.</param>
+    /// <param name="argLocals">The spilled argument locals, in call-site parameter order.</param>
+    /// <param name="originalOpCode">The original call site's opcode (<c>call</c> or <c>callvirt</c>).</param>
     /// <returns>The copied and lowered instruction sequence.</returns>
     public static List<Instruction> CopyWrapInjection(
         MethodDefinition injectionDefinition,
@@ -125,7 +128,10 @@ internal static class BodyCopier {
         MethodBase injectionMethod,
         InjectedMemberMap injectedMembers,
         Instruction wrapEnd,
-        MethodReference originalCall) {
+        MethodReference originalCall,
+        VariableDefinition? receiverLocal,
+        IReadOnlyList<VariableDefinition> argLocals,
+        OpCode originalOpCode) {
         MethodBody injectionBody = injectionDefinition.Body;
         ModuleDefinition module = destination.Module;
 
@@ -137,8 +143,14 @@ internal static class BodyCopier {
             ? module.ImportReference(originalConstructor)
             : module.ImportReference((MethodInfo)resolvedOriginal);
 
+        ParameterInfo[] originalParameters = resolvedOriginal.GetParameters();
+        Type[] invokeParameterTypes = new Type[originalParameters.Length];
+        for (int i = 0; i < originalParameters.Length; i++) {
+            invokeParameterTypes[i] = originalParameters[i].ParameterType;
+        }
+
         Dictionary<VariableDefinition, VariableDefinition> variableMap = CopyInjectionLocals(injectionBody, destination.Body, module);
-        LoweringContext ctx = new LoweringContext(module, variableMap, injectionBody.Variables, injectedMembers, argRemap);
+        LoweringContext ctx = new LoweringContext(module, variableMap, injectionBody.Variables, injectedMembers, argRemap, destination.Body.Variables);
 
         List<(Instruction Source, List<Instruction> Emitted)> entries =
             new List<(Instruction Source, List<Instruction> Emitted)>(injectionBody.Instructions.Count);
@@ -149,7 +161,10 @@ internal static class BodyCopier {
                 ctx,
                 operationArgIndex,
                 wrapEnd,
-                importedOriginal);
+                importedOriginal,
+                receiverLocal,
+                invokeParameterTypes,
+                originalOpCode);
             entries.Add((source_instruction, emitted));
         }
 
@@ -183,13 +198,16 @@ internal static class BodyCopier {
         LoweringContext ctx,
         int operationArgIndex,
         Instruction wrapEnd,
-        MethodReference importedOriginal) {
+        MethodReference importedOriginal,
+        VariableDefinition? receiverLocal,
+        IReadOnlyList<Type> invokeParameterTypes,
+        OpCode originalOpCode) {
         if (ControlHandleLowering.IsOperationReceiverLoad(source, operationArgIndex)) {
             return new List<Instruction>(0);
         }
 
         if (ControlHandleLowering.IsOperationInvoke(source)) {
-            return new List<Instruction> { Instruction.Create(OpCodes.Call, importedOriginal) };
+            return LowerOperationInvoke(ctx, importedOriginal, receiverLocal, invokeParameterTypes, originalOpCode);
         }
 
         if (source.OpCode == OpCodes.Ret) {
@@ -207,6 +225,41 @@ internal static class BodyCopier {
         Instruction copy = CloneInstruction(source, ctx.Module, ctx.VariableMap, ctx.InjectedMembers);
         RemapArgInstruction(copy, ctx.ArgRemap);
         return new List<Instruction> { copy };
+    }
+
+    /// <summary>
+    ///     Lowers an <c>Operation.Invoke</c> call: pops the invoke's evaluated arguments into fresh temps,
+    ///     re-pushes the spilled receiver and the temps in call order, then emits the original call.
+    /// </summary>
+    private static List<Instruction> LowerOperationInvoke(
+        LoweringContext ctx,
+        MethodReference importedOriginal,
+        VariableDefinition? receiverLocal,
+        IReadOnlyList<Type> invokeParameterTypes,
+        OpCode originalOpCode) {
+        List<Instruction> emitted = new List<Instruction>();
+
+        List<VariableDefinition> temps = new List<VariableDefinition>(invokeParameterTypes.Count);
+        for (int i = 0; i < invokeParameterTypes.Count; i++) {
+            VariableDefinition temp = new VariableDefinition(ctx.Module.ImportReference(invokeParameterTypes[i]));
+            ctx.DestinationVariables.Add(temp);
+            temps.Add(temp);
+        }
+
+        for (int i = temps.Count - 1; i >= 0; i--) {
+            emitted.Add(Instruction.Create(OpCodes.Stloc, temps[i]));
+        }
+
+        if (receiverLocal is not null) {
+            emitted.Add(Instruction.Create(OpCodes.Ldloc, receiverLocal));
+        }
+
+        for (int i = 0; i < temps.Count; i++) {
+            emitted.Add(Instruction.Create(OpCodes.Ldloc, temps[i]));
+        }
+
+        emitted.Add(Instruction.Create(originalOpCode, importedOriginal));
+        return emitted;
     }
 
     private static List<Instruction> LowerInstruction(

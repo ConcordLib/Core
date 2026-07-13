@@ -449,11 +449,29 @@ public static class WrapperComposer {
         CallSiteShape shape = CallSiteShape.Resolve(resolvedOriginal);
         ValidateOperationShape(injectionMethod, shape, target);
 
-        int siteIndex = spine.IndexOf(site);
-        if (siteIndex <= 0) {
-            throw new ConcordEmitException(
-                "CONC032",
-                $"Wrapping call site '{site.Operand}' has no preceding argument-setup instruction to drop.");
+        ModuleDefinition module = wrapperDefinition.Module;
+        MethodBody body = wrapperDefinition.Body;
+
+        List<VariableDefinition> argLocals = new List<VariableDefinition>(shape.ParameterTypes.Length);
+        for (int i = 0; i < shape.ParameterTypes.Length; i++) {
+            VariableDefinition local = new VariableDefinition(module.ImportReference(shape.ParameterTypes[i]));
+            body.Variables.Add(local);
+            argLocals.Add(local);
+        }
+
+        VariableDefinition? receiverLocal = null;
+        if (shape.HasThis) {
+            receiverLocal = new VariableDefinition(module.ImportReference(shape.ReceiverType!));
+            body.Variables.Add(receiverLocal);
+        }
+
+        List<Instruction> spill = new List<Instruction>(argLocals.Count + 1);
+        for (int i = argLocals.Count - 1; i >= 0; i--) {
+            spill.Add(Instruction.Create(OpCodes.Stloc, argLocals[i]));
+        }
+
+        if (receiverLocal is not null) {
+            spill.Add(Instruction.Create(OpCodes.Stloc, receiverLocal));
         }
 
         Instruction wrapEnd = Instruction.Create(OpCodes.Nop);
@@ -464,17 +482,19 @@ public static class WrapperComposer {
             injectionMethod,
             injectedMembers,
             wrapEnd,
-            originalCall);
+            originalCall,
+            receiverLocal,
+            argLocals,
+            site.OpCode);
 
-        int argSetupIndex = siteIndex - 1;
+        int siteIndex = spine.IndexOf(site);
         spine.RemoveAt(siteIndex);
-        spine.RemoveAt(argSetupIndex);
 
-        List<Instruction> replacement = new List<Instruction>(wrapBody.Count + 1);
+        List<Instruction> replacement = new List<Instruction>(spill.Count + wrapBody.Count + 1);
+        replacement.AddRange(spill);
         replacement.AddRange(wrapBody);
         replacement.Add(wrapEnd);
-
-        spine.InsertRange(argSetupIndex, replacement);
+        spine.InsertRange(siteIndex, replacement);
     }
 
     private static List<Instruction> SelectInvokeSites(List<Instruction> allSites, uint by, MethodBase target, InjectAt.Invoke invoke) {
