@@ -108,6 +108,61 @@ internal static class BodyCopier {
     }
 
     /// <summary>
+    ///     Copies a <c>T M(T original)</c> value-injection body: the leading parameter's loads read from
+    ///     <paramref name="valueLocal" />, and every <c>ret</c> lowers to storing the returned value into a fresh
+    ///     result local and branching to a trailing splice-end block that reloads it, leaving exactly the
+    ///     replacement value on the evaluation stack.
+    /// </summary>
+    public static List<Instruction> CopyValueInjection(
+        MethodDefinition injectionDefinition,
+        MethodDefinition destination,
+        MethodBase target,
+        MethodBase injectionMethod,
+        InjectedMemberMap injectedMembers,
+        VariableDefinition valueLocal) {
+        MethodBody injectionBody = injectionDefinition.Body;
+        ModuleDefinition module = destination.Module;
+
+        Dictionary<int, int> argRemap = BuildArgRemap(target, injectionMethod);
+        int valueArgIndex = injectionMethod.IsStatic ? 0 : 1;
+        argRemap.Remove(valueArgIndex);
+
+        VariableDefinition resultLocal = new VariableDefinition(valueLocal.VariableType);
+        destination.Body.Variables.Add(resultLocal);
+        destination.Body.InitLocals = true;
+
+        Instruction spliceEnd = Instruction.Create(OpCodes.Nop);
+
+        Dictionary<VariableDefinition, VariableDefinition> variableMap = CopyInjectionLocals(injectionBody, destination.Body, module);
+        LoweringContext ctx = new LoweringContext(module, variableMap, injectionBody.Variables, injectedMembers, argRemap, destination.Body.Variables);
+
+        List<(Instruction Source, List<Instruction> Emitted)> entries =
+            new List<(Instruction Source, List<Instruction> Emitted)>(injectionBody.Instructions.Count);
+
+        foreach (Instruction source_instruction in injectionBody.Instructions) {
+            List<Instruction> emitted = LowerValueInstruction(source_instruction, ctx, valueArgIndex, valueLocal, resultLocal, spliceEnd);
+            entries.Add((source_instruction, emitted));
+        }
+
+        Dictionary<Instruction, Instruction> instructionMap = BuildInstructionMap(entries);
+
+        List<Instruction> result = new List<Instruction>(injectionBody.Instructions.Count + 2);
+        foreach ((Instruction _, List<Instruction> emitted) in entries) {
+            foreach (Instruction copy in emitted) {
+                RemapBranchTargets(copy, instructionMap);
+                result.Add(copy);
+            }
+        }
+
+        CopyInjectionHandlers(injectionBody, destination.Body, instructionMap, module);
+
+        result.Add(spliceEnd);
+        result.Add(Instruction.Create(OpCodes.Ldloc, resultLocal));
+
+        return result;
+    }
+
+    /// <summary>
     ///     Copies a call-site wrap injection method body and lowers Operation.Invoke calls to the original call.
     /// </summary>
     /// <param name="injectionDefinition">The Cecil definition for the injection method.</param>
@@ -364,6 +419,36 @@ internal static class BodyCopier {
             }
 
             return new List<Instruction> { Instruction.Create(OpCodes.Br, returnBranchTarget) };
+        }
+
+        if (TryLowerProjectedMethodCall(source, ctx, out List<Instruction>? projectedCall)) {
+            return projectedCall;
+        }
+
+        if (TryNormalizeLocal(source, ctx.VariableMap, ctx.InjectionMethodLocals, out Instruction? local)) {
+            return new List<Instruction> { local! };
+        }
+
+        Instruction copy = CloneInstruction(source, ctx.Module, ctx.VariableMap, ctx.InjectedMembers);
+        RemapArgInstruction(copy, ctx.ArgRemap);
+        return new List<Instruction> { copy };
+    }
+
+    private static List<Instruction> LowerValueInstruction(
+        Instruction source,
+        LoweringContext ctx,
+        int valueArgIndex,
+        VariableDefinition valueLocal,
+        VariableDefinition resultLocal,
+        Instruction spliceEnd) {
+        if (IsLoadArgOpCode(source.OpCode) && GetArgIndex(source) == valueArgIndex) {
+            return new List<Instruction> { Instruction.Create(OpCodes.Ldloc, valueLocal) };
+        }
+
+        if (source.OpCode == OpCodes.Ret) {
+            return new List<Instruction> {
+                Instruction.Create(OpCodes.Stloc, resultLocal), Instruction.Create(OpCodes.Br, spliceEnd),
+            };
         }
 
         if (TryLowerProjectedMethodCall(source, ctx, out List<Instruction>? projectedCall)) {

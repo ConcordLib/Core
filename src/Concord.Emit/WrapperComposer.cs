@@ -229,6 +229,11 @@ public static class WrapperComposer {
                 continue;
             }
 
+            if (injection.At is InjectAt.Constant constant) {
+                ProcessConstantInjection(injection, constant, wrapperDefinition, target, spine);
+                continue;
+            }
+
             if (injection.At is InjectAt.Around) {
                 ProcessAroundInjection(injection, wrapperDefinition, target, locals, epilogueStart, afterSpine, spine, ref aroundBody);
             }
@@ -410,6 +415,67 @@ public static class WrapperComposer {
                 site);
             int siteIndex = spine.IndexOf(site);
             spine.InsertRange(after ? siteIndex + 1 : siteIndex, invokeBody);
+        }
+    }
+
+    private static void ProcessConstantInjection(
+        Injection injection,
+        InjectAt.Constant constant,
+        MethodDefinition wrapperDefinition,
+        MethodBase target,
+        List<Instruction> spine) {
+        List<Instruction> allMatches = ConstantMatcher.FindMatches(spine, constant.Value);
+        if (allMatches.Count == 0) {
+            throw new ConcordEmitException(
+                "CONC037",
+                $"Constant injection on '{target.DeclaringType?.Name}.{target.Name}' matched no '{constant.Value}' literal in the target body.");
+        }
+
+        if (constant.By > allMatches.Count) {
+            throw new ConcordEmitException(
+                "CONC038",
+                $"Constant injection on '{target.DeclaringType?.Name}.{target.Name}' targets occurrence {constant.By} of '{constant.Value}', but only {allMatches.Count} occurrence(s) exist.");
+        }
+
+        List<Instruction> matches = constant.By == 0 ? allMatches : [allMatches[(int)(constant.By - 1)]];
+
+        ValidateValueInjectionShape(injection.InjectionMethod, constant.Value.GetType(), target);
+
+        InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
+        using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
+
+        ModuleDefinition module = wrapperDefinition.Module;
+        foreach (Instruction match in matches) {
+            VariableDefinition valueLocal = new VariableDefinition(module.ImportReference(constant.Value.GetType()));
+            wrapperDefinition.Body.Variables.Add(valueLocal);
+
+            List<Instruction> splice = new List<Instruction> { Instruction.Create(OpCodes.Stloc, valueLocal) };
+            splice.AddRange(BodyCopier.CopyValueInjection(
+                injectionMethodDefinition.Definition,
+                wrapperDefinition,
+                target,
+                injection.InjectionMethod,
+                injectedMembers,
+                valueLocal));
+
+            int matchIndex = spine.IndexOf(match);
+            spine.InsertRange(matchIndex + 1, splice);
+        }
+    }
+
+    private static void ValidateValueInjectionShape(MethodBase injectionMethod, Type valueType, MethodBase target) {
+        ParameterInfo[] parameters = injectionMethod.GetParameters();
+        if (parameters.Length != 1) {
+            throw new ConcordEmitException(
+                "CONC039",
+                $"Value injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' on '{target.DeclaringType?.Name}.{target.Name}' must declare exactly one parameter, got {parameters.Length}.");
+        }
+
+        Type returnType = injectionMethod is MethodInfo methodInfo ? methodInfo.ReturnType : typeof(void);
+        if (parameters[0].ParameterType != valueType || returnType != valueType) {
+            throw new ConcordEmitException(
+                "CONC039",
+                $"Value injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' on '{target.DeclaringType?.Name}.{target.Name}' must be shaped '{valueType.Name} M({valueType.Name} original)'.");
         }
     }
 
