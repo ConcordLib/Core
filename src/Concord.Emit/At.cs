@@ -19,4 +19,10 @@ public enum At {
 
     /// <summary>Wrap the whole target body.</summary>
     Around,
+
+    /// <summary>Replace an inlined literal constant in the target body with the injection method's return value.</summary>
+    Constant,
+
+    /// <summary>Rewrite one argument of a matched call inside the target body through the injection method.</summary>
+    Argument,
 }

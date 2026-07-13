@@ -108,6 +108,18 @@ public static class PatchDeclarationScanner {
                 continue;
             }
 
+            if (inject.HasConstant && inject.At != Concord.At.Constant) {
+                throw new ConcordDeclarationException(
+                    InjectOnPrefix + declaration.FullName + " passes a constant but position " + inject.At + "; constant injections require At.Constant.");
+            }
+
+            if (!inject.HasConstant &&
+                inject.ResolvedAt is not InjectAt.Invoke &&
+                (inject.At == Concord.At.Constant || inject.At == Concord.At.Argument)) {
+                throw new ConcordDeclarationException(
+                    InjectOnPrefix + declaration.FullName + " uses position " + inject.At + " without its dedicated constructor form.");
+            }
+
             MethodBase resolvedTarget = ResolveInjectionTarget(declaration, baseType, inject);
             resolved.Add((resolvedTarget, new Injection(method, inject.ResolvedAt, declaration.FullName!, inject.ResolvedPriority)));
         }

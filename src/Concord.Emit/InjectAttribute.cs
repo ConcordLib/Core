@@ -12,6 +12,8 @@ public sealed class InjectAttribute : Attribute {
     private readonly At invokeShift;
     private readonly uint by;
     private readonly Type[]? invokeParameterTypes;
+    private readonly uint arg;
+    private readonly object? constant;
 
     /// <summary>
     ///     Initializes a new injection declaration at the given position.
@@ -50,6 +52,46 @@ public sealed class InjectAttribute : Attribute {
     }
 
     /// <summary>
+    ///     Initializes a new injection declaration targeting an inlined literal constant in the target body.
+    /// </summary>
+    /// <param name="method">The target method name. Private names are validated by Concord tooling.</param>
+    /// <param name="constant">The literal to match. Supported kinds: int, long, float, double, string.</param>
+    /// <param name="at">The injection position. Must be <see cref="At.Constant" />.</param>
+    /// <param name="by">The 1-based occurrence of the constant to target, or <c>0</c> for every match.</param>
+    /// <param name="parameterTypes">
+    ///     When non-<see langword="null" />, selects a specific overload of <paramref name="method" /> by
+    ///     parameter types, allowing ambiguous overloads to be disambiguated.
+    /// </param>
+    public InjectAttribute(string method, object constant, At at, uint by = 0, Type[]? parameterTypes = null) {
+        Method = method;
+        this.constant = constant;
+        At = at;
+        this.by = by;
+        ParameterTypes = parameterTypes;
+        TargetsConstructor = false;
+    }
+
+    /// <summary>
+    ///     Initializes a new injection declaration targeting an inlined literal constant in the patch target's
+    ///     instance constructor.
+    /// </summary>
+    /// <param name="constant">The literal to match. Supported kinds: int, long, float, double, string.</param>
+    /// <param name="at">The injection position. Must be <see cref="At.Constant" />.</param>
+    /// <param name="by">The 1-based occurrence of the constant to target, or <c>0</c> for every match.</param>
+    /// <param name="parameterTypes">
+    ///     The parameter types of the constructor overload to target, or <see langword="null" /> to select
+    ///     the parameterless constructor. Only instance constructors are supported.
+    /// </param>
+    public InjectAttribute(object constant, At at, uint by = 0, Type[]? parameterTypes = null) {
+        Method = null;
+        this.constant = constant;
+        At = at;
+        this.by = by;
+        ParameterTypes = parameterTypes;
+        TargetsConstructor = true;
+    }
+
+    /// <summary>
     ///     Initializes a new injection declaration at an invoke-splice position, targeting a call inside
     ///     the target method.
     /// </summary>
@@ -58,8 +100,9 @@ public sealed class InjectAttribute : Attribute {
     /// <param name="invokeDeclaringMethod">The name of the call-site method to match.</param>
     /// <param name="shift">
     ///     Where the injection method runs relative to the matched call: <see cref="At.Head" /> before the
-    ///     call, <see cref="At.Tail" /> after the call, or <see cref="At.Around" /> wrapping
-    ///     the call (the injection method receives an <see cref="Operation" /> family handle matching the call's shape).
+    ///     call, <see cref="At.Tail" /> after the call, <see cref="At.Around" /> wrapping
+    ///     the call (the injection method receives an <see cref="Operation" /> family handle matching the call's shape),
+    ///     or <see cref="At.Argument" /> to rewrite one of the call's arguments.
     /// </param>
     /// <param name="by">The 1-based occurrence of the matched call to target, or <c>0</c> for every matching call.</param>
     /// <param name="targetParameterTypes">
@@ -70,7 +113,11 @@ public sealed class InjectAttribute : Attribute {
     ///     When non-<see langword="null" />, only call sites whose parameter types match this array are
     ///     considered when matching <paramref name="invokeDeclaringMethod" />.
     /// </param>
-    public InjectAttribute(string method, Type invokeDeclaringType, string invokeDeclaringMethod, At shift, uint by = 0, Type[]? targetParameterTypes = null, Type[]? invokeParameterTypes = null) {
+    /// <param name="arg">
+    ///     For <see cref="At.Argument" />, the 1-based argument to rewrite, or <c>0</c> to infer by unique
+    ///     type match. Ignored for other shifts.
+    /// </param>
+    public InjectAttribute(string method, Type invokeDeclaringType, string invokeDeclaringMethod, At shift, uint by = 0, Type[]? targetParameterTypes = null, Type[]? invokeParameterTypes = null, uint arg = 0) {
         Method = method;
         At = shift;
         this.invokeDeclaringType = invokeDeclaringType;
@@ -79,6 +126,7 @@ public sealed class InjectAttribute : Attribute {
         this.by = by;
         ParameterTypes = targetParameterTypes;
         this.invokeParameterTypes = invokeParameterTypes;
+        this.arg = arg;
         TargetsConstructor = false;
     }
 
@@ -112,14 +160,24 @@ public sealed class InjectAttribute : Attribute {
     public int Priority { get; init; }
 
     /// <summary>
+    ///     Gets a value indicating whether this declaration was created through one of the constant-targeting
+    ///     constructors.
+    /// </summary>
+    internal bool HasConstant => constant is not null;
+
+    /// <summary>
     ///     Gets the <see cref="InjectAt" /> corresponding to this injection's position.
-    ///     Returns <see cref="InjectAt.Invoke" /> when the invoke constructor was used;
-    ///     otherwise maps from <see cref="At" />.
+    ///     Returns <see cref="InjectAt.Constant" /> when a constant-targeting constructor was used,
+    ///     <see cref="InjectAt.Invoke" /> when the invoke constructor was used, otherwise maps from <see cref="At" />.
     /// </summary>
     internal InjectAt ResolvedAt {
         get {
+            if (constant is not null) {
+                return new InjectAt.Constant(constant, by);
+            }
+
             if (invokeDeclaringType is not null) {
-                return new InjectAt.Invoke(invokeDeclaringType, invokeMethod!, invokeShift, by, invokeParameterTypes);
+                return new InjectAt.Invoke(invokeDeclaringType, invokeMethod!, invokeShift, by, invokeParameterTypes, arg);
             }
 
             return At switch {

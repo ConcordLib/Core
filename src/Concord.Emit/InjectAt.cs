@@ -29,6 +29,13 @@ public abstract record InjectAt {
     public sealed record Around : InjectAt;
 
     /// <summary>
+    ///     Targets an inlined literal constant in the target body.
+    /// </summary>
+    /// <param name="Value">The literal to match. Supported kinds: int, long, float, double, string.</param>
+    /// <param name="By">The 1-based occurrence to target, or <c>0</c> to target every match.</param>
+    public sealed record Constant(object Value, uint By = 0) : InjectAt;
+
+    /// <summary>
     ///     Targets a call to a named method inside the target body.
     /// </summary>
     /// <param name="DeclaringType">The declaring type of the call-site method to match.</param>
@@ -45,5 +52,6 @@ public abstract record InjectAt {
     ///     When non-<see langword="null" />, only call sites whose parameter types match this array are
     ///     considered, allowing overloaded call-site methods to be disambiguated.
     /// </param>
-    public sealed record Invoke(Type DeclaringType, string Method, At Shift, uint By = 0, Type[]? ParameterTypes = null) : InjectAt;
+    /// <param name="Arg">The 1-based argument to rewrite for At.Argument, or 0 to infer by unique type match.</param>
+    public sealed record Invoke(Type DeclaringType, string Method, At Shift, uint By = 0, Type[]? ParameterTypes = null, uint Arg = 0) : InjectAt;
 }
