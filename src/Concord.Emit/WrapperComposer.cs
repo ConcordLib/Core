@@ -23,6 +23,7 @@ public static class WrapperComposer {
     public static ComposeResult Compose(MethodBase target, IReadOnlyList<Injection> ordered) {
         if (HasWholeMethodAround(ordered)) {
             ValidateWholeMethodAroundEligible(target);
+            RejectCallSiteInjectionsWithWholeMethodAround(ordered, target);
         }
 
         MethodBase resolved = ResolveStateMachineTarget(target);
@@ -151,6 +152,26 @@ public static class WrapperComposer {
         }
 
         return false;
+    }
+
+    /// <summary>
+    ///     Rejects call-site injection positions (<see cref="InjectAt.Invoke" /> in any shift, including its
+    ///     <c>At.Argument</c> variant, and <see cref="InjectAt.Constant" />) when combined with a whole-method
+    ///     <see cref="InjectAt.Around" /> on the same target.
+    /// </summary>
+    /// <param name="ordered">The full injection list being composed for <paramref name="target" />.</param>
+    /// <param name="target">The original method being patched, used for the diagnostic message.</param>
+    private static void RejectCallSiteInjectionsWithWholeMethodAround(IReadOnlyList<Injection> ordered, MethodBase target) {
+        for (int i = 0; i < ordered.Count; i++) {
+            InjectAt at = ordered[i].At;
+            if (at is InjectAt.Invoke or InjectAt.Constant) {
+                throw new ConcordEmitException(
+                    "CONC115",
+                    $"Whole-method Around on '{target.DeclaringType?.Name}.{target.Name}' cannot be combined with call-site " +
+                    "(Invoke/Argument/Constant) injections on the same target. Call-site positions mutate the pre-Around spine, " +
+                    "which does not compose with the per-copy splicing a whole-method Around performs.");
+            }
+        }
     }
 
     private static void ValidateWholeMethodAroundEligible(MethodBase originalTarget) {
@@ -609,11 +630,31 @@ public static class WrapperComposer {
                 insideAround: true);
             BodyCopier.RewriteSpliceArgs(siteBody, spineCopy.ArgLocals);
 
+            RedirectIntermediateBranches(spineCopy.Instructions, lastExit, siteBody[0]);
+            RedirectIntermediateBranches(aroundBody, lastExit, siteBody[0]);
+
             int spineCopyExitIndex = spineCopy.Instructions.IndexOf(lastExit);
             spineCopy.Instructions.InsertRange(spineCopyExitIndex, siteBody);
 
             int aroundBodyExitIndex = aroundBody.IndexOf(lastExit);
             aroundBody.InsertRange(aroundBodyExitIndex, siteBody);
+        }
+    }
+
+    /// <summary>
+    ///     Redirects every branch in <paramref name="instructions" /> that currently targets
+    ///     <paramref name="originalTarget" /> to instead target <paramref name="newTarget" />, so code about to be
+    ///     spliced immediately before <paramref name="originalTarget" /> is not skipped by an earlier injection's
+    ///     own trailing branch to that same exit.
+    /// </summary>
+    /// <param name="instructions">The instruction list to scan for branches targeting <paramref name="originalTarget" />.</param>
+    /// <param name="originalTarget">The exit instruction that previously-spliced code may branch to directly.</param>
+    /// <param name="newTarget">The first instruction of the newly-spliced body, which now sits before <paramref name="originalTarget" />.</param>
+    private static void RedirectIntermediateBranches(List<Instruction> instructions, Instruction originalTarget, Instruction newTarget) {
+        foreach (Instruction instruction in instructions) {
+            if (!ReferenceEquals(instruction, originalTarget) && ReferenceEquals(instruction.Operand, originalTarget)) {
+                instruction.Operand = newTarget;
+            }
         }
     }
 

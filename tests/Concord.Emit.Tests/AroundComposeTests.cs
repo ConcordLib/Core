@@ -58,6 +58,10 @@ public static class AroundComposeCtorInjectionMethods {
         original.Invoke(seed);
         AroundComposeLog.Entries.Add("post");
     }
+
+    public static void Tail(int seed, ControlHandle ch) {
+        AroundComposeLog.Entries.Add("tail:" + seed);
+    }
 }
 
 public static class AroundComposeReturnTarget {
@@ -139,6 +143,101 @@ public static class AroundComposeMultiInvokeTailInjectionMethods {
 
     public static void Double(ControlHandle<int> ch) {
         ch.ReturnValue *= 2;
+    }
+}
+
+public static class AroundComposeRejectTarget {
+    public static int Helper(int x) {
+        return x + 1;
+    }
+
+    public static int Step() {
+        AroundComposeLog.Entries.Add("body");
+        return Helper(6) + 5;
+    }
+}
+
+public static class AroundComposeRejectInjectionMethods {
+    public static void Head(ControlHandle ch) {
+        AroundComposeLog.Entries.Add("head");
+    }
+
+    public static void Tail(ControlHandle ch) {
+        AroundComposeLog.Entries.Add("tail");
+    }
+
+    public static int WrapHelper(int x, Operation<int, int> original) {
+        return original.Invoke(x);
+    }
+
+    public static int WrapWhole(Operation<int> original) {
+        AroundComposeLog.Entries.Add("pre");
+        int result = original.Invoke();
+        AroundComposeLog.Entries.Add("post");
+        return result;
+    }
+
+    public static int RewriteArg(int original) {
+        return original + 1;
+    }
+
+    public static int RewriteConstant(int original) {
+        return original + 1;
+    }
+}
+
+public static class AroundComposeThreeWayTarget {
+    public static int Pick(int which) {
+        if (which == 0) {
+            return 10;
+        }
+
+        if (which == 1) {
+            return 20;
+        }
+
+        return 30;
+    }
+}
+
+public static class AroundComposeThreeWayInjectionMethods {
+    public static void Head(ControlHandle ch) {
+        AroundComposeLog.Entries.Add("head");
+    }
+
+    public static int Around(int which, Operation<int, int> original) {
+        AroundComposeLog.Entries.Add("pre");
+        int result = original.Invoke(which);
+        AroundComposeLog.Entries.Add("post");
+        return result;
+    }
+
+    public static void Return(ControlHandle<int> ch) {
+        AroundComposeLog.Entries.Add("return");
+        ch.ReturnValue += 1;
+    }
+
+    public static void Tail(ControlHandle<int> ch) {
+        AroundComposeLog.Entries.Add("tail");
+        ch.ReturnValue *= 10;
+    }
+}
+
+public static class AroundComposeVoidTailTarget {
+    public static void Step() {
+        AroundComposeLog.Entries.Add("body");
+    }
+}
+
+public static class AroundComposeVoidTailInjectionMethods {
+    public static void Around(Operation original) {
+        AroundComposeLog.Entries.Add("pre");
+        original.Invoke();
+        AroundComposeLog.Entries.Add("post");
+    }
+
+    public static void Tail(ControlHandle ch) {
+        AroundComposeLog.Entries.Add("tail");
     }
 }
 
@@ -317,5 +416,157 @@ public sealed class AroundComposeTests {
         object? value = result.Wrapper.Invoke(null, [5]);
 
         Assert.Equal(66, value);
+    }
+
+    [Fact]
+    public void Compose_AroundWithInvokeHead_ThrowsCONC115() {
+        MethodBase target = typeof(AroundComposeRejectTarget).GetMethod(nameof(AroundComposeRejectTarget.Step))!;
+        MethodBase aroundInjectionMethod = typeof(AroundComposeRejectInjectionMethods).GetMethod(nameof(AroundComposeRejectInjectionMethods.WrapWhole))!;
+        MethodBase headInjectionMethod = typeof(AroundComposeRejectInjectionMethods).GetMethod(nameof(AroundComposeRejectInjectionMethods.Head))!;
+
+        Injection around = new Injection(aroundInjectionMethod, new InjectAt.Around(), "test", 0);
+        Injection invokeHead = new Injection(
+            headInjectionMethod,
+            new InjectAt.Invoke(typeof(AroundComposeRejectTarget), nameof(AroundComposeRejectTarget.Helper), At.Head, 0),
+            "test",
+            1);
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() =>
+            WrapperComposer.Compose(target, [around, invokeHead]));
+
+        Assert.Equal("CONC115", ex.Code);
+    }
+
+    [Fact]
+    public void Compose_AroundWithInvokeTail_ThrowsCONC115() {
+        MethodBase target = typeof(AroundComposeRejectTarget).GetMethod(nameof(AroundComposeRejectTarget.Step))!;
+        MethodBase aroundInjectionMethod = typeof(AroundComposeRejectInjectionMethods).GetMethod(nameof(AroundComposeRejectInjectionMethods.WrapWhole))!;
+        MethodBase tailInjectionMethod = typeof(AroundComposeRejectInjectionMethods).GetMethod(nameof(AroundComposeRejectInjectionMethods.Tail))!;
+
+        Injection around = new Injection(aroundInjectionMethod, new InjectAt.Around(), "test", 0);
+        Injection invokeTail = new Injection(
+            tailInjectionMethod,
+            new InjectAt.Invoke(typeof(AroundComposeRejectTarget), nameof(AroundComposeRejectTarget.Helper), At.Tail, 0),
+            "test",
+            1);
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() =>
+            WrapperComposer.Compose(target, [around, invokeTail]));
+
+        Assert.Equal("CONC115", ex.Code);
+    }
+
+    [Fact]
+    public void Compose_AroundWithInvokeAround_ThrowsCONC115() {
+        MethodBase target = typeof(AroundComposeRejectTarget).GetMethod(nameof(AroundComposeRejectTarget.Step))!;
+        MethodBase aroundInjectionMethod = typeof(AroundComposeRejectInjectionMethods).GetMethod(nameof(AroundComposeRejectInjectionMethods.WrapWhole))!;
+        MethodBase wrapHelperInjectionMethod = typeof(AroundComposeRejectInjectionMethods).GetMethod(nameof(AroundComposeRejectInjectionMethods.WrapHelper))!;
+
+        Injection around = new Injection(aroundInjectionMethod, new InjectAt.Around(), "test", 0);
+        Injection invokeAround = new Injection(
+            wrapHelperInjectionMethod,
+            new InjectAt.Invoke(typeof(AroundComposeRejectTarget), nameof(AroundComposeRejectTarget.Helper), At.Around, 0),
+            "test",
+            1);
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() =>
+            WrapperComposer.Compose(target, [around, invokeAround]));
+
+        Assert.Equal("CONC115", ex.Code);
+    }
+
+    [Fact]
+    public void Compose_AroundWithArgument_ThrowsCONC115() {
+        MethodBase target = typeof(AroundComposeRejectTarget).GetMethod(nameof(AroundComposeRejectTarget.Step))!;
+        MethodBase aroundInjectionMethod = typeof(AroundComposeRejectInjectionMethods).GetMethod(nameof(AroundComposeRejectInjectionMethods.WrapWhole))!;
+        MethodBase rewriteArgInjectionMethod = typeof(AroundComposeRejectInjectionMethods).GetMethod(nameof(AroundComposeRejectInjectionMethods.RewriteArg))!;
+
+        Injection around = new Injection(aroundInjectionMethod, new InjectAt.Around(), "test", 0);
+        Injection argument = new Injection(
+            rewriteArgInjectionMethod,
+            new InjectAt.Invoke(typeof(AroundComposeRejectTarget), nameof(AroundComposeRejectTarget.Helper), At.Argument, 0),
+            "test",
+            1);
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() =>
+            WrapperComposer.Compose(target, [around, argument]));
+
+        Assert.Equal("CONC115", ex.Code);
+    }
+
+    [Fact]
+    public void Compose_AroundWithConstant_ThrowsCONC115() {
+        MethodBase target = typeof(AroundComposeRejectTarget).GetMethod(nameof(AroundComposeRejectTarget.Step))!;
+        MethodBase aroundInjectionMethod = typeof(AroundComposeRejectInjectionMethods).GetMethod(nameof(AroundComposeRejectInjectionMethods.WrapWhole))!;
+        MethodBase rewriteConstantInjectionMethod = typeof(AroundComposeRejectInjectionMethods).GetMethod(nameof(AroundComposeRejectInjectionMethods.RewriteConstant))!;
+
+        Injection around = new Injection(aroundInjectionMethod, new InjectAt.Around(), "test", 0);
+        Injection constant = new Injection(rewriteConstantInjectionMethod, new InjectAt.Constant(6), "test", 1);
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() =>
+            WrapperComposer.Compose(target, [around, constant]));
+
+        Assert.Equal("CONC115", ex.Code);
+    }
+
+    [Fact]
+    public void Compose_HeadReturnTailAround_FullStackComposesInPriorityOrder() {
+        MethodBase target = typeof(AroundComposeThreeWayTarget).GetMethod(nameof(AroundComposeThreeWayTarget.Pick))!;
+        MethodBase headInjectionMethod = typeof(AroundComposeThreeWayInjectionMethods).GetMethod(nameof(AroundComposeThreeWayInjectionMethods.Head))!;
+        MethodBase aroundInjectionMethod = typeof(AroundComposeThreeWayInjectionMethods).GetMethod(nameof(AroundComposeThreeWayInjectionMethods.Around))!;
+        MethodBase returnInjectionMethod = typeof(AroundComposeThreeWayInjectionMethods).GetMethod(nameof(AroundComposeThreeWayInjectionMethods.Return))!;
+        MethodBase tailInjectionMethod = typeof(AroundComposeThreeWayInjectionMethods).GetMethod(nameof(AroundComposeThreeWayInjectionMethods.Tail))!;
+
+        Injection head = new Injection(headInjectionMethod, new InjectAt.Head(), "test", 0);
+        Injection around = new Injection(aroundInjectionMethod, new InjectAt.Around(), "test", 1);
+        Injection ret = new Injection(returnInjectionMethod, new InjectAt.Return(0), "test", 2);
+        Injection tail = new Injection(tailInjectionMethod, new InjectAt.Tail(), "test", 3);
+
+        AroundComposeLog.Clear();
+        ComposeResult result = WrapperComposer.Compose(target, [head, around, ret, tail]);
+        object? value = result.Wrapper.Invoke(null, [2]);
+
+        Assert.Equal(310, value);
+        Assert.Equal(["head", "pre", "return", "tail", "post"], AroundComposeLog.Entries);
+    }
+
+    [Fact]
+    public void Compose_VoidTargetTailWithAround_TailFiresBeforeAroundPostCode() {
+        MethodBase target = typeof(AroundComposeVoidTailTarget).GetMethod(nameof(AroundComposeVoidTailTarget.Step))!;
+        MethodBase aroundInjectionMethod = typeof(AroundComposeVoidTailInjectionMethods).GetMethod(nameof(AroundComposeVoidTailInjectionMethods.Around))!;
+        MethodBase tailInjectionMethod = typeof(AroundComposeVoidTailInjectionMethods).GetMethod(nameof(AroundComposeVoidTailInjectionMethods.Tail))!;
+
+        Injection around = new Injection(aroundInjectionMethod, new InjectAt.Around(), "test", 0);
+        Injection tail = new Injection(tailInjectionMethod, new InjectAt.Tail(), "test", 1);
+
+        AroundComposeLog.Clear();
+        ComposeResult result = WrapperComposer.Compose(target, [around, tail]);
+        result.Wrapper.Invoke(null, []);
+
+        Assert.Equal(["pre", "body", "tail", "post"], AroundComposeLog.Entries);
+    }
+
+    [Fact]
+    public void Compose_ConstructorTailWithAround_TailFiresBeforeAroundPostCode() {
+        ConstructorInfo ctor = typeof(AroundComposeCtorTarget).GetConstructor([typeof(int)])!;
+        MethodBase aroundInjectionMethod = typeof(AroundComposeCtorInjectionMethods).GetMethod(nameof(AroundComposeCtorInjectionMethods.Around))!;
+        MethodBase tailInjectionMethod = typeof(AroundComposeCtorInjectionMethods).GetMethod(nameof(AroundComposeCtorInjectionMethods.Tail))!;
+
+        Injection around = new Injection(aroundInjectionMethod, new InjectAt.Around(), "test", 0);
+        Injection tail = new Injection(tailInjectionMethod, new InjectAt.Tail(), "test", 1);
+
+        ComposeResult result = WrapperComposer.Compose(ctor, [around, tail]);
+        IDetourHandle handle = DetourBackend.Current.Apply(ctor, result.Wrapper);
+
+        AroundComposeLog.Clear();
+
+        try {
+            AroundComposeCtorTarget instance = new AroundComposeCtorTarget(4);
+
+            Assert.Equal(4, instance.Seed);
+            Assert.Equal(["pre", "ctor-body:4", "tail:4", "post"], AroundComposeLog.Entries);
+        } finally {
+            handle.Dispose();
+        }
     }
 }
