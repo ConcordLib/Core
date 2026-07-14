@@ -25,7 +25,9 @@ public abstract record InjectAt {
     public sealed record Tail : InjectAt;
 
     /// <summary>
-    ///     Uses the injection method body's call to the target method as the splice point for the original body.
+    ///     Wraps the entire target method. The injection method declares an <see cref="Operation" /> family
+    ///     handle and calls <c>original.Invoke(args)</c> to run the original body; omitting the call skips
+    ///     the body. Operation-only (no <see cref="ControlHandle" />).
     /// </summary>
     public sealed record Around : InjectAt;
 

@@ -2,9 +2,9 @@ namespace Concord;
 
 /// <summary>
 ///     Control parameter used by invoke injections that wrap a one-argument void call,
-///     such as a property setter.
+///     such as a property setter, or a one-parameter void target method under whole-method Around.
 /// </summary>
-/// <typeparam name="T1">The wrapped call's argument type.</typeparam>
+/// <typeparam name="T1">The wrapped call's or target method's argument type.</typeparam>
 public sealed class VoidOperation<T1> {
     /// <summary>
     ///     Invokes the original operation from inside a wrap injection.

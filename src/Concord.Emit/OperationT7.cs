@@ -1,15 +1,16 @@
 namespace Concord;
 
 /// <summary>
-///     Control parameter used by invoke injections that wrap a six-argument value-producing call.
+///     Control parameter used by invoke injections that wrap a six-argument value-producing call,
+///     or a six-parameter target method under whole-method Around.
 /// </summary>
-/// <typeparam name="T1">The wrapped call's first argument type.</typeparam>
-/// <typeparam name="T2">The wrapped call's second argument type.</typeparam>
-/// <typeparam name="T3">The wrapped call's third argument type.</typeparam>
-/// <typeparam name="T4">The wrapped call's fourth argument type.</typeparam>
-/// <typeparam name="T5">The wrapped call's fifth argument type.</typeparam>
-/// <typeparam name="T6">The wrapped call's sixth argument type.</typeparam>
-/// <typeparam name="TResult">The value type produced by the wrapped call.</typeparam>
+/// <typeparam name="T1">The wrapped call's or target method's first argument type.</typeparam>
+/// <typeparam name="T2">The wrapped call's or target method's second argument type.</typeparam>
+/// <typeparam name="T3">The wrapped call's or target method's third argument type.</typeparam>
+/// <typeparam name="T4">The wrapped call's or target method's fourth argument type.</typeparam>
+/// <typeparam name="T5">The wrapped call's or target method's fifth argument type.</typeparam>
+/// <typeparam name="T6">The wrapped call's or target method's sixth argument type.</typeparam>
+/// <typeparam name="TResult">The value type produced by the wrapped call or target method.</typeparam>
 public sealed class Operation<T1, T2, T3, T4, T5, T6, TResult> {
     /// <summary>
     ///     Invokes the original operation from inside a wrap injection.

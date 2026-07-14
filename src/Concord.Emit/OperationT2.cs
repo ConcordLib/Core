@@ -1,10 +1,11 @@
 namespace Concord;
 
 /// <summary>
-///     Control parameter used by invoke injections that wrap a one-argument value-producing call.
+///     Control parameter used by invoke injections that wrap a one-argument value-producing call,
+///     or a one-parameter target method under whole-method Around.
 /// </summary>
-/// <typeparam name="T1">The wrapped call's argument type.</typeparam>
-/// <typeparam name="TResult">The value type produced by the wrapped call.</typeparam>
+/// <typeparam name="T1">The wrapped call's or target method's argument type.</typeparam>
+/// <typeparam name="TResult">The value type produced by the wrapped call or target method.</typeparam>
 public sealed class Operation<T1, TResult> {
     /// <summary>
     ///     Invokes the original operation from inside a wrap injection.
