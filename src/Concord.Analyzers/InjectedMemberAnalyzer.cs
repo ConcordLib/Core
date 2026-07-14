@@ -670,7 +670,8 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             targetMethod.IsStatic,
             targetMethod.ReturnType,
             targetMethod.Parameters,
-            true);
+            true,
+            targetMethod);
     }
 
     private static IEnumerable<IMethodSymbol> FindMethodCandidates(INamedTypeSymbol targetType, string targetName) {
@@ -758,6 +759,8 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             return;
         }
 
+        bool isWholeMethodAround = !injection.TargetsInvoke && injection.AtValue == 3;
+
         bool hasControlHandle = false;
         bool hasOperation = false;
 
@@ -773,37 +776,50 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         }
 
         hasOperation = false;
+        int controlHandleCount = 0;
+        int operationCount = 0;
+        IParameterSymbol? operationParameter = null;
 
         foreach (IParameterSymbol parameter in injection.Method.Parameters) {
             if (IsControlHandleType(parameter.Type, out ITypeSymbol? controlHandleReturnType)) {
+                controlHandleCount++;
                 if (hasControlHandle) {
                     ReportInvalidInjectionSignature(context, injection, target, targetType, "only one ControlHandle parameter is supported");
                     continue;
                 }
 
                 hasControlHandle = true;
-                ValidateControlHandle(context, injection, target, targetType, controlHandleReturnType);
+                if (!isWholeMethodAround) {
+                    ValidateControlHandle(context, injection, target, targetType, controlHandleReturnType);
+                }
+
                 continue;
             }
 
             if (IsOperationType(parameter.Type)) {
+                operationCount++;
                 if (hasOperation) {
                     ReportInvalidInjectionSignature(context, injection, target, targetType, "only one Operation parameter is supported");
                     continue;
                 }
 
                 hasOperation = true;
-                if (!injection.TargetsInvoke || injection.AtValue != 3) {
+                operationParameter = parameter;
+                if (injection.TargetsInvoke && injection.AtValue == 3) {
+                    ValidateOperationShape(context, injection, target, targetType, parameter);
+                } else if (!isWholeMethodAround) {
                     ReportInvalidInjectionSignature(
                         context,
                         injection,
                         target,
                         targetType,
                         "Operation parameters are only supported on call-site [Inject] declarations with At.Around");
-                } else {
-                    ValidateOperationShape(context, injection, target, targetType, parameter);
                 }
 
+                continue;
+            }
+
+            if (isWholeMethodAround) {
                 continue;
             }
 
@@ -816,6 +832,10 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
                     targetType,
                     "injection method parameters must match target parameters by name and type");
             }
+        }
+
+        if (isWholeMethodAround) {
+            ValidateWholeMethodAroundSignature(context, injection, target, targetType, operationCount, controlHandleCount, operationParameter);
         }
 
         if (IsControlType(injection.Method.ReturnType)) {
@@ -925,6 +945,145 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
                 callSite.Name,
                 expected));
         }
+    }
+
+    private static void ValidateWholeMethodAroundSignature(
+        SymbolAnalysisContext context,
+        InjectionInfo injection,
+        InjectionTarget target,
+        INamedTypeSymbol targetType,
+        int operationCount,
+        int controlHandleCount,
+        IParameterSymbol? operationParameter) {
+        if (operationCount == 0) {
+            ReportInvalidInjectionSignature(
+                context,
+                injection,
+                target,
+                targetType,
+                "whole-method At.Around injections must declare exactly one Operation parameter");
+        } else if (controlHandleCount > 0) {
+            ReportInvalidInjectionSignature(
+                context,
+                injection,
+                target,
+                targetType,
+                "whole-method At.Around injections must declare exactly one Operation parameter and no ControlHandle parameters");
+        } else if (operationCount == 1 && operationParameter is not null) {
+            ValidateWholeMethodOperationShape(context, injection, target, operationParameter);
+        }
+
+        if (target.MethodSymbol is not null) {
+            ValidateWholeMethodAroundEligibility(context, injection, target, targetType, target.MethodSymbol);
+        }
+    }
+
+    private static void ValidateWholeMethodOperationShape(
+        SymbolAnalysisContext context,
+        InjectionInfo injection,
+        InjectionTarget target,
+        IParameterSymbol operationParameter) {
+        if (target.ReturnType is null) {
+            return;
+        }
+
+        ImmutableArray<ITypeSymbol> parameterTypes = target.Parameters.Select(parameter => parameter.Type).ToImmutableArray();
+        if (!OperationTypeMatchesExpected(operationParameter.Type, parameterTypes, target.ReturnType)) {
+            string expected = ExpectedOperationTypeName(parameterTypes, target.ReturnType);
+            context.ReportDiagnostic(Diagnostic.Create(
+                OperationShapeMismatchRule,
+                LocationOf(operationParameter),
+                injection.Method.Name,
+                operationParameter.Type.ToDisplayString(),
+                target.Name,
+                expected));
+        }
+    }
+
+    private static void ValidateWholeMethodAroundEligibility(
+        SymbolAnalysisContext context,
+        InjectionInfo injection,
+        InjectionTarget target,
+        INamedTypeSymbol targetType,
+        IMethodSymbol targetMethod) {
+        foreach (IParameterSymbol parameter in targetMethod.Parameters) {
+            if (parameter.RefKind != RefKind.None) {
+                ReportInvalidInjectionSignature(
+                    context,
+                    injection,
+                    target,
+                    targetType,
+                    $"whole-method At.Around targets a byref parameter '{parameter.Name}'; byref parameters are not supported by the Operation handle");
+                return;
+            }
+
+            if (IsUnsupportedByValueShape(parameter.Type)) {
+                ReportInvalidInjectionSignature(
+                    context,
+                    injection,
+                    target,
+                    targetType,
+                    $"whole-method At.Around targets parameter '{parameter.Name}' of type '{parameter.Type.ToDisplayString()}', which is a pointer, function pointer, or byref-like type; these are not supported by the Operation handle");
+                return;
+            }
+        }
+
+        if (targetMethod.ReturnsByRef || targetMethod.ReturnsByRefReadonly) {
+            ReportInvalidInjectionSignature(
+                context,
+                injection,
+                target,
+                targetType,
+                "whole-method At.Around targets a method that returns by reference; ref returns are not supported by the Operation handle");
+            return;
+        }
+
+        if (IsUnsupportedByValueShape(targetMethod.ReturnType)) {
+            ReportInvalidInjectionSignature(
+                context,
+                injection,
+                target,
+                targetType,
+                $"whole-method At.Around targets a method returning '{targetMethod.ReturnType.ToDisplayString()}', which is a pointer, function pointer, or byref-like type; these are not supported by the Operation handle");
+            return;
+        }
+
+        if (targetMethod.IsAsync || IsIteratorMethod(targetMethod)) {
+            ReportInvalidInjectionSignature(
+                context,
+                injection,
+                target,
+                targetType,
+                "whole-method At.Around targets an async or iterator method; state-machine methods are not supported by the Operation handle");
+        }
+    }
+
+    private static bool IsUnsupportedByValueShape(ITypeSymbol type) {
+        return type.TypeKind is TypeKind.Pointer or TypeKind.FunctionPointer || type.IsRefLikeType;
+    }
+
+    private static bool IsIteratorMethod(IMethodSymbol methodSymbol) {
+        foreach (SyntaxReference syntaxReference in methodSymbol.DeclaringSyntaxReferences) {
+            if (ContainsYield(syntaxReference.GetSyntax())) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ContainsYield(SyntaxNode node) {
+        foreach (SyntaxNode descendant in node.DescendantNodes(descendIntoChildren: DescendIntoMethodBody)) {
+            if (descendant is YieldStatementSyntax) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool DescendIntoMethodBody(SyntaxNode node) {
+        return node is not (LambdaExpressionSyntax or AnonymousMethodExpressionSyntax or LocalFunctionStatementSyntax);
     }
 
     private static void ReportAmbiguousAccessorName(SymbolAnalysisContext context, InjectionInfo injection, INamedTypeSymbol declaringType) {
@@ -2024,12 +2183,14 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             bool isStatic,
             ITypeSymbol? returnType,
             ImmutableArray<IParameterSymbol> parameters,
-            bool signatureValidated) {
+            bool signatureValidated,
+            IMethodSymbol? methodSymbol = null) {
             Name = name;
             IsStatic = isStatic;
             ReturnType = returnType;
             Parameters = parameters;
             SignatureValidated = signatureValidated;
+            MethodSymbol = methodSymbol;
         }
 
         public string Name { get; }
@@ -2041,5 +2202,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         public ImmutableArray<IParameterSymbol> Parameters { get; }
 
         public bool SignatureValidated { get; }
+
+        public IMethodSymbol? MethodSymbol { get; }
     }
 }

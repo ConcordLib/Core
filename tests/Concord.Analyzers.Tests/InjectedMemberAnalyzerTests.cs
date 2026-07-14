@@ -824,7 +824,7 @@ public sealed class InjectedMemberAnalyzerTests {
             [Concord.Patch(typeof(Target))]
             public abstract class Patch {
                 [Concord.Inject(Concord.At.Around, "Tick")]
-                private Concord.Control Wrap() {
+                private Concord.Control Wrap(Concord.Operation original) {
                     return Concord.Control.Continue;
                 }
             }
@@ -832,6 +832,364 @@ public sealed class InjectedMemberAnalyzerTests {
 
         Diagnostic diagnostic = Assert.Single(diagnostics);
         Assert.Equal(InjectedMemberAnalyzer.ControlReturnPositionDiagnosticId, diagnostic.Id);
+    }
+
+    [Fact]
+    public async Task Inject_WholeMethodAround_ValidOperationHandle_ReportsNothing() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public sealed class Target {
+                private void Tick() {
+                }
+            }
+
+            [Concord.Patch(typeof(Target))]
+            public abstract class Patch {
+                [Concord.Inject(Concord.At.Around, "Tick")]
+                private void Wrap(Concord.Operation original) {
+                    original.Invoke();
+                }
+            }
+            """);
+
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
+    public async Task Inject_WholeMethodAround_ValidOperationHandleWithArgsAndResult_ReportsNothing() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public sealed class Target {
+                private int Recalculate(int add) => add;
+            }
+
+            [Concord.Patch(typeof(Target))]
+            public abstract class Patch {
+                [Concord.Inject(Concord.At.Around, "Recalculate")]
+                private int Wrap(Concord.Operation<int, int> original) {
+                    return original.Invoke(1);
+                }
+            }
+            """);
+
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
+    public async Task Inject_WholeMethodAround_MissingOperationHandle_ReportsDiagnostic() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public sealed class Target {
+                private void Tick() {
+                }
+            }
+
+            [Concord.Patch(typeof(Target))]
+            public abstract class Patch {
+                [Concord.Inject(Concord.At.Around, "Tick")]
+                private void Wrap() {
+                }
+            }
+            """);
+
+        Diagnostic diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(InjectedMemberAnalyzer.InvalidInjectionSignatureDiagnosticId, diagnostic.Id);
+        Assert.Contains("Operation parameter", diagnostic.GetMessage());
+    }
+
+    [Fact]
+    public async Task Inject_WholeMethodAround_WrongArity_ReportsDiagnostic() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public sealed class Target {
+                private int Recalculate(int add) => add;
+            }
+
+            [Concord.Patch(typeof(Target))]
+            public abstract class Patch {
+                [Concord.Inject(Concord.At.Around, "Recalculate")]
+                private int Wrap(Concord.Operation<int> original) {
+                    return original.Invoke();
+                }
+            }
+            """);
+
+        Diagnostic diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(InjectedMemberAnalyzer.OperationShapeMismatchDiagnosticId, diagnostic.Id);
+    }
+
+    [Fact]
+    public async Task Inject_WholeMethodAround_WrongResultType_ReportsDiagnostic() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public sealed class Target {
+                private int Recalculate(int add) => add;
+            }
+
+            [Concord.Patch(typeof(Target))]
+            public abstract class Patch {
+                [Concord.Inject(Concord.At.Around, "Recalculate")]
+                private int Wrap(Concord.Operation<int, string> original) {
+                    return 0;
+                }
+            }
+            """);
+
+        Diagnostic diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(InjectedMemberAnalyzer.OperationShapeMismatchDiagnosticId, diagnostic.Id);
+    }
+
+    [Fact]
+    public async Task Inject_WholeMethodAround_ValueOperationOnVoidTarget_ReportsDiagnostic() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public sealed class Target {
+                private void Tick() {
+                }
+            }
+
+            [Concord.Patch(typeof(Target))]
+            public abstract class Patch {
+                [Concord.Inject(Concord.At.Around, "Tick")]
+                private void Wrap(Concord.Operation<int> original) {
+                }
+            }
+            """);
+
+        Diagnostic diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(InjectedMemberAnalyzer.OperationShapeMismatchDiagnosticId, diagnostic.Id);
+    }
+
+    [Fact]
+    public async Task Inject_WholeMethodAround_VoidOperationOnValueTarget_ReportsDiagnostic() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public sealed class Target {
+                private int Recalculate(int add) => add;
+            }
+
+            [Concord.Patch(typeof(Target))]
+            public abstract class Patch {
+                [Concord.Inject(Concord.At.Around, "Recalculate")]
+                private void Wrap(Concord.VoidOperation<int> original) {
+                    original.Invoke(1);
+                }
+            }
+            """);
+
+        Diagnostic diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(InjectedMemberAnalyzer.OperationShapeMismatchDiagnosticId, diagnostic.Id);
+    }
+
+    [Fact]
+    public async Task Inject_WholeMethodAround_TwoOperationParameters_ReportsDiagnostic() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public sealed class Target {
+                private void Tick() {
+                }
+            }
+
+            [Concord.Patch(typeof(Target))]
+            public abstract class Patch {
+                [Concord.Inject(Concord.At.Around, "Tick")]
+                private void Wrap(Concord.Operation first, Concord.Operation second) {
+                }
+            }
+            """);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Id == InjectedMemberAnalyzer.InvalidInjectionSignatureDiagnosticId &&
+            diagnostic.GetMessage().Contains("only one Operation parameter is supported"));
+    }
+
+    [Fact]
+    public async Task Inject_WholeMethodAround_OperationPlusControlHandle_ReportsDiagnostic() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public sealed class Target {
+                private void Tick() {
+                }
+            }
+
+            [Concord.Patch(typeof(Target))]
+            public abstract class Patch {
+                [Concord.Inject(Concord.At.Around, "Tick")]
+                private void Wrap(Concord.Operation original, Concord.ControlHandle control) {
+                }
+            }
+            """);
+
+        Diagnostic diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(InjectedMemberAnalyzer.InvalidInjectionSignatureDiagnosticId, diagnostic.Id);
+        Assert.Contains("no ControlHandle parameters", diagnostic.GetMessage());
+    }
+
+    [Fact]
+    public async Task Inject_WholeMethodAround_ByRefParameter_ReportsDiagnostic() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public sealed class Target {
+                private void Tick(ref int amount) {
+                }
+            }
+
+            [Concord.Patch(typeof(Target))]
+            public abstract class Patch {
+                [Concord.Inject(Concord.At.Around, "Tick")]
+                private void Wrap(Concord.Operation original) {
+                }
+            }
+            """);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Id == InjectedMemberAnalyzer.InvalidInjectionSignatureDiagnosticId &&
+            diagnostic.GetMessage().Contains("byref parameter"));
+    }
+
+    [Fact]
+    public async Task Inject_WholeMethodAround_RefReturn_ReportsDiagnostic() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public sealed class Target {
+                private int amount;
+
+                private ref int Tick() {
+                    return ref amount;
+                }
+            }
+
+            [Concord.Patch(typeof(Target))]
+            public abstract class Patch {
+                [Concord.Inject(Concord.At.Around, "Tick")]
+                private void Wrap(Concord.Operation original) {
+                }
+            }
+            """);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Id == InjectedMemberAnalyzer.InvalidInjectionSignatureDiagnosticId &&
+            diagnostic.GetMessage().Contains("returns by reference"));
+    }
+
+    [Fact]
+    public async Task Inject_WholeMethodAround_PointerParameter_ReportsDiagnostic() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public sealed unsafe class Target {
+                private void Tick(int* amount) {
+                }
+            }
+
+            [Concord.Patch(typeof(Target))]
+            public abstract class Patch {
+                [Concord.Inject(Concord.At.Around, "Tick")]
+                private void Wrap(Concord.Operation original) {
+                }
+            }
+            """);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Id == InjectedMemberAnalyzer.InvalidInjectionSignatureDiagnosticId &&
+            diagnostic.GetMessage().Contains("pointer, function pointer, or byref-like type"));
+    }
+
+    [Fact]
+    public async Task Inject_WholeMethodAround_ByRefLikeParameter_ReportsDiagnostic() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public sealed class Target {
+                private void Tick(System.Span<int> amount) {
+                }
+            }
+
+            [Concord.Patch(typeof(Target))]
+            public abstract class Patch {
+                [Concord.Inject(Concord.At.Around, "Tick")]
+                private void Wrap(Concord.Operation original) {
+                }
+            }
+            """);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Id == InjectedMemberAnalyzer.InvalidInjectionSignatureDiagnosticId &&
+            diagnostic.GetMessage().Contains("pointer, function pointer, or byref-like type"));
+    }
+
+    [Fact]
+    public async Task Inject_WholeMethodAround_AsyncTarget_ReportsDiagnostic() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public sealed class Target {
+                private async System.Threading.Tasks.Task TickAsync() {
+                    await System.Threading.Tasks.Task.CompletedTask;
+                }
+            }
+
+            [Concord.Patch(typeof(Target))]
+            public abstract class Patch {
+                [Concord.Inject(Concord.At.Around, "TickAsync")]
+                private void Wrap(Concord.Operation original) {
+                }
+            }
+            """);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Id == InjectedMemberAnalyzer.InvalidInjectionSignatureDiagnosticId &&
+            diagnostic.GetMessage().Contains("async or iterator"));
+    }
+
+    [Fact]
+    public async Task Inject_WholeMethodAround_IteratorTarget_ReportsDiagnostic() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public sealed class Target {
+                private System.Collections.Generic.IEnumerable<int> TickAll() {
+                    yield return 1;
+                }
+            }
+
+            [Concord.Patch(typeof(Target))]
+            public abstract class Patch {
+                [Concord.Inject(Concord.At.Around, "TickAll")]
+                private void Wrap(Concord.Operation original) {
+                }
+            }
+            """);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Id == InjectedMemberAnalyzer.InvalidInjectionSignatureDiagnosticId &&
+            diagnostic.GetMessage().Contains("async or iterator"));
     }
 
     [Fact]
@@ -1016,7 +1374,7 @@ public sealed class InjectedMemberAnalyzerTests {
                 CSharpSyntaxTree.ParseText(source, ParseOptions),
             },
             BasicReferences.AddRange(references),
-            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, allowUnsafe: true));
 
         CompilationWithAnalyzers compilationWithAnalyzers = compilation.WithAnalyzers(
             ImmutableArray.Create<DiagnosticAnalyzer>(new InjectedMemberAnalyzer()));
