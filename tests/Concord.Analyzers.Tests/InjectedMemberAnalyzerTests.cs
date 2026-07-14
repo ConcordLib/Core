@@ -858,6 +858,30 @@ public sealed class InjectedMemberAnalyzerTests {
     }
 
     [Fact]
+    public async Task Inject_WholeMethodAround_ConstructorZeroInvokeSites_ReportsDiagnostic() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public sealed class Target {
+                public Target(int seed) {
+                }
+            }
+
+            [Concord.Patch(typeof(Target))]
+            public abstract class Patch {
+                [Concord.Inject(Concord.At.Around, parameterTypes: new[] { typeof(int) })]
+                private void Wrap(int seed, Concord.VoidOperation<int> original) {
+                }
+            }
+            """);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Id == InjectedMemberAnalyzer.InvalidInjectionSignatureDiagnosticId &&
+            diagnostic.GetMessage().Contains("Invoke"));
+    }
+
+    [Fact]
     public async Task Inject_WholeMethodAround_ValidOperationHandleWithArgsAndResult_ReportsNothing() {
         ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
             AttributeSource +

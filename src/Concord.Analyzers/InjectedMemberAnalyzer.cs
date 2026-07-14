@@ -971,6 +971,15 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
                 "whole-method At.Around injections must declare exactly one Operation parameter and no ControlHandle parameters");
         } else if (operationCount == 1 && operationParameter is not null) {
             ValidateWholeMethodOperationShape(context, injection, target, operationParameter);
+
+            if (injection.TargetsConstructor && !ContainsOperationInvoke(injection.Method, operationParameter)) {
+                ReportInvalidInjectionSignature(
+                    context,
+                    injection,
+                    target,
+                    targetType,
+                    "whole-method At.Around on a constructor never calls Invoke(...); a constructor Around must invoke the original constructor exactly once");
+            }
         }
 
         if (target.MethodSymbol is not null) {
@@ -1076,6 +1085,26 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         foreach (SyntaxNode descendant in node.DescendantNodes(descendIntoChildren: DescendIntoMethodBody)) {
             if (descendant is YieldStatementSyntax) {
                 return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ContainsOperationInvoke(IMethodSymbol method, IParameterSymbol operationParameter) {
+        foreach (SyntaxReference syntaxReference in method.DeclaringSyntaxReferences) {
+            foreach (SyntaxNode descendant in syntaxReference.GetSyntax().DescendantNodes(descendIntoChildren: DescendIntoMethodBody)) {
+                if (descendant is not InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax memberAccess }) {
+                    continue;
+                }
+
+                if (memberAccess.Name.Identifier.Text != "Invoke" || memberAccess.Expression is not IdentifierNameSyntax identifier) {
+                    continue;
+                }
+
+                if (identifier.Identifier.Text == operationParameter.Name) {
+                    return true;
+                }
             }
         }
 

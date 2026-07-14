@@ -154,6 +154,13 @@ public static class WrapperComposer {
     }
 
     private static void ValidateWholeMethodAroundEligible(MethodBase originalTarget) {
+        if (originalTarget is ConstructorInfo && originalTarget.IsStatic) {
+            throw new ConcordEmitException(
+                "CONC114",
+                $"Whole-method Around on '{originalTarget.DeclaringType?.Name}.{originalTarget.Name}' targets a static type initializer. " +
+                "Type initializers have no coherent Around contract and are not supported.");
+        }
+
         ParameterInfo[] parameters = originalTarget.GetParameters();
         for (int i = 0; i < parameters.Length; i++) {
             Type parameterType = parameters[i].ParameterType;
@@ -276,12 +283,17 @@ public static class WrapperComposer {
             }
         }
 
-        ProtocolLocals locals = DeclareLocals(body, module, returnType, isVoid, hasAround && !isVoid);
+        bool needsCtorGuard = hasAround && target.IsConstructor;
+        ProtocolLocals locals = DeclareLocals(body, module, returnType, isVoid, hasAround && !isVoid, needsCtorGuard);
 
         List<Instruction> spine = new List<Instruction>(body.Instructions);
         Instruction afterSpine = Instruction.Create(OpCodes.Nop);
 
         List<Instruction> epilogue = BuildEpilogue(locals, isVoid);
+        if (needsCtorGuard) {
+            epilogue.InsertRange(0, BuildCtorExactlyOnceCheck(locals, module));
+        }
+
         Instruction epilogueStart = epilogue[0];
 
         RewriteSpineReturns(spine, locals, afterSpine, isVoid, hasAround, body.ExceptionHandlers);
@@ -755,6 +767,10 @@ public static class WrapperComposer {
         EnsureOperationInvokeNotInLoop(injectionMethodDefinition.Definition.Body, injection.InjectionMethod);
         EnsureAroundInvokePlacement(injectionMethodDefinition.Definition, template.Handlers.Count > 0, injection.InjectionMethod);
 
+        if (target.IsConstructor) {
+            EnsureConstructorHasInvokeSite(injectionMethodDefinition.Definition.Body, injection.InjectionMethod, target);
+        }
+
         List<SpineCopy> spineCopies = [];
         aroundBody = BodyCopier.CopyInjection(
             injectionMethodDefinition.Definition,
@@ -774,6 +790,10 @@ public static class WrapperComposer {
         }
 
         RetargetAroundSpineBranches(aroundBody, spineCopies, afterSpine, epilogueStart, locals);
+
+        if (target.IsConstructor) {
+            GuardCtorSpineCopiesAgainstReentry(aroundBody, spineCopies, locals);
+        }
     }
 
     private static void ValidateWholeMethodOperationOnly(MethodBase injectionMethod, MethodBase target) {
@@ -816,6 +836,19 @@ public static class WrapperComposer {
                     "' is inside a loop; the original body can only be spliced once.");
             }
         }
+    }
+
+    private static void EnsureConstructorHasInvokeSite(MethodBody injectionBody, MethodBase injectionMethod, MethodBase target) {
+        foreach (Instruction instruction in injectionBody.Instructions) {
+            if (ControlHandleLowering.IsOperationInvoke(instruction)) {
+                return;
+            }
+        }
+
+        throw new ConcordEmitException(
+            "CONC112",
+            $"Whole-method Around injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' on constructor '{target.DeclaringType?.Name}.{target.Name}' " +
+            "never calls Invoke(...); a constructor Around must invoke the original constructor exactly once.");
     }
 
     private static bool BranchTargetsAtOrBefore(Instruction branch, List<Instruction> instructions, int index) {
@@ -1044,13 +1077,23 @@ public static class WrapperComposer {
         ModuleDefinition module,
         Type returnType,
         bool isVoid,
-        bool needsSpliceValue) {
+        bool needsSpliceValue,
+        bool needsCtorGuard) {
         VariableDefinition cancel = new VariableDefinition(module.ImportReference(typeof(bool)));
         body.Variables.Add(cancel);
         body.InitLocals = true;
 
+        VariableDefinition? ctorBodyRan = null;
+        VariableDefinition? ctorBodyRanTwice = null;
+        if (needsCtorGuard) {
+            ctorBodyRan = new VariableDefinition(module.ImportReference(typeof(bool)));
+            ctorBodyRanTwice = new VariableDefinition(module.ImportReference(typeof(bool)));
+            body.Variables.Add(ctorBodyRan);
+            body.Variables.Add(ctorBodyRanTwice);
+        }
+
         if (isVoid) {
-            return new ProtocolLocals(cancel, null, null);
+            return new ProtocolLocals(cancel, null, null, null, ctorBodyRan, ctorBodyRanTwice);
         }
 
         VariableDefinition hasReturn = new VariableDefinition(module.ImportReference(typeof(bool)));
@@ -1064,7 +1107,7 @@ public static class WrapperComposer {
             body.Variables.Add(spliceValue);
         }
 
-        return new ProtocolLocals(cancel, hasReturn, returnValue, spliceValue);
+        return new ProtocolLocals(cancel, hasReturn, returnValue, spliceValue, ctorBodyRan, ctorBodyRanTwice);
     }
 
     private static List<Instruction> BuildEpilogue(ProtocolLocals locals, bool isVoid) {
@@ -1073,6 +1116,30 @@ public static class WrapperComposer {
         }
 
         return new List<Instruction> { Instruction.Create(OpCodes.Ldloc, locals.ReturnValue!), Instruction.Create(OpCodes.Ret) };
+    }
+
+    private static List<Instruction> BuildCtorExactlyOnceCheck(ProtocolLocals locals, ModuleDefinition module) {
+        MethodReference exceptionCtor = module.ImportReference(typeof(InvalidOperationException).GetConstructor([typeof(string)]));
+
+        Instruction afterTwiceCheck = Instruction.Create(OpCodes.Nop);
+        Instruction afterZeroCheck = Instruction.Create(OpCodes.Nop);
+
+        List<Instruction> instructions = new List<Instruction> {
+            Instruction.Create(OpCodes.Ldloc, locals.CtorBodyRanTwice!),
+            Instruction.Create(OpCodes.Brfalse, afterTwiceCheck),
+            Instruction.Create(OpCodes.Ldstr, "Constructor Around invoked the original constructor body more than once; the pre-entry guard blocked the second attempt."),
+            Instruction.Create(OpCodes.Newobj, exceptionCtor),
+            Instruction.Create(OpCodes.Throw),
+            afterTwiceCheck,
+            Instruction.Create(OpCodes.Ldloc, locals.CtorBodyRan!),
+            Instruction.Create(OpCodes.Brtrue, afterZeroCheck),
+            Instruction.Create(OpCodes.Ldstr, "Constructor Around never invoked the original constructor body; the object was not fully constructed."),
+            Instruction.Create(OpCodes.Newobj, exceptionCtor),
+            Instruction.Create(OpCodes.Throw),
+            afterZeroCheck,
+        };
+
+        return instructions;
     }
 
     private static void RewriteSpineReturns(
@@ -1300,6 +1367,45 @@ public static class WrapperComposer {
                 instruction.Operand = spliceJoin;
             }
         }
+    }
+
+    private static void GuardCtorSpineCopiesAgainstReentry(List<Instruction> aroundBody, List<SpineCopy> spineCopies, ProtocolLocals locals) {
+        foreach (SpineCopy spineCopy in spineCopies) {
+            GuardCtorSpineCopyAgainstReentry(aroundBody, spineCopy, locals);
+        }
+    }
+
+    private static void GuardCtorSpineCopyAgainstReentry(List<Instruction> aroundBody, SpineCopy spineCopy, ProtocolLocals locals) {
+        List<Instruction> spine = spineCopy.Instructions;
+        if (spine.Count == 0) {
+            return;
+        }
+
+        Instruction firstSpineInstruction = spine[0];
+        Instruction lastSpineInstruction = spine[spine.Count - 1];
+        int firstSpineIndex = aroundBody.IndexOf(firstSpineInstruction);
+        int lastSpineIndex = aroundBody.LastIndexOf(lastSpineInstruction);
+
+        Instruction skipTarget = Instruction.Create(OpCodes.Nop);
+        int skipInsertAt = lastSpineIndex + 1;
+        if (skipInsertAt < aroundBody.Count) {
+            aroundBody.Insert(skipInsertAt, skipTarget);
+        } else {
+            aroundBody.Add(skipTarget);
+        }
+
+        Instruction markRan = Instruction.Create(OpCodes.Ldc_I4_1);
+        List<Instruction> guardEntry = new List<Instruction> {
+            Instruction.Create(OpCodes.Ldloc, locals.CtorBodyRan!),
+            Instruction.Create(OpCodes.Brfalse, markRan),
+            Instruction.Create(OpCodes.Ldc_I4_1),
+            Instruction.Create(OpCodes.Stloc, locals.CtorBodyRanTwice!),
+            Instruction.Create(OpCodes.Br, skipTarget),
+            markRan,
+            Instruction.Create(OpCodes.Stloc, locals.CtorBodyRan!),
+        };
+
+        aroundBody.InsertRange(firstSpineIndex, guardEntry);
     }
 
     private static Type ResolveReturnType(MethodBase target) {

@@ -9,8 +9,12 @@ namespace Concord.Emit;
 /// <param name="HasReturn">Boolean local that records whether an explicit return value was supplied.</param>
 /// <param name="ReturnValue">Local that stores the wrapper return value for non-void targets.</param>
 /// <param name="SpliceValue">Local that carries the original body's result across an Around splice for non-void targets.</param>
+/// <param name="CtorBodyRan">Boolean local set the first time a constructor Around's spliced body copy runs.</param>
+/// <param name="CtorBodyRanTwice">Boolean local set when a second entry into any constructor Around body copy is blocked.</param>
 internal sealed record ProtocolLocals(
     VariableDefinition Cancel,
     VariableDefinition? HasReturn,
     VariableDefinition? ReturnValue,
-    VariableDefinition? SpliceValue = null);
+    VariableDefinition? SpliceValue = null,
+    VariableDefinition? CtorBodyRan = null,
+    VariableDefinition? CtorBodyRanTwice = null);
