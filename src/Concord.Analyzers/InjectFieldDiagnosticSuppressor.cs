@@ -89,14 +89,7 @@ public sealed class InjectFieldDiagnosticSuppressor : DiagnosticSuppressor {
     }
 
     private static bool HasInjectFieldAttribute(IFieldSymbol field) {
-        foreach (AttributeData attribute in field.GetAttributes()) {
-            INamedTypeSymbol? attributeClass = attribute.AttributeClass;
-            if (attributeClass?.Name == "InjectFieldAttribute" &&
-                attributeClass.ContainingNamespace.ToDisplayString() == "Concord") {
-                return true;
-            }
-        }
-
-        return false;
+        return field.GetAttributes().Any(a => a.AttributeClass?.Name == "InjectFieldAttribute" &&
+            a.AttributeClass.ContainingNamespace.ToDisplayString() == "Concord");
     }
 }

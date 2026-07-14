@@ -47,10 +47,8 @@ public sealed class BootstrapReferenceAnalyzer : DiagnosticAnalyzer {
         }
 
         ImmutableHashSet<string> adapterAssemblies = AdapterAssemblies(context.Options.AnalyzerConfigOptionsProvider);
-        foreach (AssemblyIdentity reference in context.Compilation.ReferencedAssemblyNames) {
-            if (IsForbiddenAssembly(reference.Name, adapterAssemblies)) {
-                context.ReportDiagnostic(Diagnostic.Create(Rule, Location.None, reference.Name));
-            }
+        foreach (AssemblyIdentity reference in context.Compilation.ReferencedAssemblyNames.Where(r => IsForbiddenAssembly(r.Name, adapterAssemblies))) {
+            context.ReportDiagnostic(Diagnostic.Create(Rule, Location.None, reference.Name));
         }
     }
 
