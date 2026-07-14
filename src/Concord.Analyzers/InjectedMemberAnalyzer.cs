@@ -1687,11 +1687,11 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         }
 
         if (named.Name == "Operation") {
-            return !named.IsGenericType || named.TypeArguments.Length is >= 1 and <= 4;
+            return !named.IsGenericType || named.TypeArguments.Length is >= 1 and <= 9;
         }
 
         if (named.Name == "VoidOperation") {
-            return named.IsGenericType && named.TypeArguments.Length is 1 or 2;
+            return named.IsGenericType && named.TypeArguments.Length is >= 1 and <= 8;
         }
 
         return false;

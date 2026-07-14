@@ -58,7 +58,14 @@ internal static class AccessorNameResolver {
         }
 
         Type definition = type.GetGenericTypeDefinition();
-        return definition == typeof(VoidOperation<>) || definition == typeof(VoidOperation<,>);
+        return definition == typeof(VoidOperation<>)
+               || definition == typeof(VoidOperation<,>)
+               || definition == typeof(VoidOperation<,,>)
+               || definition == typeof(VoidOperation<,,,>)
+               || definition == typeof(VoidOperation<,,,,>)
+               || definition == typeof(VoidOperation<,,,,,>)
+               || definition == typeof(VoidOperation<,,,,,,>)
+               || definition == typeof(VoidOperation<,,,,,,,>);
     }
 
     private static bool HasMethodNamed(Type declaringType, string name) {

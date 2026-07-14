@@ -78,8 +78,19 @@ internal static class ControlHandleLowering {
                || definition == typeof(Operation<,>)
                || definition == typeof(Operation<,,>)
                || definition == typeof(Operation<,,,>)
+               || definition == typeof(Operation<,,,,>)
+               || definition == typeof(Operation<,,,,,>)
+               || definition == typeof(Operation<,,,,,,>)
+               || definition == typeof(Operation<,,,,,,,>)
+               || definition == typeof(Operation<,,,,,,,,>)
                || definition == typeof(VoidOperation<>)
-               || definition == typeof(VoidOperation<,>);
+               || definition == typeof(VoidOperation<,>)
+               || definition == typeof(VoidOperation<,,>)
+               || definition == typeof(VoidOperation<,,,>)
+               || definition == typeof(VoidOperation<,,,,>)
+               || definition == typeof(VoidOperation<,,,,,>)
+               || definition == typeof(VoidOperation<,,,,,,>)
+               || definition == typeof(VoidOperation<,,,,,,,>);
     }
 
     internal static bool IsOperationInvoke(Instruction instruction) {

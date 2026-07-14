@@ -41,9 +41,15 @@ internal sealed record CallSiteShape(bool HasThis, Type? ReceiverType, Type[] Pa
                 0 => typeof(Operation),
                 1 => typeof(VoidOperation<>).MakeGenericType(ParameterTypes),
                 2 => typeof(VoidOperation<,>).MakeGenericType(ParameterTypes),
+                3 => typeof(VoidOperation<,,>).MakeGenericType(ParameterTypes),
+                4 => typeof(VoidOperation<,,,>).MakeGenericType(ParameterTypes),
+                5 => typeof(VoidOperation<,,,,>).MakeGenericType(ParameterTypes),
+                6 => typeof(VoidOperation<,,,,,>).MakeGenericType(ParameterTypes),
+                7 => typeof(VoidOperation<,,,,,,>).MakeGenericType(ParameterTypes),
+                8 => typeof(VoidOperation<,,,,,,,>).MakeGenericType(ParameterTypes),
                 _ => throw new ConcordEmitException(
                     "CONC039",
-                    $"Void call sites with {ParameterTypes.Length} arguments exceed the supported VoidOperation arity (2)."),
+                    $"Void call sites with {ParameterTypes.Length} arguments exceed the supported VoidOperation arity (8)."),
             };
         }
 
@@ -56,9 +62,14 @@ internal sealed record CallSiteShape(bool HasThis, Type? ReceiverType, Type[] Pa
             1 => typeof(Operation<,>).MakeGenericType(withResult),
             2 => typeof(Operation<,,>).MakeGenericType(withResult),
             3 => typeof(Operation<,,,>).MakeGenericType(withResult),
+            4 => typeof(Operation<,,,,>).MakeGenericType(withResult),
+            5 => typeof(Operation<,,,,,>).MakeGenericType(withResult),
+            6 => typeof(Operation<,,,,,,>).MakeGenericType(withResult),
+            7 => typeof(Operation<,,,,,,,>).MakeGenericType(withResult),
+            8 => typeof(Operation<,,,,,,,,>).MakeGenericType(withResult),
             _ => throw new ConcordEmitException(
                 "CONC039",
-                $"Value call sites with {ParameterTypes.Length} arguments exceed the supported Operation arity (3)."),
+                $"Value call sites with {ParameterTypes.Length} arguments exceed the supported Operation arity (8)."),
         };
     }
 }
