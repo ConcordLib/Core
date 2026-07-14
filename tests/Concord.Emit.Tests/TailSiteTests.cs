@@ -172,8 +172,8 @@ public sealed class TailSiteTests {
     [Theory]
     [InlineData(0, 100)]
     [InlineData(1, 200)]
-    [InlineData(2, 300)]
-    public void Tail_WithAround_TailIsCurrentlyDropped(int which, int expected) {
+    [InlineData(2, 600)]
+    public void Tail_WithAround_FiresBeforePostCode(int which, int expected) {
         MethodBase target = typeof(TailSiteTarget).GetMethod(nameof(TailSiteTarget.Pick))!;
         MethodBase aroundInjectionMethod = typeof(TailInjectionMethods).GetMethod(nameof(TailInjectionMethods.AroundPick))!;
         MethodBase tailInjectionMethod = typeof(TailInjectionMethods).GetMethod(nameof(TailInjectionMethods.Double))!;

@@ -298,17 +298,21 @@ public static class WrapperComposer {
 
         RewriteSpineReturns(spine, locals, afterSpine, isVoid, hasAround, body.ExceptionHandlers);
 
-        if (!isVoid && !hasAround) {
+        if (!isVoid) {
             bool hasReturnSite = false;
+            bool hasTailSite = false;
             for (int i = 0; i < ordered.Count; i++) {
-                if (ordered[i].At is InjectAt.Return or InjectAt.Tail) {
+                if (ordered[i].At is InjectAt.Return) {
                     hasReturnSite = true;
-                    break;
+                } else if (ordered[i].At is InjectAt.Tail) {
+                    hasTailSite = true;
                 }
             }
 
-            if (hasReturnSite) {
-                NormalizeReturnSites(spine, locals, afterSpine, body.ExceptionHandlers);
+            if (!hasAround && (hasReturnSite || hasTailSite)) {
+                NormalizeReturnSites(spine, locals.ReturnValue!, afterSpine, body.ExceptionHandlers);
+            } else if (hasAround && hasTailSite) {
+                NormalizeReturnSites(spine, locals.SpliceValue!, afterSpine, body.ExceptionHandlers);
             }
         }
 
@@ -320,6 +324,7 @@ public static class WrapperComposer {
         List<List<Instruction>> returnBodies = new List<List<Instruction>>();
         List<List<Instruction>> tailBodies = new List<List<Instruction>>();
         List<(Injection Injection, InjectAt.Return ReturnSite)> aroundReturnInjections = new List<(Injection, InjectAt.Return)>();
+        List<Injection> aroundTailInjections = new List<Injection>();
         Injection? aroundInjection = null;
         List<Instruction>? aroundBody = null;
         Instruction? lastExit = null;
@@ -333,7 +338,12 @@ public static class WrapperComposer {
             }
 
             if (injection.At is InjectAt.Tail) {
-                lastExit = ProcessTailInjection(injection, wrapperDefinition, target, locals, afterSpine, spine, tailBodies);
+                if (hasAround) {
+                    aroundTailInjections.Add(injection);
+                } else {
+                    lastExit = ProcessTailInjection(injection, wrapperDefinition, target, locals, afterSpine, spine, tailBodies);
+                }
+
                 continue;
             }
 
@@ -376,7 +386,8 @@ public static class WrapperComposer {
 
         if (aroundInjection is not null) {
             aroundReturnInjections.Reverse();
-            ProcessAroundInjection(aroundInjection, wrapperDefinition, target, locals, epilogueStart, afterSpine, spine, aroundReturnInjections, ref aroundBody);
+            aroundTailInjections.Reverse();
+            ProcessAroundInjection(aroundInjection, wrapperDefinition, target, locals, epilogueStart, afterSpine, spine, aroundReturnInjections, aroundTailInjections, ref aroundBody);
         }
 
         List<Instruction> heads = ChainBodies(headBodies, guardStart);
@@ -564,6 +575,45 @@ public static class WrapperComposer {
                 int aroundBodyExitIndex = aroundBody.IndexOf(exit);
                 aroundBody.InsertRange(aroundBodyExitIndex, siteBody);
             }
+        }
+    }
+
+    private static void SpliceTailInjectionsIntoSpineCopy(
+        SpineCopy spineCopy,
+        List<Instruction> aroundBody,
+        List<Injection> tailInjections,
+        MethodDefinition wrapperDefinition,
+        MethodBase target,
+        ProtocolLocals locals,
+        Instruction afterSpine) {
+        foreach (Injection injection in tailInjections) {
+            List<Instruction> allExits = FindReturnExits(spineCopy.Instructions, afterSpine);
+            if (allExits.Count == 0) {
+                throw new ConcordEmitException(
+                    "CONC106",
+                    $"Tail injection on '{target.DeclaringType?.Name}.{target.Name}' found no return in the target body.");
+            }
+
+            Instruction lastExit = allExits[allExits.Count - 1];
+
+            InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
+            using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
+            List<Instruction> siteBody = BodyCopier.CopyInjection(
+                injectionMethodDefinition.Definition,
+                wrapperDefinition,
+                target,
+                injection.InjectionMethod,
+                injectedMembers,
+                locals,
+                lastExit,
+                insideAround: true);
+            BodyCopier.RewriteSpliceArgs(siteBody, spineCopy.ArgLocals);
+
+            int spineCopyExitIndex = spineCopy.Instructions.IndexOf(lastExit);
+            spineCopy.Instructions.InsertRange(spineCopyExitIndex, siteBody);
+
+            int aroundBodyExitIndex = aroundBody.IndexOf(lastExit);
+            aroundBody.InsertRange(aroundBodyExitIndex, siteBody);
         }
     }
 
@@ -798,6 +848,7 @@ public static class WrapperComposer {
         Instruction afterSpine,
         List<Instruction> spine,
         List<(Injection Injection, InjectAt.Return ReturnSite)> returnInjections,
+        List<Injection> tailInjections,
         ref List<Instruction>? aroundBody) {
         if (aroundBody is not null) {
             throw new ConcordEmitException(
@@ -858,6 +909,12 @@ public static class WrapperComposer {
         if (returnInjections.Count > 0) {
             foreach (SpineCopy spineCopy in spineCopies) {
                 SpliceReturnInjectionsIntoSpineCopy(spineCopy, aroundBody, returnInjections, wrapperDefinition, target, locals, afterSpine);
+            }
+        }
+
+        if (tailInjections.Count > 0) {
+            foreach (SpineCopy spineCopy in spineCopies) {
+                SpliceTailInjectionsIntoSpineCopy(spineCopy, aroundBody, tailInjections, wrapperDefinition, target, locals, afterSpine);
             }
         }
 
@@ -1260,8 +1317,8 @@ public static class WrapperComposer {
         }
     }
 
-    private static void NormalizeReturnSites(List<Instruction> spine, ProtocolLocals locals, Instruction afterSpine, IList<ExceptionHandler> handlers) {
-        Instruction? exitStore = FindExitStore(spine, locals, afterSpine);
+    private static void NormalizeReturnSites(List<Instruction> spine, VariableDefinition exitLocal, Instruction afterSpine, IList<ExceptionHandler> handlers) {
+        Instruction? exitStore = FindExitStore(spine, exitLocal, afterSpine);
         if (exitStore is null) {
             return;
         }
@@ -1298,7 +1355,7 @@ public static class WrapperComposer {
             int branchIndex = spine.IndexOf(branch);
             OpCode exit = IsInsideProtectedRegion(branch, handlers) ? OpCodes.Leave : OpCodes.Br;
             spine[branchIndex] = CloneLoadLocal(sharedLoad);
-            spine.Insert(branchIndex + 1, Instruction.Create(OpCodes.Stloc, locals.ReturnValue!));
+            spine.Insert(branchIndex + 1, Instruction.Create(OpCodes.Stloc, exitLocal));
             spine.Insert(branchIndex + 2, Instruction.Create(exit, afterSpine));
         }
 
@@ -1310,11 +1367,11 @@ public static class WrapperComposer {
         spine.RemoveAt(deadTailIndex);
     }
 
-    private static Instruction? FindExitStore(List<Instruction> spine, ProtocolLocals locals, Instruction afterSpine) {
+    private static Instruction? FindExitStore(List<Instruction> spine, VariableDefinition exitLocal, Instruction afterSpine) {
         for (int i = 0; i < spine.Count - 1; i++) {
             Instruction store = spine[i];
             Instruction branch = spine[i + 1];
-            if (store.OpCode == OpCodes.Stloc && ReferenceEquals(store.Operand, locals.ReturnValue)
+            if (store.OpCode == OpCodes.Stloc && ReferenceEquals(store.Operand, exitLocal)
                 && branch.OpCode == OpCodes.Br && ReferenceEquals(branch.Operand, afterSpine)) {
                 return store;
             }

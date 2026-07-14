@@ -101,6 +101,47 @@ public static class AroundComposeChangedArgInjectionMethods {
     }
 }
 
+public static class AroundComposeTailTarget {
+    public static int Pick(int which) {
+        if (which == 0) {
+            return 10;
+        }
+
+        if (which == 1) {
+            return 20;
+        }
+
+        return 30;
+    }
+}
+
+public static class AroundComposeTailInjectionMethods {
+    public static int Times10(int which, Operation<int, int> original) {
+        int result = original.Invoke(which);
+        return result * 10;
+    }
+
+    public static void Double(ControlHandle<int> ch) {
+        ch.ReturnValue *= 2;
+    }
+}
+
+public static class AroundComposeMultiInvokeTailTarget {
+    public static int Triple(int x) {
+        return x * 3;
+    }
+}
+
+public static class AroundComposeMultiInvokeTailInjectionMethods {
+    public static int InvokeTwiceAndSum(int x, Operation<int, int> original) {
+        return original.Invoke(x) + original.Invoke(x + 1);
+    }
+
+    public static void Double(ControlHandle<int> ch) {
+        ch.ReturnValue *= 2;
+    }
+}
+
 public sealed class AroundComposeTests {
     [Fact]
     public void Compose_HeadAndAround_HeadRunsBeforeAroundPreCode() {
@@ -225,5 +266,56 @@ public sealed class AroundComposeTests {
         object? value = result.Wrapper.Invoke(null, [5]);
 
         Assert.Equal(3, value);
+    }
+
+    [Theory]
+    [InlineData(0, 100)]
+    [InlineData(1, 200)]
+    [InlineData(2, 600)]
+    public void Compose_TailWithAround_FiresBeforePostCodeOnLastBodyReturnOnly(int which, int expected) {
+        MethodBase target = typeof(AroundComposeTailTarget).GetMethod(nameof(AroundComposeTailTarget.Pick))!;
+        MethodBase aroundInjectionMethod = typeof(AroundComposeTailInjectionMethods).GetMethod(nameof(AroundComposeTailInjectionMethods.Times10))!;
+        MethodBase tailInjectionMethod = typeof(AroundComposeTailInjectionMethods).GetMethod(nameof(AroundComposeTailInjectionMethods.Double))!;
+
+        Injection around = new Injection(aroundInjectionMethod, new InjectAt.Around(), "test", 0);
+        Injection tail = new Injection(tailInjectionMethod, new InjectAt.Tail(), "test", 1);
+
+        ComposeResult result = WrapperComposer.Compose(target, [around, tail]);
+        object? value = result.Wrapper.Invoke(null, [which]);
+
+        Assert.Equal(expected, value);
+    }
+
+    [Theory]
+    [InlineData(0, 100)]
+    [InlineData(1, 200)]
+    [InlineData(2, 600)]
+    public void Compose_TailPriorityAboveAround_SameResultAsBelow(int which, int expected) {
+        MethodBase target = typeof(AroundComposeTailTarget).GetMethod(nameof(AroundComposeTailTarget.Pick))!;
+        MethodBase aroundInjectionMethod = typeof(AroundComposeTailInjectionMethods).GetMethod(nameof(AroundComposeTailInjectionMethods.Times10))!;
+        MethodBase tailInjectionMethod = typeof(AroundComposeTailInjectionMethods).GetMethod(nameof(AroundComposeTailInjectionMethods.Double))!;
+
+        Injection around = new Injection(aroundInjectionMethod, new InjectAt.Around(), "test", 1);
+        Injection tail = new Injection(tailInjectionMethod, new InjectAt.Tail(), "test", 0);
+
+        ComposeResult result = WrapperComposer.Compose(target, [tail, around]);
+        object? value = result.Wrapper.Invoke(null, [which]);
+
+        Assert.Equal(expected, value);
+    }
+
+    [Fact]
+    public void Compose_TailWithAroundMultipleInvoke_FiresPerBodyRun() {
+        MethodBase target = typeof(AroundComposeMultiInvokeTailTarget).GetMethod(nameof(AroundComposeMultiInvokeTailTarget.Triple))!;
+        MethodBase aroundInjectionMethod = typeof(AroundComposeMultiInvokeTailInjectionMethods).GetMethod(nameof(AroundComposeMultiInvokeTailInjectionMethods.InvokeTwiceAndSum))!;
+        MethodBase tailInjectionMethod = typeof(AroundComposeMultiInvokeTailInjectionMethods).GetMethod(nameof(AroundComposeMultiInvokeTailInjectionMethods.Double))!;
+
+        Injection around = new Injection(aroundInjectionMethod, new InjectAt.Around(), "test", 0);
+        Injection tail = new Injection(tailInjectionMethod, new InjectAt.Tail(), "test", 1);
+
+        ComposeResult result = WrapperComposer.Compose(target, [around, tail]);
+        object? value = result.Wrapper.Invoke(null, [5]);
+
+        Assert.Equal(66, value);
     }
 }
