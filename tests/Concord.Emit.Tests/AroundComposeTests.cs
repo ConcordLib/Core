@@ -60,6 +60,47 @@ public static class AroundComposeCtorInjectionMethods {
     }
 }
 
+public static class AroundComposeReturnTarget {
+    public static int Pick(int which) {
+        if (which == 0) {
+            return 10;
+        }
+
+        if (which == 1) {
+            return 20;
+        }
+
+        return 30;
+    }
+}
+
+public static class AroundComposeReturnInjectionMethods {
+    public static int PassThrough(int which, Operation<int, int> original) {
+        return original.Invoke(which);
+    }
+
+    public static void Double(ControlHandle<int> ch) {
+        int current = ch.ReturnValue;
+        ch.ReturnValue = current * 2;
+    }
+}
+
+public static class AroundComposeChangedArgTarget {
+    public static int Double(int x) {
+        return x * 2;
+    }
+}
+
+public static class AroundComposeChangedArgInjectionMethods {
+    public static int WrapChangedArg(int x, Operation<int, int> original) {
+        return original.Invoke(x - 2);
+    }
+
+    public static void ObserveArg(ControlHandle<int> ch, int x) {
+        ch.ReturnValue = x;
+    }
+}
+
 public sealed class AroundComposeTests {
     [Fact]
     public void Compose_HeadAndAround_HeadRunsBeforeAroundPreCode() {
@@ -133,5 +174,56 @@ public sealed class AroundComposeTests {
         } finally {
             handle.Dispose();
         }
+    }
+
+    [Theory]
+    [InlineData(0, 20)]
+    [InlineData(1, 40)]
+    [InlineData(2, 60)]
+    public void Compose_ReturnWithAround_DoublesEveryBodyReturnThroughSpliceValue(int which, int expected) {
+        MethodBase target = typeof(AroundComposeReturnTarget).GetMethod(nameof(AroundComposeReturnTarget.Pick))!;
+        MethodBase aroundInjectionMethod = typeof(AroundComposeReturnInjectionMethods).GetMethod(nameof(AroundComposeReturnInjectionMethods.PassThrough))!;
+        MethodBase returnInjectionMethod = typeof(AroundComposeReturnInjectionMethods).GetMethod(nameof(AroundComposeReturnInjectionMethods.Double))!;
+
+        Injection around = new Injection(aroundInjectionMethod, new InjectAt.Around(), "test", 0);
+        Injection ret = new Injection(returnInjectionMethod, new InjectAt.Return(0), "test", 1);
+
+        ComposeResult result = WrapperComposer.Compose(target, [around, ret]);
+        object? value = result.Wrapper.Invoke(null, [which]);
+
+        Assert.Equal(expected, value);
+    }
+
+    [Theory]
+    [InlineData(0, 20)]
+    [InlineData(1, 40)]
+    [InlineData(2, 60)]
+    public void Compose_ReturnPriorityAboveAround_SameResultAsBelow(int which, int expected) {
+        MethodBase target = typeof(AroundComposeReturnTarget).GetMethod(nameof(AroundComposeReturnTarget.Pick))!;
+        MethodBase aroundInjectionMethod = typeof(AroundComposeReturnInjectionMethods).GetMethod(nameof(AroundComposeReturnInjectionMethods.PassThrough))!;
+        MethodBase returnInjectionMethod = typeof(AroundComposeReturnInjectionMethods).GetMethod(nameof(AroundComposeReturnInjectionMethods.Double))!;
+
+        Injection around = new Injection(aroundInjectionMethod, new InjectAt.Around(), "test", 1);
+        Injection ret = new Injection(returnInjectionMethod, new InjectAt.Return(0), "test", 0);
+
+        ComposeResult result = WrapperComposer.Compose(target, [ret, around]);
+        object? value = result.Wrapper.Invoke(null, [which]);
+
+        Assert.Equal(expected, value);
+    }
+
+    [Fact]
+    public void Compose_ReturnWithAroundChangedArg_ObservesInvokeArgNotAmbientArg() {
+        MethodBase target = typeof(AroundComposeChangedArgTarget).GetMethod(nameof(AroundComposeChangedArgTarget.Double))!;
+        MethodBase aroundInjectionMethod = typeof(AroundComposeChangedArgInjectionMethods).GetMethod(nameof(AroundComposeChangedArgInjectionMethods.WrapChangedArg))!;
+        MethodBase returnInjectionMethod = typeof(AroundComposeChangedArgInjectionMethods).GetMethod(nameof(AroundComposeChangedArgInjectionMethods.ObserveArg))!;
+
+        Injection around = new Injection(aroundInjectionMethod, new InjectAt.Around(), "test", 0);
+        Injection ret = new Injection(returnInjectionMethod, new InjectAt.Return(0), "test", 1);
+
+        ComposeResult result = WrapperComposer.Compose(target, [around, ret]);
+        object? value = result.Wrapper.Invoke(null, [5]);
+
+        Assert.Equal(3, value);
     }
 }

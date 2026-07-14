@@ -58,6 +58,11 @@ internal static class BodyCopier {
     /// <param name="returnBranchTarget">The instruction to branch to when the injection method returns.</param>
     /// <param name="spineTemplate">The whole-method Around spine template to splice a fresh copy from at each Invoke site, if any.</param>
     /// <param name="spineCopies">Collects one <see cref="SpineCopy" /> per Invoke site spliced while copying, if any.</param>
+    /// <param name="insideAround">
+    ///     <see langword="true" /> when this injection body is being spliced inside a whole-method Around's
+    ///     <see cref="SpineCopy" />, so its <c>ControlHandle</c> return-value protocol reads/writes
+    ///     <see cref="ProtocolLocals.SpliceValue" /> instead of <see cref="ProtocolLocals.ReturnValue" />.
+    /// </param>
     /// <returns>The copied and lowered instruction sequence.</returns>
     public static List<Instruction> CopyInjection(
         MethodDefinition injectionDefinition,
@@ -68,7 +73,8 @@ internal static class BodyCopier {
         ProtocolLocals locals,
         Instruction returnBranchTarget,
         SpineTemplate? spineTemplate = null,
-        List<SpineCopy>? spineCopies = null) {
+        List<SpineCopy>? spineCopies = null,
+        bool insideAround = false) {
         MethodBody injectionBody = injectionDefinition.Body;
         ModuleDefinition module = destination.Module;
 
@@ -94,7 +100,8 @@ internal static class BodyCopier {
                 target,
                 spineTemplate,
                 destination,
-                spineCopies);
+                spineCopies,
+                insideAround);
             entries.Add((source_instruction, emitted));
         }
 
@@ -248,6 +255,32 @@ internal static class BodyCopier {
         return result;
     }
 
+    /// <summary>
+    ///     Rewrites <c>ldarg</c>/<c>ldarga</c>/<c>starg</c> instructions that target a rebound parameter to
+    ///     load/store the given per-copy argument local instead, so a body spliced into a <see cref="SpineCopy" />
+    ///     observes that copy's (possibly Invoke-changed) argument values.
+    /// </summary>
+    /// <param name="spliceBody">The instruction list to rewrite in place.</param>
+    /// <param name="argLocals">Maps a wrapper-relative argument index to its per-copy local.</param>
+    internal static void RewriteSpliceArgs(List<Instruction> spliceBody, Dictionary<int, VariableDefinition> argLocals) {
+        foreach (Instruction instruction in spliceBody) {
+            bool isAddress = instruction.OpCode == OpCodes.Ldarga || instruction.OpCode == OpCodes.Ldarga_S;
+            bool isStore = instruction.OpCode == OpCodes.Starg || instruction.OpCode == OpCodes.Starg_S;
+            bool isLoad = IsLoadArgOpCode(instruction.OpCode);
+            if (!isAddress && !isStore && !isLoad) {
+                continue;
+            }
+
+            int argIndex = GetArgIndex(instruction);
+            if (argIndex < 0 || !argLocals.TryGetValue(argIndex, out VariableDefinition? local)) {
+                continue;
+            }
+
+            instruction.OpCode = isAddress ? OpCodes.Ldloca : isStore ? OpCodes.Stloc : OpCodes.Ldloc;
+            instruction.Operand = local;
+        }
+    }
+
     private static void CopyInjectionHandlers(
         MethodBody injectionBody,
         MethodBody destinationBody,
@@ -341,25 +374,6 @@ internal static class BodyCopier {
         return argLocals;
     }
 
-    private static void RewriteSpliceArgs(List<Instruction> spliceBody, Dictionary<int, VariableDefinition> argLocals) {
-        foreach (Instruction instruction in spliceBody) {
-            bool isAddress = instruction.OpCode == OpCodes.Ldarga || instruction.OpCode == OpCodes.Ldarga_S;
-            bool isStore = instruction.OpCode == OpCodes.Starg || instruction.OpCode == OpCodes.Starg_S;
-            bool isLoad = IsLoadArgOpCode(instruction.OpCode);
-            if (!isAddress && !isStore && !isLoad) {
-                continue;
-            }
-
-            int argIndex = GetArgIndex(instruction);
-            if (argIndex < 0 || !argLocals.TryGetValue(argIndex, out VariableDefinition? local)) {
-                continue;
-            }
-
-            instruction.OpCode = isAddress ? OpCodes.Ldloca : isStore ? OpCodes.Stloc : OpCodes.Ldloc;
-            instruction.Operand = local;
-        }
-    }
-
     /// <summary>
     ///     Lowers an <c>Operation.Invoke</c> call: pops the invoke's evaluated arguments into fresh temps,
     ///     re-pushes the spilled receiver and the temps in call order, then emits the original call.
@@ -406,7 +420,8 @@ internal static class BodyCopier {
         MethodBase? target = null,
         SpineTemplate? spineTemplate = null,
         MethodDefinition? destination = null,
-        List<SpineCopy>? spineCopies = null) {
+        List<SpineCopy>? spineCopies = null,
+        bool insideAround = false) {
         if (ControlHandleLowering.IsControlHandleReceiverLoad(source, controlHandleArgIndex)) {
             EnsureNotStrayControlHandleUse(source, controlHandleArgIndex, target, injectionMethod);
             return new List<Instruction>(0);
@@ -467,10 +482,15 @@ internal static class BodyCopier {
         }
 
         if (controlCall == ControlHandleLowering.ControlCallKind.GetReturnValue) {
-            return new List<Instruction> { Instruction.Create(OpCodes.Ldloc, locals.ReturnValue!) };
+            VariableDefinition returnValueSource = insideAround && locals.SpliceValue is not null ? locals.SpliceValue : locals.ReturnValue!;
+            return new List<Instruction> { Instruction.Create(OpCodes.Ldloc, returnValueSource) };
         }
 
         if (controlCall == ControlHandleLowering.ControlCallKind.SetReturnValue) {
+            if (insideAround && locals.SpliceValue is not null) {
+                return new List<Instruction> { Instruction.Create(OpCodes.Stloc, locals.SpliceValue) };
+            }
+
             return new List<Instruction> {
                 Instruction.Create(OpCodes.Stloc, locals.ReturnValue!),
                 Instruction.Create(OpCodes.Ldc_I4_1),
