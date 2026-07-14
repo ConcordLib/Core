@@ -49,11 +49,7 @@ internal static class BodyCopier {
     /// <summary>
     ///     Copies an injection method body into a wrapper instruction list.
     /// </summary>
-    /// <param name="injectionDefinition">The Cecil definition for the injection method.</param>
-    /// <param name="destination">The destination wrapper method definition.</param>
-    /// <param name="target">The target method being patched.</param>
-    /// <param name="injectionMethod">The reflection method for the injection method body.</param>
-    /// <param name="injectedMembers">The resolved injected-member map for the injection's declaring type.</param>
+    /// <param name="request">The injection identity and target being copied.</param>
     /// <param name="locals">Wrapper locals used for cancellation and return-value protocol state.</param>
     /// <param name="returnBranchTarget">The instruction to branch to when the injection method returns.</param>
     /// <param name="spineTemplate">The whole-method Around spine template to splice a fresh copy from at each Invoke site, if any.</param>
@@ -65,43 +61,39 @@ internal static class BodyCopier {
     /// </param>
     /// <returns>The copied and lowered instruction sequence.</returns>
     public static List<Instruction> CopyInjection(
-        MethodDefinition injectionDefinition,
-        MethodDefinition destination,
-        MethodBase target,
-        MethodBase injectionMethod,
-        InjectedMemberMap injectedMembers,
+        InjectionCopyRequest request,
         ProtocolLocals locals,
         Instruction returnBranchTarget,
         SpineTemplate? spineTemplate = null,
         List<SpineCopy>? spineCopies = null,
         bool insideAround = false) {
-        MethodBody injectionBody = injectionDefinition.Body;
-        ModuleDefinition module = destination.Module;
+        MethodBody injectionBody = request.InjectionDefinition.Body;
+        ModuleDefinition module = request.Destination.Module;
 
-        Dictionary<int, int> argRemap = BuildArgRemap(target, injectionMethod);
-        int controlHandleArgIndex = ControlHandleLowering.FindControlHandleArgIndex(injectionMethod);
-        int operationArgIndex = ControlHandleLowering.FindOperationArgIndex(injectionMethod);
+        Dictionary<int, int> argRemap = BuildArgRemap(request.Target, request.InjectionMethod);
+        int controlHandleArgIndex = ControlHandleLowering.FindControlHandleArgIndex(request.InjectionMethod);
+        int operationArgIndex = ControlHandleLowering.FindOperationArgIndex(request.InjectionMethod);
 
-        Dictionary<VariableDefinition, VariableDefinition> variableMap = CopyInjectionLocals(injectionBody, destination.Body, module);
-        LoweringContext ctx = new LoweringContext(module, variableMap, injectionBody.Variables, injectedMembers, argRemap, destination.Body.Variables);
+        Dictionary<VariableDefinition, VariableDefinition> variableMap = CopyInjectionLocals(injectionBody, request.Destination.Body, module);
+        LoweringContext ctx = new LoweringContext(module, variableMap, injectionBody.Variables, request.InjectedMembers, argRemap, request.Destination.Body.Variables);
+
+        InjectionLoweringSite site = new InjectionLoweringSite(
+            controlHandleArgIndex,
+            operationArgIndex,
+            locals,
+            returnBranchTarget,
+            request.InjectionMethod,
+            request.Target,
+            spineTemplate,
+            request.Destination,
+            spineCopies,
+            insideAround);
 
         List<(Instruction Source, List<Instruction> Emitted)> entries =
             new List<(Instruction Source, List<Instruction> Emitted)>(injectionBody.Instructions.Count);
 
         foreach (Instruction source_instruction in injectionBody.Instructions) {
-            List<Instruction> emitted = LowerInstruction(
-                source_instruction,
-                ctx,
-                controlHandleArgIndex,
-                operationArgIndex,
-                locals,
-                returnBranchTarget,
-                injectionMethod,
-                target,
-                spineTemplate,
-                destination,
-                spineCopies,
-                insideAround);
+            List<Instruction> emitted = LowerInstruction(source_instruction, ctx, site);
             entries.Add((source_instruction, emitted));
         }
 
@@ -115,7 +107,7 @@ internal static class BodyCopier {
             }
         }
 
-        CopyInjectionHandlers(injectionBody, destination.Body, instructionMap, module);
+        CopyInjectionHandlers(injectionBody, request.Destination.Body, instructionMap, module);
 
         return result;
     }
@@ -178,11 +170,7 @@ internal static class BodyCopier {
     /// <summary>
     ///     Copies a call-site wrap injection method body and lowers Operation.Invoke calls to the original call.
     /// </summary>
-    /// <param name="injectionDefinition">The Cecil definition for the injection method.</param>
-    /// <param name="destination">The destination wrapper method definition.</param>
-    /// <param name="target">The target method being patched.</param>
-    /// <param name="injectionMethod">The reflection method for the injection method body.</param>
-    /// <param name="injectedMembers">The resolved injected-member map for the injection's declaring type.</param>
+    /// <param name="request">The injection identity and target being copied.</param>
     /// <param name="wrapEnd">The instruction to branch to when the wrap injection method returns.</param>
     /// <param name="originalCall">The original call-site method reference.</param>
     /// <param name="receiverLocal">The spilled receiver local, or <see langword="null" /> for a static call site.</param>
@@ -191,23 +179,19 @@ internal static class BodyCopier {
     /// <param name="shape">The matched call site's resolved shape.</param>
     /// <returns>The copied and lowered instruction sequence.</returns>
     public static List<Instruction> CopyWrapInjection(
-        MethodDefinition injectionDefinition,
-        MethodDefinition destination,
-        MethodBase target,
-        MethodBase injectionMethod,
-        InjectedMemberMap injectedMembers,
+        InjectionCopyRequest request,
         Instruction wrapEnd,
         MethodReference originalCall,
         VariableDefinition? receiverLocal,
         IReadOnlyList<VariableDefinition> argLocals,
         OpCode originalOpCode,
         CallSiteShape shape) {
-        MethodBody injectionBody = injectionDefinition.Body;
-        ModuleDefinition module = destination.Module;
+        MethodBody injectionBody = request.InjectionDefinition.Body;
+        ModuleDefinition module = request.Destination.Module;
 
-        Dictionary<int, VariableDefinition> wrapArgBinding = BuildWrapArgBinding(injectionMethod, argLocals, shape);
-        Dictionary<int, int> thisRemap = injectionMethod.IsStatic ? new Dictionary<int, int>() : new Dictionary<int, int> { [0] = 0 };
-        int operationArgIndex = ControlHandleLowering.FindOperationArgIndex(injectionMethod);
+        Dictionary<int, VariableDefinition> wrapArgBinding = BuildWrapArgBinding(request.InjectionMethod, argLocals, shape);
+        Dictionary<int, int> thisRemap = request.InjectionMethod.IsStatic ? new Dictionary<int, int>() : new Dictionary<int, int> { [0] = 0 };
+        int operationArgIndex = ControlHandleLowering.FindOperationArgIndex(request.InjectionMethod);
 
         MethodBase resolvedOriginal = originalCall.ResolveReflection();
         MethodReference importedOriginal = resolvedOriginal is ConstructorInfo originalConstructor
@@ -220,23 +204,23 @@ internal static class BodyCopier {
             invokeParameterTypes[i] = originalParameters[i].ParameterType;
         }
 
-        Dictionary<VariableDefinition, VariableDefinition> variableMap = CopyInjectionLocals(injectionBody, destination.Body, module);
-        LoweringContext ctx = new LoweringContext(module, variableMap, injectionBody.Variables, injectedMembers, thisRemap, destination.Body.Variables);
+        Dictionary<VariableDefinition, VariableDefinition> variableMap = CopyInjectionLocals(injectionBody, request.Destination.Body, module);
+        LoweringContext ctx = new LoweringContext(module, variableMap, injectionBody.Variables, request.InjectedMembers, thisRemap, request.Destination.Body.Variables);
+
+        WrapLoweringSite site = new WrapLoweringSite(
+            operationArgIndex,
+            wrapEnd,
+            importedOriginal,
+            receiverLocal,
+            invokeParameterTypes,
+            originalOpCode,
+            wrapArgBinding);
 
         List<(Instruction Source, List<Instruction> Emitted)> entries =
             new List<(Instruction Source, List<Instruction> Emitted)>(injectionBody.Instructions.Count);
 
         foreach (Instruction source_instruction in injectionBody.Instructions) {
-            List<Instruction> emitted = LowerWrapInstruction(
-                source_instruction,
-                ctx,
-                operationArgIndex,
-                wrapEnd,
-                importedOriginal,
-                receiverLocal,
-                invokeParameterTypes,
-                originalOpCode,
-                wrapArgBinding);
+            List<Instruction> emitted = LowerWrapInstruction(source_instruction, ctx, site);
             entries.Add((source_instruction, emitted));
         }
 
@@ -250,7 +234,7 @@ internal static class BodyCopier {
             }
         }
 
-        CopyInjectionHandlers(injectionBody, destination.Body, instructionMap, module);
+        CopyInjectionHandlers(injectionBody, request.Destination.Body, instructionMap, module);
 
         return result;
     }
@@ -276,7 +260,12 @@ internal static class BodyCopier {
                 continue;
             }
 
-            instruction.OpCode = isAddress ? OpCodes.Ldloca : isStore ? OpCodes.Stloc : OpCodes.Ldloc;
+            instruction.OpCode = (isAddress, isStore) switch
+            {
+                (true, _) => OpCodes.Ldloca,
+                (false, true) => OpCodes.Stloc,
+                _ => OpCodes.Ldloc,
+            };
             instruction.Operand = local;
         }
     }
@@ -291,29 +280,20 @@ internal static class BodyCopier {
         }
     }
 
-    private static List<Instruction> LowerWrapInstruction(
-        Instruction source,
-        LoweringContext ctx,
-        int operationArgIndex,
-        Instruction wrapEnd,
-        MethodReference importedOriginal,
-        VariableDefinition? receiverLocal,
-        IReadOnlyList<Type> invokeParameterTypes,
-        OpCode originalOpCode,
-        Dictionary<int, VariableDefinition> wrapArgBinding) {
-        if (ControlHandleLowering.IsOperationReceiverLoad(source, operationArgIndex)) {
+    private static List<Instruction> LowerWrapInstruction(Instruction source, LoweringContext ctx, WrapLoweringSite site) {
+        if (ControlHandleLowering.IsOperationReceiverLoad(source, site.OperationArgIndex)) {
             return new List<Instruction>(0);
         }
 
         if (ControlHandleLowering.IsOperationInvoke(source)) {
-            return LowerOperationInvoke(ctx, importedOriginal, receiverLocal, invokeParameterTypes, originalOpCode);
+            return LowerOperationInvoke(ctx, site.ImportedOriginal, site.ReceiverLocal, site.InvokeParameterTypes, site.OriginalOpCode);
         }
 
         if (source.OpCode == OpCodes.Ret) {
-            return new List<Instruction> { Instruction.Create(OpCodes.Br, wrapEnd) };
+            return new List<Instruction> { Instruction.Create(OpCodes.Br, site.WrapEnd) };
         }
 
-        if (TryLowerWrapArgBinding(source, wrapArgBinding, out Instruction? bound)) {
+        if (TryLowerWrapArgBinding(source, site.WrapArgBinding, out Instruction? bound)) {
             return new List<Instruction> { bound! };
         }
 
@@ -409,112 +389,24 @@ internal static class BodyCopier {
         return emitted;
     }
 
-    private static List<Instruction> LowerInstruction(
-        Instruction source,
-        LoweringContext ctx,
-        int controlHandleArgIndex,
-        int operationArgIndex,
-        ProtocolLocals locals,
-        Instruction returnBranchTarget,
-        MethodBase injectionMethod,
-        MethodBase? target = null,
-        SpineTemplate? spineTemplate = null,
-        MethodDefinition? destination = null,
-        List<SpineCopy>? spineCopies = null,
-        bool insideAround = false) {
-        if (ControlHandleLowering.IsControlHandleReceiverLoad(source, controlHandleArgIndex)) {
-            EnsureNotStrayControlHandleUse(source, controlHandleArgIndex, target, injectionMethod);
-            return new List<Instruction>(0);
+    private static List<Instruction> LowerInstruction(Instruction source, LoweringContext ctx, InjectionLoweringSite site) {
+        List<Instruction>? strayHandleUse = TryLowerStrayHandleUse(source, site);
+        if (strayHandleUse is not null) {
+            return strayHandleUse;
         }
 
-        if (IsControlHandleDup(source, controlHandleArgIndex)) {
-            EnsureNotStrayControlHandleUse(source, controlHandleArgIndex, target, injectionMethod);
-            return new List<Instruction>(0);
+        List<Instruction>? spliceLowering = TryLowerOriginalBodySplice(source, ctx, site);
+        if (spliceLowering is not null) {
+            return spliceLowering;
         }
 
-        if (spineTemplate is not null && ControlHandleLowering.IsOperationReceiverLoad(source, operationArgIndex)) {
-            EnsureNotStrayOperationUse(source, operationArgIndex, injectionMethod);
-            return new List<Instruction>(0);
-        }
-
-        if (spineTemplate is not null && IsOperationDup(source, operationArgIndex)) {
-            EnsureNotStrayOperationUse(source, operationArgIndex, injectionMethod);
-            return new List<Instruction>(0);
-        }
-
-        if (target is not null && spineTemplate is not null && ControlHandleLowering.IsOperationInvoke(source)) {
-            SpineCopy spineCopy = SpineCopy.Create(spineTemplate, destination!);
-            spineCopies!.Add(spineCopy);
-
-            List<Instruction> spliced = new List<Instruction>(target.GetParameters().Length + spineCopy.Instructions.Count);
-            List<VariableDefinition> argLocals = SpillInvokeArgs(ctx, target, spliced);
-
-            int targetOffset = target.IsStatic ? 0 : 1;
-            for (int i = 0; i < argLocals.Count; i++) {
-                spineCopy.ArgLocals[i + targetOffset] = argLocals[i];
-            }
-
-            RewriteSpliceArgs(spineCopy.Instructions, spineCopy.ArgLocals);
-
-            spliced.AddRange(spineCopy.Instructions);
-            return spliced;
-        }
-
-        if (target is not null && spineTemplate is not null && ControlHandleLowering.IsOriginalBodySpliceCall(source, target)) {
-            int consumed = target.GetParameters().Length + (target.IsStatic ? 0 : 1);
-            EnsureVerbatimArgForwards(source, consumed, injectionMethod);
-
-            SpineCopy spineCopy = SpineCopy.Create(spineTemplate, destination!);
-            spineCopies!.Add(spineCopy);
-
-            List<Instruction> spliced = new List<Instruction>(consumed + spineCopy.Instructions.Count);
-            for (int p = 0; p < consumed; p++) {
-                spliced.Add(Instruction.Create(OpCodes.Pop));
-            }
-
-            spliced.AddRange(spineCopy.Instructions);
-            return spliced;
-        }
-
-        ControlHandleLowering.ControlCallKind controlCall = ControlHandleLowering.ClassifyCall(source);
-        if (controlCall == ControlHandleLowering.ControlCallKind.Cancel) {
-            return new List<Instruction> { Instruction.Create(OpCodes.Ldc_I4_1), Instruction.Create(OpCodes.Stloc, locals.Cancel) };
-        }
-
-        if (controlCall == ControlHandleLowering.ControlCallKind.GetReturnValue) {
-            VariableDefinition returnValueSource = insideAround && locals.SpliceValue is not null ? locals.SpliceValue : locals.ReturnValue!;
-            return new List<Instruction> { Instruction.Create(OpCodes.Ldloc, returnValueSource) };
-        }
-
-        if (controlCall == ControlHandleLowering.ControlCallKind.SetReturnValue) {
-            if (insideAround && locals.SpliceValue is not null) {
-                return new List<Instruction> { Instruction.Create(OpCodes.Stloc, locals.SpliceValue) };
-            }
-
-            return new List<Instruction> {
-                Instruction.Create(OpCodes.Stloc, locals.ReturnValue!),
-                Instruction.Create(OpCodes.Ldc_I4_1),
-                Instruction.Create(OpCodes.Stloc, locals.HasReturn!),
-            };
+        List<Instruction>? controlCallLowering = TryLowerControlCall(source, site);
+        if (controlCallLowering is not null) {
+            return controlCallLowering;
         }
 
         if (source.OpCode == OpCodes.Ret) {
-            if (spineTemplate is not null && locals.ReturnValue is not null) {
-                return new List<Instruction> {
-                    Instruction.Create(OpCodes.Stloc, locals.ReturnValue), Instruction.Create(OpCodes.Br, returnBranchTarget),
-                };
-            }
-
-            if (ControlHandleLowering.ReturnsControl(injectionMethod)) {
-                return new List<Instruction> {
-                    Instruction.Create(OpCodes.Ldloc, locals.Cancel),
-                    Instruction.Create(OpCodes.Or),
-                    Instruction.Create(OpCodes.Stloc, locals.Cancel),
-                    Instruction.Create(OpCodes.Br, returnBranchTarget),
-                };
-            }
-
-            return new List<Instruction> { Instruction.Create(OpCodes.Br, returnBranchTarget) };
+            return LowerReturn(site);
         }
 
         if (TryLowerProjectedMethodCall(source, ctx, out List<Instruction>? projectedCall)) {
@@ -528,6 +420,113 @@ internal static class BodyCopier {
         Instruction copy = CloneInstruction(source, ctx.Module, ctx.VariableMap, ctx.InjectedMembers);
         RemapArgInstruction(copy, ctx.ArgRemap);
         return new List<Instruction> { copy };
+    }
+
+    private static List<Instruction>? TryLowerStrayHandleUse(Instruction source, InjectionLoweringSite site) {
+        if (ControlHandleLowering.IsControlHandleReceiverLoad(source, site.ControlHandleArgIndex)) {
+            EnsureNotStrayControlHandleUse(source, site.ControlHandleArgIndex, site.Target, site.InjectionMethod);
+            return new List<Instruction>(0);
+        }
+
+        if (IsControlHandleDup(source, site.ControlHandleArgIndex)) {
+            EnsureNotStrayControlHandleUse(source, site.ControlHandleArgIndex, site.Target, site.InjectionMethod);
+            return new List<Instruction>(0);
+        }
+
+        if (site.SpineTemplate is not null && ControlHandleLowering.IsOperationReceiverLoad(source, site.OperationArgIndex)) {
+            EnsureNotStrayOperationUse(source, site.OperationArgIndex, site.InjectionMethod);
+            return new List<Instruction>(0);
+        }
+
+        if (site.SpineTemplate is not null && IsOperationDup(source, site.OperationArgIndex)) {
+            EnsureNotStrayOperationUse(source, site.OperationArgIndex, site.InjectionMethod);
+            return new List<Instruction>(0);
+        }
+
+        return null;
+    }
+
+    private static List<Instruction>? TryLowerOriginalBodySplice(Instruction source, LoweringContext ctx, InjectionLoweringSite site) {
+        if (site.Target is not null && site.SpineTemplate is not null && ControlHandleLowering.IsOperationInvoke(source)) {
+            SpineCopy spineCopy = SpineCopy.Create(site.SpineTemplate, site.Destination!);
+            site.SpineCopies!.Add(spineCopy);
+
+            List<Instruction> spliced = new List<Instruction>(site.Target.GetParameters().Length + spineCopy.Instructions.Count);
+            List<VariableDefinition> argLocals = SpillInvokeArgs(ctx, site.Target, spliced);
+
+            int targetOffset = site.Target.IsStatic ? 0 : 1;
+            for (int i = 0; i < argLocals.Count; i++) {
+                spineCopy.ArgLocals[i + targetOffset] = argLocals[i];
+            }
+
+            RewriteSpliceArgs(spineCopy.Instructions, spineCopy.ArgLocals);
+
+            spliced.AddRange(spineCopy.Instructions);
+            return spliced;
+        }
+
+        if (site.Target is not null && site.SpineTemplate is not null && ControlHandleLowering.IsOriginalBodySpliceCall(source, site.Target)) {
+            int consumed = site.Target.GetParameters().Length + (site.Target.IsStatic ? 0 : 1);
+            EnsureVerbatimArgForwards(source, consumed, site.InjectionMethod);
+
+            SpineCopy spineCopy = SpineCopy.Create(site.SpineTemplate, site.Destination!);
+            site.SpineCopies!.Add(spineCopy);
+
+            List<Instruction> spliced = new List<Instruction>(consumed + spineCopy.Instructions.Count);
+            for (int p = 0; p < consumed; p++) {
+                spliced.Add(Instruction.Create(OpCodes.Pop));
+            }
+
+            spliced.AddRange(spineCopy.Instructions);
+            return spliced;
+        }
+
+        return null;
+    }
+
+    private static List<Instruction>? TryLowerControlCall(Instruction source, InjectionLoweringSite site) {
+        ControlHandleLowering.ControlCallKind controlCall = ControlHandleLowering.ClassifyCall(source);
+        if (controlCall == ControlHandleLowering.ControlCallKind.Cancel) {
+            return new List<Instruction> { Instruction.Create(OpCodes.Ldc_I4_1), Instruction.Create(OpCodes.Stloc, site.Locals.Cancel) };
+        }
+
+        if (controlCall == ControlHandleLowering.ControlCallKind.GetReturnValue) {
+            VariableDefinition returnValueSource = site.InsideAround && site.Locals.SpliceValue is not null ? site.Locals.SpliceValue : site.Locals.ReturnValue!;
+            return new List<Instruction> { Instruction.Create(OpCodes.Ldloc, returnValueSource) };
+        }
+
+        if (controlCall == ControlHandleLowering.ControlCallKind.SetReturnValue) {
+            if (site.InsideAround && site.Locals.SpliceValue is not null) {
+                return new List<Instruction> { Instruction.Create(OpCodes.Stloc, site.Locals.SpliceValue) };
+            }
+
+            return new List<Instruction> {
+                Instruction.Create(OpCodes.Stloc, site.Locals.ReturnValue!),
+                Instruction.Create(OpCodes.Ldc_I4_1),
+                Instruction.Create(OpCodes.Stloc, site.Locals.HasReturn!),
+            };
+        }
+
+        return null;
+    }
+
+    private static List<Instruction> LowerReturn(InjectionLoweringSite site) {
+        if (site.SpineTemplate is not null && site.Locals.ReturnValue is not null) {
+            return new List<Instruction> {
+                Instruction.Create(OpCodes.Stloc, site.Locals.ReturnValue), Instruction.Create(OpCodes.Br, site.ReturnBranchTarget),
+            };
+        }
+
+        if (ControlHandleLowering.ReturnsControl(site.InjectionMethod)) {
+            return new List<Instruction> {
+                Instruction.Create(OpCodes.Ldloc, site.Locals.Cancel),
+                Instruction.Create(OpCodes.Or),
+                Instruction.Create(OpCodes.Stloc, site.Locals.Cancel),
+                Instruction.Create(OpCodes.Br, site.ReturnBranchTarget),
+            };
+        }
+
+        return new List<Instruction> { Instruction.Create(OpCodes.Br, site.ReturnBranchTarget) };
     }
 
     private static List<Instruction> LowerValueInstruction(
