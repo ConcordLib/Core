@@ -72,6 +72,7 @@ internal static class BodyCopier {
 
         Dictionary<int, int> argRemap = BuildArgRemap(target, injectionMethod);
         int controlHandleArgIndex = ControlHandleLowering.FindControlHandleArgIndex(injectionMethod);
+        int operationArgIndex = ControlHandleLowering.FindOperationArgIndex(injectionMethod);
 
         Dictionary<VariableDefinition, VariableDefinition> variableMap = CopyInjectionLocals(injectionBody, destination.Body, module);
         LoweringContext ctx = new LoweringContext(module, variableMap, injectionBody.Variables, injectedMembers, argRemap, destination.Body.Variables);
@@ -84,6 +85,7 @@ internal static class BodyCopier {
                 source_instruction,
                 ctx,
                 controlHandleArgIndex,
+                operationArgIndex,
                 locals,
                 returnBranchTarget,
                 injectionMethod,
@@ -357,6 +359,7 @@ internal static class BodyCopier {
         Instruction source,
         LoweringContext ctx,
         int controlHandleArgIndex,
+        int operationArgIndex,
         ProtocolLocals locals,
         Instruction returnBranchTarget,
         MethodBase injectionMethod,
@@ -370,6 +373,27 @@ internal static class BodyCopier {
         if (IsControlHandleDup(source, controlHandleArgIndex)) {
             EnsureNotStrayControlHandleUse(source, controlHandleArgIndex, target, injectionMethod);
             return new List<Instruction>(0);
+        }
+
+        if (spliceBody is not null && ControlHandleLowering.IsOperationReceiverLoad(source, operationArgIndex)) {
+            EnsureNotStrayOperationUse(source, operationArgIndex, injectionMethod);
+            return new List<Instruction>(0);
+        }
+
+        if (spliceBody is not null && IsOperationDup(source, operationArgIndex)) {
+            EnsureNotStrayOperationUse(source, operationArgIndex, injectionMethod);
+            return new List<Instruction>(0);
+        }
+
+        if (spliceBody is not null && ControlHandleLowering.IsOperationInvoke(source)) {
+            int consumed = source.Operand is MethodReference invokeReference ? invokeReference.Parameters.Count : 0;
+            List<Instruction> spliced = new List<Instruction>(consumed + spliceBody.Count);
+            for (int p = 0; p < consumed; p++) {
+                spliced.Add(Instruction.Create(OpCodes.Pop));
+            }
+
+            spliced.AddRange(spliceBody);
+            return spliced;
         }
 
         if (target is not null && spliceBody is not null && ControlHandleLowering.IsOriginalBodySpliceCall(source, target)) {
@@ -484,6 +508,16 @@ internal static class BodyCopier {
             || IsControlHandleDup(previous, controlHandleArgIndex);
     }
 
+    private static bool IsOperationDup(Instruction instruction, int operationArgIndex) {
+        if (instruction.OpCode != OpCodes.Dup || instruction.Previous is null) {
+            return false;
+        }
+
+        Instruction previous = instruction.Previous;
+        return ControlHandleLowering.IsOperationReceiverLoad(previous, operationArgIndex)
+            || IsOperationDup(previous, operationArgIndex);
+    }
+
     private static void EnsureNotStrayControlHandleUse(Instruction receiverLoad, int controlHandleArgIndex, MethodBase? target, MethodBase injectionMethod) {
         Instruction? next = receiverLoad.Next;
         if (next is null) {
@@ -507,6 +541,31 @@ internal static class BodyCopier {
                 "CONC013",
                 "The control handle parameter of injection '" + injectionMethod.DeclaringType?.Name + "." + injectionMethod.Name +
                 "' must be used only for direct control calls (Cancel/ReturnValue/original invoke); " +
+                "it cannot be stored to a local, captured, or passed elsewhere.");
+        }
+    }
+
+    private static void EnsureNotStrayOperationUse(Instruction receiverLoad, int operationArgIndex, MethodBase injectionMethod) {
+        Instruction? next = receiverLoad.Next;
+        if (next is null) {
+            return;
+        }
+
+        bool isStore = IsStoreOpCode(next.OpCode);
+        bool isUnrelatedCall = IsCallOpCode(next.OpCode) && !ControlHandleLowering.IsOperationInvoke(next);
+        bool isChainedReceiverLoad = ControlHandleLowering.IsOperationReceiverLoad(next, operationArgIndex)
+            || next.OpCode == OpCodes.Dup;
+
+        if (isChainedReceiverLoad) {
+            EnsureNotStrayOperationUse(next, operationArgIndex, injectionMethod);
+            return;
+        }
+
+        if (isStore || isUnrelatedCall) {
+            throw new ConcordEmitException(
+                "CONC013",
+                "The Operation handle parameter of injection '" + injectionMethod.DeclaringType?.Name + "." + injectionMethod.Name +
+                "' must be used only as the direct receiver of Invoke(...); " +
                 "it cannot be stored to a local, captured, or passed elsewhere.");
         }
     }

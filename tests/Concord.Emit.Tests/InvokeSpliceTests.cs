@@ -68,18 +68,6 @@ public static class OverloadedCallSiteInjectionMethods {
     }
 }
 
-public static class ComputedSpliceArgTarget {
-    public static int Add(int value) {
-        return value + 1;
-    }
-}
-
-public static class ComputedSpliceArgInjectionMethods {
-    public static int AroundComputedArg(int value, ControlHandle<int> ch) {
-        return ComputedSpliceArgTarget.Add(value + 1);
-    }
-}
-
 public sealed class InvokeSpliceTests {
     [Fact]
     public void Compose_InvokeInjection_SplicesBeforeCallSite() {
@@ -171,18 +159,5 @@ public sealed class InvokeSpliceTests {
             WrapperComposer.Compose(target, [injection]));
 
         Assert.Equal("CONC031", ex.Code);
-    }
-
-    [Fact]
-    public void Compose_AroundSpliceComputedArgument_ThrowsCONC014() {
-        MethodBase target = typeof(ComputedSpliceArgTarget).GetMethod(nameof(ComputedSpliceArgTarget.Add))!;
-        MethodBase injectionMethod = typeof(ComputedSpliceArgInjectionMethods).GetMethod(nameof(ComputedSpliceArgInjectionMethods.AroundComputedArg))!;
-
-        Injection around = new Injection(injectionMethod, new InjectAt.Around(), "test", 0);
-
-        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() =>
-            WrapperComposer.Compose(target, [around]));
-
-        Assert.Equal("CONC014", ex.Code);
     }
 }

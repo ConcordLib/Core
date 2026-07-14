@@ -95,42 +95,42 @@ public static class NestingInjectionMethods {
         NestingLog.Entries.Add("p2-post");
     }
 
-    public static void AroundVoid(ControlHandle ch) {
+    public static void AroundVoid(Operation original) {
         NestingLog.Entries.Add("pre");
-        NestingTarget.VoidStep();
+        original.Invoke();
         NestingLog.Entries.Add("post");
     }
 
-    public static void AroundAllocFree(ControlHandle ch) {
+    public static void AroundAllocFree(Operation original) {
         NestingCounters.BumpAround();
-        NestingTarget.AllocFreeStep();
+        original.Invoke();
         NestingCounters.BumpAround();
     }
 
-    public static int AroundInt(ControlHandle<int> ch) {
+    public static int AroundInt(Operation<int> original) {
         NestingLog.Entries.Add("pre");
-        int result = NestingTarget.IntStep();
+        int result = original.Invoke();
         NestingLog.Entries.Add("post");
         return result * 10;
     }
 
-    public static int AroundIntFinally(ControlHandle<int> ch) {
+    public static int AroundIntFinally(Operation<int> original) {
         NestingLog.Entries.Add("pre");
-        int result = NestingTarget.IntStepWithFinally();
+        int result = original.Invoke();
         NestingLog.Entries.Add("post");
         return result * 10;
     }
 
-    public static int AroundMultiReturnFinally(int which, ControlHandle<int> ch) {
+    public static int AroundMultiReturnFinally(int which, Operation<int, int> original) {
         NestingLog.Entries.Add("pre");
-        int result = NestingTarget.MultiReturnInFinally(which);
+        int result = original.Invoke(which);
         NestingLog.Entries.Add("post");
         return result * 10;
     }
 
-    public static int AroundNestedTryReturns(int which, ControlHandle<int> ch) {
+    public static int AroundNestedTryReturns(int which, Operation<int, int> original) {
         NestingLog.Entries.Add("pre");
-        int result = NestingTarget.NestedTryReturns(which);
+        int result = original.Invoke(which);
         NestingLog.Entries.Add("post");
         return result * 10;
     }

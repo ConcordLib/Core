@@ -97,9 +97,9 @@ public static class BuilderReturnInjectionMethod2 {
 }
 
 public static class BuilderAroundInjectionMethod2 {
-    public static void OnStep(ControlHandle ch) {
+    public static void OnStep(Operation original) {
         BuilderLog.Entries.Add("pre");
-        BuilderAroundTarget2.Step();
+        original.Invoke();
         BuilderLog.Entries.Add("post");
     }
 }

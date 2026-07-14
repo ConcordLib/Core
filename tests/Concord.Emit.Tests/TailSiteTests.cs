@@ -39,8 +39,8 @@ public static class TailInjectionMethods {
         TailVoidTarget.Calls += 100;
     }
 
-    public static int AroundPick(int which, ControlHandle<int> ch) {
-        int result = TailSiteTarget.Pick(which);
+    public static int AroundPick(int which, Operation<int, int> original) {
+        int result = original.Invoke(which);
         return result * 10;
     }
 }

@@ -33,6 +33,14 @@ internal static class ControlHandleLowering {
         return -1;
     }
 
+    internal static bool IsControlHandleType(Type type) {
+        if (type == typeof(ControlHandle)) {
+            return true;
+        }
+
+        return type.IsGenericType && type.GetGenericTypeDefinition() == typeof(ControlHandle<>);
+    }
+
     internal static bool IsControlHandleReceiverLoad(Instruction instruction, int controlHandleArgIndex) {
         if (controlHandleArgIndex < 0) {
             return false;
@@ -239,14 +247,6 @@ internal static class ControlHandleLowering {
         }
 
         return true;
-    }
-
-    private static bool IsControlHandleType(Type type) {
-        if (type == typeof(ControlHandle)) {
-            return true;
-        }
-
-        return type.IsGenericType && type.GetGenericTypeDefinition() == typeof(ControlHandle<>);
     }
 
     private static int ArgIndexOperand(object? operand) {

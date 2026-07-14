@@ -21,9 +21,9 @@ public static class HandlerInjectionMethods {
     public static int TryRan;
     public static int FinallyRan;
 
-    public static int AroundCatch(ControlHandle<int> ch) {
+    public static int AroundCatch(Operation<int> original) {
         try {
-            return HandlerTargets.Throwing();
+            return original.Invoke();
         }
         catch (InvalidOperationException) {
             return -1;

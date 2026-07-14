@@ -21,6 +21,10 @@ public static class WrapperComposer {
     /// <param name="ordered">The injections to compose, ordered by their caller.</param>
     /// <returns>The generated wrapper method and original body copy.</returns>
     public static ComposeResult Compose(MethodBase target, IReadOnlyList<Injection> ordered) {
+        if (HasWholeMethodAround(ordered)) {
+            ValidateWholeMethodAroundEligible(target);
+        }
+
         MethodBase resolved = ResolveStateMachineTarget(target);
 
         MethodInfo originalBody = OriginalBody.Clone(resolved);
@@ -103,8 +107,8 @@ public static class WrapperComposer {
         }
     }
 
-    internal static void ValidateOperationShape(MethodBase injectionMethod, CallSiteShape shape, MethodBase target) {
-        if (shape.HasThis && shape.ReceiverType is { IsValueType: true }) {
+    internal static void ValidateOperationShape(MethodBase injectionMethod, CallSiteShape shape, MethodBase target, bool allowValueReceiver = false) {
+        if (!allowValueReceiver && shape.HasThis && shape.ReceiverType is { IsValueType: true }) {
             throw new ConcordEmitException(
                 "CONC039",
                 $"Around-invoke on '{target.DeclaringType?.Name}.{target.Name}' matches a call on value type '{shape.ReceiverType.Name}'. Value-type receivers are not supported.");
@@ -137,6 +141,92 @@ public static class WrapperComposer {
         }
 
         return false;
+    }
+
+    private static bool HasWholeMethodAround(IReadOnlyList<Injection> ordered) {
+        for (int i = 0; i < ordered.Count; i++) {
+            if (ordered[i].At is InjectAt.Around) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void ValidateWholeMethodAroundEligible(MethodBase originalTarget) {
+        ParameterInfo[] parameters = originalTarget.GetParameters();
+        for (int i = 0; i < parameters.Length; i++) {
+            Type parameterType = parameters[i].ParameterType;
+            if (parameterType.IsByRef) {
+                throw new ConcordEmitException(
+                    "CONC108",
+                    $"Whole-method Around on '{originalTarget.DeclaringType?.Name}.{originalTarget.Name}' targets a byref parameter '{parameters[i].Name}'. " +
+                    "Byref parameters are not supported by the Operation handle.");
+            }
+
+            if (IsUnsupportedByValueShape(parameterType)) {
+                throw new ConcordEmitException(
+                    "CONC109",
+                    $"Whole-method Around on '{originalTarget.DeclaringType?.Name}.{originalTarget.Name}' targets parameter '{parameters[i].Name}' of type '{parameterType.Name}', " +
+                    "which is a pointer, function pointer, or byref-like type. These are not supported by the Operation handle.");
+            }
+        }
+
+        Type returnType = ResolveReturnType(originalTarget);
+        if (returnType.IsByRef) {
+            throw new ConcordEmitException(
+                "CONC109",
+                $"Whole-method Around on '{originalTarget.DeclaringType?.Name}.{originalTarget.Name}' returns by reference. " +
+                "Ref returns are not supported by the Operation handle.");
+        }
+
+        if (IsUnsupportedByValueShape(returnType)) {
+            throw new ConcordEmitException(
+                "CONC109",
+                $"Whole-method Around on '{originalTarget.DeclaringType?.Name}.{originalTarget.Name}' returns type '{returnType.Name}', " +
+                "which is a pointer, function pointer, or byref-like type. These are not supported by the Operation handle.");
+        }
+
+        if (ReadStateMachineType(originalTarget) is not null) {
+            throw new ConcordEmitException(
+                "CONC110",
+                $"Whole-method Around on '{originalTarget.DeclaringType?.Name}.{originalTarget.Name}' targets an async or iterator method. " +
+                "State-machine methods are not supported by the Operation handle; patch at Head instead.");
+        }
+    }
+
+    private static bool IsUnsupportedByValueShape(Type type) {
+        if (type.IsPointer) {
+            return true;
+        }
+
+        if (IsFunctionPointer(type)) {
+            return true;
+        }
+
+        return IsByRefLike(type);
+    }
+
+    private static bool IsFunctionPointer(Type type) {
+#if NET
+        return type.IsFunctionPointer || type.IsUnmanagedFunctionPointer;
+#else
+        return type.Name.IndexOf("(fnptr)", StringComparison.Ordinal) >= 0;
+#endif
+    }
+
+    private static bool IsByRefLike(Type type) {
+#if NET
+        return type.IsByRefLike;
+#else
+        foreach (CustomAttributeData attribute in type.GetCustomAttributesData()) { // NOSONAR project forbids LINQ in loops (perf/determinism); for-loop is intentional
+            if (attribute.AttributeType.FullName == "System.Runtime.CompilerServices.IsByRefLikeAttribute") {
+                return true;
+            }
+        }
+
+        return false;
+#endif
     }
 
     private static IEnumerable<Type> EnumerateGenericArguments(MethodBase target) {
@@ -637,6 +727,10 @@ public static class WrapperComposer {
                 $"Multiple Around injections on '{target.DeclaringType?.Name}.{target.Name}' are not supported; only one Around injection per target is allowed.");
         }
 
+        ValidateWholeMethodOperationOnly(injection.InjectionMethod, target);
+        CallSiteShape shape = CallSiteShape.Resolve(target);
+        ValidateOperationShape(injection.InjectionMethod, shape, target, allowValueReceiver: true);
+
         HashSet<VariableDefinition> protocolLocals = [locals.Cancel];
         if (locals.HasReturn is not null) {
             protocolLocals.Add(locals.HasReturn);
@@ -663,6 +757,7 @@ public static class WrapperComposer {
 
         InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
         using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
+        EnsureOperationInvokeNotInLoop(injectionMethodDefinition.Definition.Body, injection.InjectionMethod);
         aroundBody = BodyCopier.CopyInjection(
             injectionMethodDefinition.Definition,
             wrapperDefinition,
@@ -673,6 +768,66 @@ public static class WrapperComposer {
             epilogueStart,
             spineCopy.Instructions);
         RetargetAroundSpineBranches(aroundBody, spineCopy.Instructions, afterSpine, epilogueStart, locals);
+    }
+
+    private static void ValidateWholeMethodOperationOnly(MethodBase injectionMethod, MethodBase target) {
+        ParameterInfo[] parameters = injectionMethod.GetParameters();
+        int operationCount = 0;
+        int controlHandleCount = 0;
+        for (int i = 0; i < parameters.Length; i++) {
+            if (ControlHandleLowering.IsOperationType(parameters[i].ParameterType)) {
+                operationCount++;
+            } else if (ControlHandleLowering.IsControlHandleType(parameters[i].ParameterType)) {
+                controlHandleCount++;
+            }
+        }
+
+        if (operationCount == 1 && controlHandleCount == 0) {
+            return;
+        }
+
+        throw new ConcordEmitException(
+            "CONC111",
+            $"Whole-method Around injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' on '{target.DeclaringType?.Name}.{target.Name}' " +
+            "must declare exactly one Operation parameter and no ControlHandle parameters.");
+    }
+
+    private static void EnsureOperationInvokeNotInLoop(MethodBody injectionBody, MethodBase injectionMethod) {
+        List<Instruction> instructions = new List<Instruction>(injectionBody.Instructions);
+        for (int i = 0; i < instructions.Count; i++) {
+            if (!ControlHandleLowering.IsOperationInvoke(instructions[i])) {
+                continue;
+            }
+
+            for (int b = i + 1; b < instructions.Count; b++) {
+                if (!BranchTargetsAtOrBefore(instructions[b], instructions, i)) {
+                    continue;
+                }
+
+                throw new ConcordEmitException(
+                    "CONC113",
+                    "The Operation handle Invoke(...) call in injection '" + injectionMethod.DeclaringType?.Name + "." + injectionMethod.Name +
+                    "' is inside a loop; the original body can only be spliced once.");
+            }
+        }
+    }
+
+    private static bool BranchTargetsAtOrBefore(Instruction branch, List<Instruction> instructions, int index) {
+        if (branch.Operand is Instruction singleTarget) {
+            int targetIndex = instructions.IndexOf(singleTarget);
+            return targetIndex >= 0 && targetIndex <= index;
+        }
+
+        if (branch.Operand is Instruction[] switchTargets) {
+            for (int t = 0; t < switchTargets.Length; t++) {
+                int targetIndex = instructions.IndexOf(switchTargets[t]);
+                if (targetIndex >= 0 && targetIndex <= index) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static void WrapCallSite(
