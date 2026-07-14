@@ -766,7 +766,8 @@ public static class WrapperComposer {
             injectedMembers,
             locals,
             epilogueStart,
-            spineCopy.Instructions);
+            spineCopy.Instructions,
+            spineCopy);
         RetargetAroundSpineBranches(aroundBody, spineCopy.Instructions, afterSpine, epilogueStart, locals);
     }
 

@@ -33,6 +33,10 @@ public static class AroundHandleInjectionMethods {
         return inner + 1;
     }
 
+    public static int WrapTripleChangedArg(int x, Operation<int, int> original) {
+        return original.Invoke(x - 2);
+    }
+
     public static void WrapVoidStep(Operation original) {
         AroundHandleLog.Entries.Add("pre");
         original.Invoke();
@@ -41,6 +45,24 @@ public static class AroundHandleInjectionMethods {
 
     public static void HeadOnAsync(ControlHandle ch) {
         AroundHandleLog.Entries.Add("head");
+    }
+}
+
+public sealed class InstanceAroundTarget {
+    public int Seed;
+
+    public InstanceAroundTarget(int seed) {
+        Seed = seed;
+    }
+
+    public int AddSeed(int x) {
+        return Seed + x;
+    }
+}
+
+public static class InstanceAroundInjectionMethods {
+    public static int WrapAddSeedChangedArg(int x, Operation<int, int> original) {
+        return original.Invoke(x + 100);
     }
 }
 
@@ -127,6 +149,33 @@ public sealed class AroundHandleTests {
         ComposeResult result = WrapperComposer.Compose(target, [around]);
 
         Assert.Equal(16, result.Wrapper.Invoke(null, [5]));
+    }
+
+    [Fact]
+    public void Around_HandleForm_InvokeChangedArg_RunsBodyWithChangedArg() {
+        MethodBase target = typeof(AroundHandleTarget).GetMethod(nameof(AroundHandleTarget.Triple))!;
+        MethodBase injectionMethod = typeof(AroundHandleInjectionMethods).GetMethod(nameof(AroundHandleInjectionMethods.WrapTripleChangedArg))!;
+        Injection around = new Injection(injectionMethod, new InjectAt.Around(), "test", 0);
+
+        ComposeResult result = WrapperComposer.Compose(target, [around]);
+
+        Assert.Equal(9, result.Wrapper.Invoke(null, [5]));
+    }
+
+    [Fact]
+    public void Around_HandleForm_InstanceTarget_InvokeChangedArgKeepsAmbientThis() {
+        MethodBase target = typeof(InstanceAroundTarget).GetMethod(nameof(InstanceAroundTarget.AddSeed))!;
+        MethodBase injectionMethod = typeof(InstanceAroundInjectionMethods).GetMethod(nameof(InstanceAroundInjectionMethods.WrapAddSeedChangedArg))!;
+        Injection around = new Injection(injectionMethod, new InjectAt.Around(), "test", 0);
+
+        ComposeResult result = WrapperComposer.Compose(target, [around]);
+        Func<InstanceAroundTarget, int, int> invoke = result.Wrapper.CreateDelegate<Func<InstanceAroundTarget, int, int>>();
+
+        InstanceAroundTarget instance = new InstanceAroundTarget(10);
+        int value = invoke(instance, 5);
+
+        Assert.Equal(115, value);
+        Assert.Equal(10, instance.Seed);
     }
 
     [Fact]

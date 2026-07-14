@@ -57,6 +57,7 @@ internal static class BodyCopier {
     /// <param name="locals">Wrapper locals used for cancellation and return-value protocol state.</param>
     /// <param name="returnBranchTarget">The instruction to branch to when the injection method returns.</param>
     /// <param name="spliceBody">Optional body to splice when an around injection method calls the target method.</param>
+    /// <param name="spineCopy">The whole-method Around spine copy being spliced, if any; carries the per-copy Invoke arg-locals map.</param>
     /// <returns>The copied and lowered instruction sequence.</returns>
     public static List<Instruction> CopyInjection(
         MethodDefinition injectionDefinition,
@@ -66,7 +67,8 @@ internal static class BodyCopier {
         InjectedMemberMap injectedMembers,
         ProtocolLocals locals,
         Instruction returnBranchTarget,
-        IReadOnlyList<Instruction>? spliceBody = null) {
+        IReadOnlyList<Instruction>? spliceBody = null,
+        SpineCopy? spineCopy = null) {
         MethodBody injectionBody = injectionDefinition.Body;
         ModuleDefinition module = destination.Module;
 
@@ -90,7 +92,8 @@ internal static class BodyCopier {
                 returnBranchTarget,
                 injectionMethod,
                 target,
-                spliceBody);
+                spliceBody,
+                spineCopy);
             entries.Add((source_instruction, emitted));
         }
 
@@ -320,6 +323,42 @@ internal static class BodyCopier {
             || opCode == OpCodes.Ldarg_3;
     }
 
+    private static List<VariableDefinition> SpillInvokeArgs(LoweringContext ctx, MethodBase target, List<Instruction> spilled) {
+        ParameterInfo[] targetParameters = target.GetParameters();
+
+        List<VariableDefinition> argLocals = new List<VariableDefinition>(targetParameters.Length);
+        for (int i = 0; i < targetParameters.Length; i++) {
+            VariableDefinition local = new VariableDefinition(ctx.Module.ImportReference(targetParameters[i].ParameterType));
+            ctx.DestinationVariables.Add(local);
+            argLocals.Add(local);
+        }
+
+        for (int i = argLocals.Count - 1; i >= 0; i--) {
+            spilled.Add(Instruction.Create(OpCodes.Stloc, argLocals[i]));
+        }
+
+        return argLocals;
+    }
+
+    private static void RewriteSpliceArgs(List<Instruction> spliceBody, Dictionary<int, VariableDefinition> argLocals) {
+        foreach (Instruction instruction in spliceBody) {
+            bool isAddress = instruction.OpCode == OpCodes.Ldarga || instruction.OpCode == OpCodes.Ldarga_S;
+            bool isStore = instruction.OpCode == OpCodes.Starg || instruction.OpCode == OpCodes.Starg_S;
+            bool isLoad = IsLoadArgOpCode(instruction.OpCode);
+            if (!isAddress && !isStore && !isLoad) {
+                continue;
+            }
+
+            int argIndex = GetArgIndex(instruction);
+            if (argIndex < 0 || !argLocals.TryGetValue(argIndex, out VariableDefinition? local)) {
+                continue;
+            }
+
+            instruction.OpCode = isAddress ? OpCodes.Ldloca : isStore ? OpCodes.Stloc : OpCodes.Ldloc;
+            instruction.Operand = local;
+        }
+    }
+
     /// <summary>
     ///     Lowers an <c>Operation.Invoke</c> call: pops the invoke's evaluated arguments into fresh temps,
     ///     re-pushes the spilled receiver and the temps in call order, then emits the original call.
@@ -364,7 +403,8 @@ internal static class BodyCopier {
         Instruction returnBranchTarget,
         MethodBase injectionMethod,
         MethodBase? target = null,
-        IReadOnlyList<Instruction>? spliceBody = null) {
+        IReadOnlyList<Instruction>? spliceBody = null,
+        SpineCopy? spineCopy = null) {
         if (ControlHandleLowering.IsControlHandleReceiverLoad(source, controlHandleArgIndex)) {
             EnsureNotStrayControlHandleUse(source, controlHandleArgIndex, target, injectionMethod);
             return new List<Instruction>(0);
@@ -385,11 +425,17 @@ internal static class BodyCopier {
             return new List<Instruction>(0);
         }
 
-        if (spliceBody is not null && ControlHandleLowering.IsOperationInvoke(source)) {
-            int consumed = source.Operand is MethodReference invokeReference ? invokeReference.Parameters.Count : 0;
-            List<Instruction> spliced = new List<Instruction>(consumed + spliceBody.Count);
-            for (int p = 0; p < consumed; p++) {
-                spliced.Add(Instruction.Create(OpCodes.Pop));
+        if (target is not null && spliceBody is not null && ControlHandleLowering.IsOperationInvoke(source)) {
+            List<Instruction> spliced = new List<Instruction>(target.GetParameters().Length + spliceBody.Count);
+            List<VariableDefinition> argLocals = SpillInvokeArgs(ctx, target, spliced);
+
+            if (spineCopy is not null) {
+                int targetOffset = target.IsStatic ? 0 : 1;
+                for (int i = 0; i < argLocals.Count; i++) {
+                    spineCopy.ArgLocals[i + targetOffset] = argLocals[i];
+                }
+
+                RewriteSpliceArgs(spineCopy.Instructions, spineCopy.ArgLocals);
             }
 
             spliced.AddRange(spliceBody);

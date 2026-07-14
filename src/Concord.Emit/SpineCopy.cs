@@ -9,6 +9,7 @@ internal sealed class SpineCopy {
         this.Instructions = instructions;
         this.Handlers = handlers;
         this.ExitJoin = exitJoin;
+        this.ArgLocals = new Dictionary<int, VariableDefinition>();
     }
 
     public List<Instruction> Instructions { get; }
@@ -16,6 +17,8 @@ internal sealed class SpineCopy {
     public List<ExceptionHandler> Handlers { get; }
 
     public Instruction ExitJoin { get; }
+
+    public Dictionary<int, VariableDefinition> ArgLocals { get; }
 
     public static SpineCopy Create(SpineTemplate template, MethodDefinition wrapperDefinition) {
         ModuleDefinition module = wrapperDefinition.Module;
