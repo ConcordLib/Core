@@ -24,6 +24,7 @@ public sealed class VoidOperation<T1, T2, T3, T4, T5, T6, T7, T8> {
     /// <param name="arg6">The sixth value to pass to the original operation.</param>
     /// <param name="arg7">The seventh value to pass to the original operation.</param>
     /// <param name="arg8">The eighth value to pass to the original operation.</param>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S107", Justification = "Arity-8 VoidOperation handle; the parameters are the original operation's signature and mirror the target it wraps.")]
     public void Invoke(T1 arg1, T2 arg2, T3 arg3, T4 arg4, T5 arg5, T6 arg6, T7 arg7, T8 arg8) {
     }
 }

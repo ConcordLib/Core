@@ -6,7 +6,8 @@ namespace Concord.Emit;
 ///     Resolves property names to accessor method names where Concord accepts a method name.
 /// </summary>
 internal static class AccessorNameResolver {
-    private const BindingFlags Declared = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static; // NOSONAR concord reaches private target members by design
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S3011", Justification = "Concord resolves private target members by design; signatures are validated at resolve time.")]
+    private const BindingFlags Declared = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
 
     /// <summary>
     ///     Maps a declared name to the effective method name, resolving property names to accessors.
@@ -39,17 +40,26 @@ internal static class AccessorNameResolver {
         }
 
         if (allowOperationDisambiguation && injectionMethod is not null) {
-            int operationArgIndex = ControlHandleLowering.FindOperationArgIndex(injectionMethod);
-            if (operationArgIndex >= 0) {
-                int offset = injectionMethod.IsStatic ? 0 : 1;
-                Type declared = injectionMethod.GetParameters()[operationArgIndex - offset].ParameterType;
-                return IsVoidFamily(declared) ? "set_" + name : "get_" + name;
+            string? disambiguated = TryResolveViaOperationParameter(name, injectionMethod);
+            if (disambiguated is not null) {
+                return disambiguated;
             }
         }
 
         throw new ConcordEmitException(
             "CONC036",
             $"'{declaringType.Name}.{name}' is a property with both accessors and nothing selects one. Write 'get_{name}' or 'set_{name}' explicitly.");
+    }
+
+    private static string? TryResolveViaOperationParameter(string name, MethodBase injectionMethod) {
+        int operationArgIndex = ControlHandleLowering.FindOperationArgIndex(injectionMethod);
+        if (operationArgIndex < 0) {
+            return null;
+        }
+
+        int offset = injectionMethod.IsStatic ? 0 : 1;
+        Type declared = injectionMethod.GetParameters()[operationArgIndex - offset].ParameterType;
+        return IsVoidFamily(declared) ? "set_" + name : "get_" + name;
     }
 
     private static bool IsVoidFamily(Type type) {

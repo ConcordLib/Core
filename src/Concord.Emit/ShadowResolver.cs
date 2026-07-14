@@ -17,9 +17,10 @@ internal static class ShadowResolver {
     /// <exception cref="ConcordEmitException">
     ///     Thrown with <c>CONC002</c> when a field matches by name but the signatures differ.
     /// </exception>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S3011", Justification = "Concord reaches private target members by design; signatures are validated at resolve time.")]
     public static Dictionary<string, FieldInfo> BuildFieldMap(Type declarationType, Type targetType) {
         FieldInfo[] declarationFields = declarationType.GetFields(
-            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly); // NOSONAR concord reaches private target members by design; validated at resolve time
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly);
 
         Dictionary<string, FieldInfo> map = new Dictionary<string, FieldInfo>();
 
@@ -30,7 +31,7 @@ internal static class ShadowResolver {
 
             FieldInfo? targetField = targetType.GetField(
                 declarationField.Name,
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly); // NOSONAR concord reaches private target members by design; validated at resolve time
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly);
 
             if (targetField is null) {
                 continue;

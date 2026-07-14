@@ -11,6 +11,8 @@ namespace Concord.Emit;
 ///     Builds composed wrapper methods from an original target and ordered Concord injections.
 /// </summary>
 public static class WrapperComposer {
+    private const string CodeCONC039 = "CONC039";
+
     /// <summary>
     ///     Creates a wrapper method for a target and a copy of the original body.
     /// </summary>
@@ -70,13 +72,14 @@ public static class WrapperComposer {
     /// </summary>
     /// <param name="target">The method to inspect.</param>
     /// <returns>The state-machine <c>MoveNext</c> method when present; otherwise <paramref name="target" />.</returns>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S3011", Justification = "Concord reaches the private state-machine MoveNext by design; validated at resolve time.")]
     public static MethodBase ResolveStateMachineTarget(MethodBase target) {
         Type? stateMachineType = ReadStateMachineType(target);
         if (stateMachineType is null) {
             return target;
         }
 
-        MethodInfo? moveNext = stateMachineType.GetMethod("MoveNext", BindingFlags.NonPublic | BindingFlags.Instance); // NOSONAR concord reaches private target members by design; validated at resolve time
+        MethodInfo? moveNext = stateMachineType.GetMethod("MoveNext", BindingFlags.NonPublic | BindingFlags.Instance);
         if (moveNext is null) {
             throw new ConcordEmitException(
                 "CONC060",
@@ -111,14 +114,14 @@ public static class WrapperComposer {
     internal static void ValidateOperationShape(MethodBase injectionMethod, CallSiteShape shape, MethodBase target, bool allowValueReceiver = false) {
         if (!allowValueReceiver && shape.HasThis && shape.ReceiverType is { IsValueType: true }) {
             throw new ConcordEmitException(
-                "CONC039",
+                CodeCONC039,
                 $"Around-invoke on '{target.DeclaringType?.Name}.{target.Name}' matches a call on value type '{shape.ReceiverType.Name}'. Value-type receivers are not supported.");
         }
 
         int operationArgIndex = ControlHandleLowering.FindOperationArgIndex(injectionMethod);
         if (operationArgIndex < 0) {
             throw new ConcordEmitException(
-                "CONC039",
+                CodeCONC039,
                 $"Around-invoke injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' declares no Operation parameter.");
         }
 
@@ -127,21 +130,16 @@ public static class WrapperComposer {
         Type declared = injectionMethod.GetParameters()[operationArgIndex - offset].ParameterType;
         if (declared != expected) {
             throw new ConcordEmitException(
-                "CONC039",
+                CodeCONC039,
                 $"Around-invoke injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' declares '{declared.Name}' but the matched call requires '{expected.Name}'.");
         }
     }
 
     internal static bool IsInsideProtectedRegion(Instruction instruction, IList<ExceptionHandler> handlers) {
-        foreach (ExceptionHandler handler in handlers) { // NOSONAR project forbids LINQ in loops (perf/determinism); for-loop is intentional
-            if (SpansInstruction(handler.TryStart, handler.TryEnd, instruction) ||
-                SpansInstruction(handler.HandlerStart, handler.HandlerEnd, instruction) ||
-                SpansInstruction(handler.FilterStart, handler.HandlerStart, instruction)) {
-                return true;
-            }
-        }
-
-        return false;
+        return handlers.Any(handler =>
+            SpansInstruction(handler.TryStart, handler.TryEnd, instruction) ||
+            SpansInstruction(handler.HandlerStart, handler.HandlerEnd, instruction) ||
+            SpansInstruction(handler.FilterStart, handler.HandlerStart, instruction));
     }
 
     private static bool HasWholeMethodAround(IReadOnlyList<Injection> ordered) {
@@ -283,26 +281,13 @@ public static class WrapperComposer {
     }
 
     private static void Assemble(MethodDefinition wrapperDefinition, MethodBase target, IReadOnlyList<Injection> ordered, Type returnType) {
-        for (int i = 0; i < ordered.Count; i++) {
-            Injection injection = ordered[i];
-            if (injection.At is not InjectAt.Head && ControlHandleLowering.ReturnsControl(injection.InjectionMethod)) {
-                throw new ConcordEmitException(
-                    "CONC015",
-                    $"Injection '{injection.InjectionMethod.DeclaringType?.Name}.{injection.InjectionMethod.Name}' returns Control; a Control return is only valid on a head injection.");
-            }
-        }
+        ValidateNonHeadInjectionsDoNotReturnControl(ordered);
 
         MethodBody body = wrapperDefinition.Body;
         ModuleDefinition module = wrapperDefinition.Module;
         bool isVoid = returnType == typeof(void);
 
-        bool hasAround = false;
-        for (int i = 0; i < ordered.Count; i++) {
-            if (ordered[i].At is InjectAt.Around) {
-                hasAround = true;
-                break;
-            }
-        }
+        bool hasAround = HasWholeMethodAround(ordered);
 
         bool needsCtorGuard = hasAround && target.IsConstructor;
         ProtocolLocals locals = DeclareLocals(body, module, returnType, isVoid, hasAround && !isVoid, needsCtorGuard);
@@ -319,129 +304,196 @@ public static class WrapperComposer {
 
         RewriteSpineReturns(spine, locals, afterSpine, isVoid, hasAround, body.ExceptionHandlers);
 
-        if (!isVoid) {
-            bool hasReturnSite = false;
-            bool hasTailSite = false;
-            for (int i = 0; i < ordered.Count; i++) {
-                if (ordered[i].At is InjectAt.Return) {
-                    hasReturnSite = true;
-                } else if (ordered[i].At is InjectAt.Tail) {
-                    hasTailSite = true;
-                }
-            }
-
-            if (!hasAround && (hasReturnSite || hasTailSite)) {
-                NormalizeReturnSites(spine, locals.ReturnValue!, afterSpine, body.ExceptionHandlers);
-            } else if (hasAround && hasTailSite) {
-                NormalizeReturnSites(spine, locals.SpliceValue!, afterSpine, body.ExceptionHandlers);
-            }
-        }
+        NormalizeReturnSitesIfNeeded(ordered, spine, locals, afterSpine, isVoid, hasAround, body.ExceptionHandlers);
 
         Instruction guardStart = Instruction.Create(OpCodes.Ldloc, locals.Cancel);
         Instruction guardBranch = Instruction.Create(OpCodes.Brtrue, hasAround ? epilogueStart : afterSpine);
 
-        bool hasHead = false;
-        List<List<Instruction>> headBodies = new List<List<Instruction>>();
-        List<List<Instruction>> returnBodies = new List<List<Instruction>>();
-        List<List<Instruction>> tailBodies = new List<List<Instruction>>();
-        List<(Injection Injection, InjectAt.Return ReturnSite)> aroundReturnInjections = new List<(Injection, InjectAt.Return)>();
-        List<Injection> aroundTailInjections = new List<Injection>();
-        Injection? aroundInjection = null;
-        List<Instruction>? aroundBody = null;
-        Instruction? lastExit = null;
+        WrapperAssembly context = new WrapperAssembly(wrapperDefinition, target, ordered, locals, isVoid, hasAround);
+        AssemblyAnchors anchors = new AssemblyAnchors(spine, afterSpine, guardStart, epilogueStart);
+        InjectionBuffers buffers = new InjectionBuffers(
+            new List<List<Instruction>>(),
+            new List<List<Instruction>>(),
+            new List<(Injection, InjectAt.Return)>(),
+            new List<Injection>());
 
-        for (int i = ordered.Count - 1; i >= 0; i--) {
-            Injection injection = ordered[i];
-
-            if (injection.At is InjectAt.Head) {
-                ProcessHeadInjection(injection, wrapperDefinition, target, locals, guardStart, isVoid, ref hasHead, headBodies);
-                continue;
-            }
-
-            if (injection.At is InjectAt.Tail) {
-                if (hasAround) {
-                    aroundTailInjections.Add(injection);
-                } else {
-                    lastExit = ProcessTailInjection(injection, wrapperDefinition, target, locals, afterSpine, spine, tailBodies);
-                }
-
-                continue;
-            }
-
-            if (injection.At is InjectAt.Return returnSite) {
-                if (hasAround) {
-                    aroundReturnInjections.Add((injection, returnSite));
-                } else {
-                    ProcessReturnInjection(injection, returnSite, wrapperDefinition, target, locals, afterSpine, spine);
-                }
-
-                continue;
-            }
-
-            if (injection.At is InjectAt.Invoke invoke) {
-                ProcessInvokeInjection(injection, invoke, wrapperDefinition, target, locals, spine);
-                continue;
-            }
-
-            if (injection.At is InjectAt.Constant constant) {
-                ProcessConstantInjection(injection, constant, wrapperDefinition, target, spine);
-                continue;
-            }
-
-            if (injection.At is InjectAt.Around) {
-                if (aroundInjection is not null) {
-                    throw new ConcordEmitException(
-                        "CONC051",
-                        $"Multiple Around injections on '{target.DeclaringType?.Name}.{target.Name}' are not supported; only one Around injection per target is allowed.");
-                }
-
-                aroundInjection = injection;
-            }
-        }
+        bool hasHead = DispatchInjections(context, anchors, buffers, out Injection? aroundInjection, out Instruction? lastExit);
 
         if (lastExit is not null) {
-            List<Instruction> tails = ChainBodies(tailBodies, lastExit);
+            List<Instruction> tails = ChainBodies(buffers.TailBodies, lastExit);
             int exitIndex = spine.IndexOf(lastExit);
             spine.InsertRange(exitIndex, tails);
         }
 
+        List<Instruction>? aroundBody = null;
         if (aroundInjection is not null) {
-            aroundReturnInjections.Reverse();
-            aroundTailInjections.Reverse();
-            ProcessAroundInjection(aroundInjection, wrapperDefinition, target, locals, epilogueStart, afterSpine, spine, aroundReturnInjections, aroundTailInjections, ref aroundBody);
+            buffers.AroundReturnInjections.Reverse();
+            buffers.AroundTailInjections.Reverse();
+            ProcessAroundInjection(new InjectionSiteContext(aroundInjection, wrapperDefinition, target, locals), epilogueStart, afterSpine, spine, buffers.AroundReturnInjections, buffers.AroundTailInjections, ref aroundBody);
         }
 
-        List<Instruction> heads = ChainBodies(headBodies, guardStart);
-        List<Instruction> returns = ChainBodies(returnBodies, epilogueStart);
+        List<Instruction> heads = ChainBodies(buffers.HeadBodies, guardStart);
+        List<Instruction> returns = ChainBodies(new List<List<Instruction>>(), epilogueStart);
 
-        List<Instruction> assembled = new List<Instruction>();
-
-        if (aroundBody is not null) {
-            assembled.AddRange(heads);
-            if (hasHead) {
-                assembled.Add(guardStart);
-                assembled.Add(guardBranch);
-            }
-
-            assembled.AddRange(aroundBody);
-            assembled.AddRange(epilogue);
-        } else {
-            assembled.AddRange(heads);
-            if (hasHead) {
-                assembled.Add(guardStart);
-                assembled.Add(guardBranch);
-            }
-
-            assembled.AddRange(spine);
-            assembled.Add(afterSpine);
-            assembled.AddRange(returns);
-            assembled.AddRange(epilogue);
-        }
+        List<Instruction> assembled = AssembleFinalBody(new AssembledBodyParts(heads, hasHead, guardStart, guardBranch, aroundBody, spine, afterSpine, returns, epilogue));
 
         body.Instructions.Clear();
         foreach (Instruction instruction in assembled) {
             body.Instructions.Add(instruction);
         }
+    }
+
+    private static void ValidateNonHeadInjectionsDoNotReturnControl(IReadOnlyList<Injection> ordered) {
+        for (int i = 0; i < ordered.Count; i++) {
+            Injection injection = ordered[i];
+            if (injection.At is not InjectAt.Head && ControlHandleLowering.ReturnsControl(injection.InjectionMethod)) {
+                throw new ConcordEmitException(
+                    "CONC015",
+                    $"Injection '{injection.InjectionMethod.DeclaringType?.Name}.{injection.InjectionMethod.Name}' returns Control; a Control return is only valid on a head injection.");
+            }
+        }
+    }
+
+    private static void NormalizeReturnSitesIfNeeded(
+        IReadOnlyList<Injection> ordered,
+        List<Instruction> spine,
+        ProtocolLocals locals,
+        Instruction afterSpine,
+        bool isVoid,
+        bool hasAround,
+        IList<ExceptionHandler> exceptionHandlers) {
+        if (isVoid) {
+            return;
+        }
+
+        bool hasReturnSite = false;
+        bool hasTailSite = false;
+        for (int i = 0; i < ordered.Count; i++) {
+            if (ordered[i].At is InjectAt.Return) {
+                hasReturnSite = true;
+            } else if (ordered[i].At is InjectAt.Tail) {
+                hasTailSite = true;
+            }
+        }
+
+        if (!hasAround && (hasReturnSite || hasTailSite)) {
+            NormalizeReturnSites(spine, locals.ReturnValue!, afterSpine, exceptionHandlers);
+        } else if (hasAround && hasTailSite) {
+            NormalizeReturnSites(spine, locals.SpliceValue!, afterSpine, exceptionHandlers);
+        }
+    }
+
+    private static bool DispatchInjections(
+        WrapperAssembly context,
+        AssemblyAnchors anchors,
+        InjectionBuffers buffers,
+        out Injection? aroundInjection,
+        out Instruction? lastExit) {
+        bool hasHead = false;
+        aroundInjection = null;
+        lastExit = null;
+
+        IReadOnlyList<Injection> ordered = context.Ordered;
+        for (int i = ordered.Count - 1; i >= 0; i--) {
+            Injection injection = ordered[i];
+
+            if (injection.At is InjectAt.Head) {
+                ProcessHeadInjection(new InjectionSiteContext(injection, context.WrapperDefinition, context.Target, context.Locals), anchors.GuardStart, context.IsVoid, ref hasHead, buffers.HeadBodies);
+                continue;
+            }
+
+            if (injection.At is InjectAt.Tail) {
+                lastExit = DispatchTailInjection(context, anchors, buffers, injection, lastExit);
+                continue;
+            }
+
+            if (injection.At is InjectAt.Return returnSite) {
+                DispatchReturnInjection(context, anchors, buffers, injection, returnSite);
+                continue;
+            }
+
+            if (injection.At is InjectAt.Invoke invoke) {
+                ProcessInvokeInjection(injection, invoke, context.WrapperDefinition, context.Target, context.Locals, anchors.Spine);
+                continue;
+            }
+
+            if (injection.At is InjectAt.Constant constant) {
+                ProcessConstantInjection(injection, constant, context.WrapperDefinition, context.Target, anchors.Spine);
+                continue;
+            }
+
+            if (injection.At is InjectAt.Around) {
+                aroundInjection = RegisterAroundInjection(injection, aroundInjection, context.Target);
+            }
+        }
+
+        return hasHead;
+    }
+
+    private static Instruction? DispatchTailInjection(
+        WrapperAssembly context,
+        AssemblyAnchors anchors,
+        InjectionBuffers buffers,
+        Injection injection,
+        Instruction? lastExit) {
+        if (context.HasAround) {
+            buffers.AroundTailInjections.Add(injection);
+            return lastExit;
+        }
+
+        return ProcessTailInjection(injection, context.WrapperDefinition, context.Target, context.Locals, anchors.AfterSpine, anchors.Spine, buffers.TailBodies);
+    }
+
+    private static void DispatchReturnInjection(
+        WrapperAssembly context,
+        AssemblyAnchors anchors,
+        InjectionBuffers buffers,
+        Injection injection,
+        InjectAt.Return returnSite) {
+        if (context.HasAround) {
+            buffers.AroundReturnInjections.Add((injection, returnSite));
+            return;
+        }
+
+        ProcessReturnInjection(injection, returnSite, context.WrapperDefinition, context.Target, context.Locals, anchors.AfterSpine, anchors.Spine);
+    }
+
+    private static Injection RegisterAroundInjection(Injection injection, Injection? aroundInjection, MethodBase target) {
+        if (aroundInjection is not null) {
+            throw new ConcordEmitException(
+                "CONC051",
+                $"Multiple Around injections on '{target.DeclaringType?.Name}.{target.Name}' are not supported; only one Around injection per target is allowed.");
+        }
+
+        return injection;
+    }
+
+    private static List<Instruction> AssembleFinalBody(AssembledBodyParts parts) {
+        List<Instruction> assembled = new List<Instruction>();
+
+        if (parts.AroundBody is not null) {
+            assembled.AddRange(parts.Heads);
+            if (parts.HasHead) {
+                assembled.Add(parts.GuardStart);
+                assembled.Add(parts.GuardBranch);
+            }
+
+            assembled.AddRange(parts.AroundBody);
+            assembled.AddRange(parts.Epilogue);
+        } else {
+            assembled.AddRange(parts.Heads);
+            if (parts.HasHead) {
+                assembled.Add(parts.GuardStart);
+                assembled.Add(parts.GuardBranch);
+            }
+
+            assembled.AddRange(parts.Spine);
+            assembled.Add(parts.AfterSpine);
+            assembled.AddRange(parts.Returns);
+            assembled.AddRange(parts.Epilogue);
+        }
+
+        return assembled;
     }
 
     private static List<Instruction> ChainBodies(List<List<Instruction>> bodies, Instruction sharedTarget) {
@@ -452,10 +504,8 @@ public static class WrapperComposer {
         for (int i = 0; i < bodies.Count - 1; i++) {
             List<Instruction> body = bodies[i];
             Instruction nextStart = bodies[i + 1][0];
-            foreach (Instruction instruction in body) {
-                if (ReferenceEquals(instruction.Operand, sharedTarget)) {
-                    instruction.Operand = nextStart;
-                }
+            foreach (Instruction instruction in body.Where(instruction => ReferenceEquals(instruction.Operand, sharedTarget))) {
+                instruction.Operand = nextStart;
             }
         }
 
@@ -468,30 +518,23 @@ public static class WrapperComposer {
     }
 
     private static void ProcessHeadInjection(
-        Injection injection,
-        MethodDefinition wrapperDefinition,
-        MethodBase target,
-        ProtocolLocals locals,
+        InjectionSiteContext site,
         Instruction guardStart,
         bool isVoid,
         ref bool hasHead,
         List<List<Instruction>> heads) {
         hasHead = true;
-        InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
-        using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
+        InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(site.Injection.InjectionMethod.DeclaringType!, site.Target);
+        using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(site.Injection.InjectionMethod);
         GuardCancelWithoutReturn(
             injectionMethodDefinition.Definition.Body,
-            target,
+            site.Target,
             isVoid,
-            ControlHandleLowering.ReturnsControl(injection.InjectionMethod));
+            ControlHandleLowering.ReturnsControl(site.Injection.InjectionMethod));
         heads.Add(
             BodyCopier.CopyInjection(
-                injectionMethodDefinition.Definition,
-                wrapperDefinition,
-                target,
-                injection.InjectionMethod,
-                injectedMembers,
-                locals,
+                new InjectionCopyRequest(injectionMethodDefinition.Definition, site.WrapperDefinition, site.Target, site.Injection.InjectionMethod, injectedMembers),
+                site.Locals,
                 guardStart));
     }
 
@@ -514,11 +557,7 @@ public static class WrapperComposer {
         InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
         using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
         List<Instruction> siteBody = BodyCopier.CopyInjection(
-            injectionMethodDefinition.Definition,
-            wrapperDefinition,
-            target,
-            injection.InjectionMethod,
-            injectedMembers,
+            new InjectionCopyRequest(injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers),
             locals,
             lastExit);
         tailBodies.Add(siteBody);
@@ -546,11 +585,7 @@ public static class WrapperComposer {
         using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
         foreach (Instruction exit in exits) {
             List<Instruction> siteBody = BodyCopier.CopyInjection(
-                injectionMethodDefinition.Definition,
-                wrapperDefinition,
-                target,
-                injection.InjectionMethod,
-                injectedMembers,
+                new InjectionCopyRequest(injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers),
                 locals,
                 exit);
             int exitIndex = spine.IndexOf(exit);
@@ -580,11 +615,7 @@ public static class WrapperComposer {
             using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
             foreach (Instruction exit in exits) {
                 List<Instruction> siteBody = BodyCopier.CopyInjection(
-                    injectionMethodDefinition.Definition,
-                    wrapperDefinition,
-                    target,
-                    injection.InjectionMethod,
-                    injectedMembers,
+                    new InjectionCopyRequest(injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers),
                     locals,
                     exit,
                     insideAround: true);
@@ -599,6 +630,7 @@ public static class WrapperComposer {
         }
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Minor Code Smell", "S3267", Justification = "Loop body copies IL, redirects branches, and splices into two collections; projecting to Select would obscure it.")]
     private static void SpliceTailInjectionsIntoSpineCopy(
         SpineCopy spineCopy,
         List<Instruction> aroundBody,
@@ -620,11 +652,7 @@ public static class WrapperComposer {
             InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
             using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
             List<Instruction> siteBody = BodyCopier.CopyInjection(
-                injectionMethodDefinition.Definition,
-                wrapperDefinition,
-                target,
-                injection.InjectionMethod,
-                injectedMembers,
+                new InjectionCopyRequest(injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers),
                 locals,
                 lastExit,
                 insideAround: true);
@@ -651,10 +679,8 @@ public static class WrapperComposer {
     /// <param name="originalTarget">The exit instruction that previously-spliced code may branch to directly.</param>
     /// <param name="newTarget">The first instruction of the newly-spliced body, which now sits before <paramref name="originalTarget" />.</param>
     private static void RedirectIntermediateBranches(List<Instruction> instructions, Instruction originalTarget, Instruction newTarget) {
-        foreach (Instruction instruction in instructions) {
-            if (!ReferenceEquals(instruction, originalTarget) && ReferenceEquals(instruction.Operand, originalTarget)) {
-                instruction.Operand = newTarget;
-            }
+        foreach (Instruction instruction in instructions.Where(instruction => !ReferenceEquals(instruction, originalTarget) && ReferenceEquals(instruction.Operand, originalTarget))) {
+            instruction.Operand = newTarget;
         }
     }
 
@@ -699,11 +725,7 @@ public static class WrapperComposer {
         bool after = invoke.Shift is At.Tail;
         foreach (Instruction site in sites) {
             List<Instruction> invokeBody = BodyCopier.CopyInjection(
-                injectionMethodDefinition.Definition,
-                wrapperDefinition,
-                target,
-                injection.InjectionMethod,
-                injectedMembers,
+                new InjectionCopyRequest(injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers),
                 locals,
                 site);
             int siteIndex = spine.IndexOf(site);
@@ -786,7 +808,7 @@ public static class WrapperComposer {
         if (invoke.Arg > 0) {
             if (invoke.Arg > shape.ParameterTypes.Length) {
                 throw new ConcordEmitException(
-                    "CONC039",
+                    CodeCONC039,
                     $"Argument injection on '{target.DeclaringType?.Name}.{target.Name}' selects arg {invoke.Arg}, but the call has {shape.ParameterTypes.Length} argument(s).");
             }
 
@@ -803,7 +825,7 @@ public static class WrapperComposer {
 
             if (found >= 0) {
                 throw new ConcordEmitException(
-                    "CONC039",
+                    CodeCONC039,
                     $"Argument injection on '{target.DeclaringType?.Name}.{target.Name}' matches more than one '{valueType.Name}' argument; pass arg: to select one.");
             }
 
@@ -812,7 +834,7 @@ public static class WrapperComposer {
 
         if (found < 0) {
             throw new ConcordEmitException(
-                "CONC039",
+                CodeCONC039,
                 $"Argument injection on '{target.DeclaringType?.Name}.{target.Name}' matches no '{valueType.Name}' argument.");
         }
 
@@ -868,23 +890,20 @@ public static class WrapperComposer {
         ParameterInfo[] parameters = injectionMethod.GetParameters();
         if (parameters.Length != 1) {
             throw new ConcordEmitException(
-                "CONC039",
+                CodeCONC039,
                 $"Value injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' on '{target.DeclaringType?.Name}.{target.Name}' must declare exactly one parameter, got {parameters.Length}.");
         }
 
         Type returnType = injectionMethod is MethodInfo methodInfo ? methodInfo.ReturnType : typeof(void);
         if (parameters[0].ParameterType != valueType || returnType != valueType) {
             throw new ConcordEmitException(
-                "CONC039",
+                CodeCONC039,
                 $"Value injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' on '{target.DeclaringType?.Name}.{target.Name}' must be shaped '{valueType.Name} M({valueType.Name} original)'.");
         }
     }
 
     private static void ProcessAroundInjection(
-        Injection injection,
-        MethodDefinition wrapperDefinition,
-        MethodBase target,
-        ProtocolLocals locals,
+        InjectionSiteContext site,
         Instruction epilogueStart,
         Instruction afterSpine,
         List<Instruction> spine,
@@ -894,13 +913,54 @@ public static class WrapperComposer {
         if (aroundBody is not null) {
             throw new ConcordEmitException(
                 "CONC051",
-                $"Multiple Around injections on '{target.DeclaringType?.Name}.{target.Name}' are not supported; only one Around injection per target is allowed.");
+                $"Multiple Around injections on '{site.Target.DeclaringType?.Name}.{site.Target.Name}' are not supported; only one Around injection per target is allowed.");
         }
 
-        ValidateWholeMethodOperationOnly(injection.InjectionMethod, target);
-        CallSiteShape shape = CallSiteShape.Resolve(target);
-        ValidateOperationShape(injection.InjectionMethod, shape, target, allowValueReceiver: true);
+        ValidateWholeMethodOperationOnly(site.Injection.InjectionMethod, site.Target);
+        CallSiteShape shape = CallSiteShape.Resolve(site.Target);
+        ValidateOperationShape(site.Injection.InjectionMethod, shape, site.Target, allowValueReceiver: true);
 
+        HashSet<VariableDefinition> protocolLocals = CollectProtocolLocals(site.Locals);
+
+        SpineTemplate template = SpineTemplate.Capture(spine, site.WrapperDefinition.Body.ExceptionHandlers, protocolLocals);
+
+        foreach (ExceptionHandler handler in template.Handlers) {
+            site.WrapperDefinition.Body.ExceptionHandlers.Remove(handler);
+        }
+
+        InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(site.Injection.InjectionMethod.DeclaringType!, site.Target);
+        using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(site.Injection.InjectionMethod);
+        EnsureOperationInvokeNotInLoop(injectionMethodDefinition.Definition.Body, site.Injection.InjectionMethod);
+        EnsureAroundInvokePlacement(injectionMethodDefinition.Definition, template.Handlers.Count > 0, site.Injection.InjectionMethod);
+
+        if (site.Target.IsConstructor) {
+            EnsureConstructorHasInvokeSite(injectionMethodDefinition.Definition.Body, site.Injection.InjectionMethod, site.Target);
+        }
+
+        List<SpineCopy> spineCopies = [];
+        aroundBody = BodyCopier.CopyInjection(
+            new InjectionCopyRequest(injectionMethodDefinition.Definition, site.WrapperDefinition, site.Target, site.Injection.InjectionMethod, injectedMembers),
+            site.Locals,
+            epilogueStart,
+            template,
+            spineCopies);
+
+        foreach (SpineCopy spineCopy in spineCopies) {
+            foreach (ExceptionHandler handler in spineCopy.Handlers) {
+                site.WrapperDefinition.Body.ExceptionHandlers.Add(handler);
+            }
+        }
+
+        SpliceCallSiteInjectionsIntoSpineCopies(site, aroundBody, spineCopies, returnInjections, tailInjections, afterSpine);
+
+        RetargetAroundSpineBranches(aroundBody, spineCopies, afterSpine, epilogueStart, site.Locals);
+
+        if (site.Target.IsConstructor) {
+            GuardCtorSpineCopiesAgainstReentry(aroundBody, spineCopies, site.Locals);
+        }
+    }
+
+    private static HashSet<VariableDefinition> CollectProtocolLocals(ProtocolLocals locals) {
         HashSet<VariableDefinition> protocolLocals = [locals.Cancel];
         if (locals.HasReturn is not null) {
             protocolLocals.Add(locals.HasReturn);
@@ -914,55 +974,26 @@ public static class WrapperComposer {
             protocolLocals.Add(locals.SpliceValue);
         }
 
-        SpineTemplate template = SpineTemplate.Capture(spine, wrapperDefinition.Body.ExceptionHandlers, protocolLocals);
+        return protocolLocals;
+    }
 
-        foreach (ExceptionHandler handler in template.Handlers) {
-            wrapperDefinition.Body.ExceptionHandlers.Remove(handler);
-        }
-
-        InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
-        using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
-        EnsureOperationInvokeNotInLoop(injectionMethodDefinition.Definition.Body, injection.InjectionMethod);
-        EnsureAroundInvokePlacement(injectionMethodDefinition.Definition, template.Handlers.Count > 0, injection.InjectionMethod);
-
-        if (target.IsConstructor) {
-            EnsureConstructorHasInvokeSite(injectionMethodDefinition.Definition.Body, injection.InjectionMethod, target);
-        }
-
-        List<SpineCopy> spineCopies = [];
-        aroundBody = BodyCopier.CopyInjection(
-            injectionMethodDefinition.Definition,
-            wrapperDefinition,
-            target,
-            injection.InjectionMethod,
-            injectedMembers,
-            locals,
-            epilogueStart,
-            template,
-            spineCopies);
-
-        foreach (SpineCopy spineCopy in spineCopies) {
-            foreach (ExceptionHandler handler in spineCopy.Handlers) {
-                wrapperDefinition.Body.ExceptionHandlers.Add(handler);
-            }
-        }
-
+    private static void SpliceCallSiteInjectionsIntoSpineCopies(
+        InjectionSiteContext site,
+        List<Instruction> aroundBody,
+        List<SpineCopy> spineCopies,
+        List<(Injection Injection, InjectAt.Return ReturnSite)> returnInjections,
+        List<Injection> tailInjections,
+        Instruction afterSpine) {
         if (returnInjections.Count > 0) {
             foreach (SpineCopy spineCopy in spineCopies) {
-                SpliceReturnInjectionsIntoSpineCopy(spineCopy, aroundBody, returnInjections, wrapperDefinition, target, locals, afterSpine);
+                SpliceReturnInjectionsIntoSpineCopy(spineCopy, aroundBody, returnInjections, site.WrapperDefinition, site.Target, site.Locals, afterSpine);
             }
         }
 
         if (tailInjections.Count > 0) {
             foreach (SpineCopy spineCopy in spineCopies) {
-                SpliceTailInjectionsIntoSpineCopy(spineCopy, aroundBody, tailInjections, wrapperDefinition, target, locals, afterSpine);
+                SpliceTailInjectionsIntoSpineCopy(spineCopy, aroundBody, tailInjections, site.WrapperDefinition, site.Target, site.Locals, afterSpine);
             }
-        }
-
-        RetargetAroundSpineBranches(aroundBody, spineCopies, afterSpine, epilogueStart, locals);
-
-        if (target.IsConstructor) {
-            GuardCtorSpineCopiesAgainstReentry(aroundBody, spineCopies, locals);
         }
     }
 
@@ -1009,10 +1040,8 @@ public static class WrapperComposer {
     }
 
     private static void EnsureConstructorHasInvokeSite(MethodBody injectionBody, MethodBase injectionMethod, MethodBase target) {
-        foreach (Instruction instruction in injectionBody.Instructions) {
-            if (ControlHandleLowering.IsOperationInvoke(instruction)) {
-                return;
-            }
+        if (injectionBody.Instructions.Any(ControlHandleLowering.IsOperationInvoke)) {
+            return;
         }
 
         throw new ConcordEmitException(
@@ -1089,39 +1118,49 @@ public static class WrapperComposer {
         }
 
         while (work.Count > 0) {
-            int idx = work.Dequeue();
-            Instruction instruction = instructions[idx];
-            int depth = entryDepth[idx];
-
-            int after = depth - IlDump.PopCount(instruction, injectionDefinition) + IlDump.PushCount(instruction);
-            if (after < 0) {
-                after = 0;
-            }
-
-            if (instruction.OpCode == OpCodes.Leave || instruction.OpCode == OpCodes.Leave_S) {
-                SeedDepth(instruction.Operand as Instruction, 0, indexOf, entryDepth, seen, work);
-                continue;
-            }
-
-            if (instruction.Operand is Instruction branchTarget) {
-                SeedDepth(branchTarget, after, indexOf, entryDepth, seen, work);
-            } else if (instruction.Operand is Instruction[] switchTargets) {
-                for (int t = 0; t < switchTargets.Length; t++) {
-                    SeedDepth(switchTargets[t], after, indexOf, entryDepth, seen, work);
-                }
-            }
-
-            FlowControl flow = instruction.OpCode.FlowControl;
-            if (flow is FlowControl.Branch or FlowControl.Return or FlowControl.Throw) {
-                continue;
-            }
-
-            if (idx + 1 < instructions.Count) {
-                SeedDepth(instructions[idx + 1], after, indexOf, entryDepth, seen, work);
-            }
+            PropagateEntryDepth(work.Dequeue(), instructions, injectionDefinition, indexOf, entryDepth, seen, work);
         }
 
         return entryDepth;
+    }
+
+    private static void PropagateEntryDepth(
+        int idx,
+        List<Instruction> instructions,
+        MethodDefinition injectionDefinition,
+        Dictionary<Instruction, int> indexOf,
+        int[] entryDepth,
+        bool[] seen,
+        Queue<int> work) {
+        Instruction instruction = instructions[idx];
+        int depth = entryDepth[idx];
+
+        int after = depth - IlDump.PopCount(instruction, injectionDefinition) + IlDump.PushCount(instruction);
+        if (after < 0) {
+            after = 0;
+        }
+
+        if (instruction.OpCode == OpCodes.Leave || instruction.OpCode == OpCodes.Leave_S) {
+            SeedDepth(instruction.Operand as Instruction, 0, indexOf, entryDepth, seen, work);
+            return;
+        }
+
+        if (instruction.Operand is Instruction branchTarget) {
+            SeedDepth(branchTarget, after, indexOf, entryDepth, seen, work);
+        } else if (instruction.Operand is Instruction[] switchTargets) {
+            for (int t = 0; t < switchTargets.Length; t++) {
+                SeedDepth(switchTargets[t], after, indexOf, entryDepth, seen, work);
+            }
+        }
+
+        FlowControl flow = instruction.OpCode.FlowControl;
+        if (flow is FlowControl.Branch or FlowControl.Return or FlowControl.Throw) {
+            return;
+        }
+
+        if (idx + 1 < instructions.Count) {
+            SeedDepth(instructions[idx + 1], after, indexOf, entryDepth, seen, work);
+        }
     }
 
     private static void SeedDepth(
@@ -1180,11 +1219,7 @@ public static class WrapperComposer {
 
         Instruction wrapEnd = Instruction.Create(OpCodes.Nop);
         List<Instruction> wrapBody = BodyCopier.CopyWrapInjection(
-            injectionMethodDefinition,
-            wrapperDefinition,
-            target,
-            injectionMethod,
-            injectedMembers,
+            new InjectionCopyRequest(injectionMethodDefinition, wrapperDefinition, target, injectionMethod, injectedMembers),
             wrapEnd,
             originalCall,
             receiverLocal,
@@ -1532,10 +1567,8 @@ public static class WrapperComposer {
             }
         }
 
-        foreach (Instruction instruction in spine) {
-            if (ReferenceEquals(instruction.Operand, afterSpine)) {
-                instruction.Operand = spliceJoin;
-            }
+        foreach (Instruction instruction in spine.Where(instruction => ReferenceEquals(instruction.Operand, afterSpine))) {
+            instruction.Operand = spliceJoin;
         }
     }
 

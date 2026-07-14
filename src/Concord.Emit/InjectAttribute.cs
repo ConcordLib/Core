@@ -117,6 +117,7 @@ public sealed class InjectAttribute : Attribute {
     ///     For <see cref="At.Argument" />, the 1-based argument to rewrite, or <c>0</c> to infer by unique
     ///     type match. Ignored for other shifts.
     /// </param>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S107", Justification = "Public attribute constructor; the parameters are the injection's authored call-site shape and cannot be bundled without breaking the API.")]
     public InjectAttribute(string method, Type invokeDeclaringType, string invokeDeclaringMethod, At shift, uint by = 0, Type[]? targetParameterTypes = null, Type[]? invokeParameterTypes = null, uint arg = 0) {
         Method = method;
         At = shift;

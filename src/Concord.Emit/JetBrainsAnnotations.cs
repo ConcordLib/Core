@@ -4,6 +4,7 @@ namespace JetBrains.Annotations;
 ///     Defines how a declaration is implicitly used.
 /// </summary>
 [Flags]
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Minor Code Smell", "S2344", Justification = "Name mirrors the well-known JetBrains.Annotations contract recognized by ReSharper/Rider; renaming breaks that recognition.")]
 public enum ImplicitUseKindFlags {
     /// <summary>The declaration is accessed, assigned, and instantiated with fixed constructor signature.</summary>
     Default = Access | Assign | InstantiatedWithFixedConstructorSignature,
@@ -25,6 +26,7 @@ public enum ImplicitUseKindFlags {
 ///     Defines which declarations are implicitly used.
 /// </summary>
 [Flags]
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Minor Code Smell", "S2344", Justification = "Name mirrors the well-known JetBrains.Annotations contract recognized by ReSharper/Rider; renaming breaks that recognition.")]
 public enum ImplicitUseTargetFlags {
     /// <summary>The marked declaration itself is implicitly used.</summary>
     Default = Itself,

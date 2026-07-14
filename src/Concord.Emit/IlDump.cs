@@ -172,6 +172,7 @@ internal static class IlDump {
         }
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S107", Justification = "Internal IL-verification walk state; these are the working buffers of a single stack-depth pass and do not form a reusable bundle.")]
     private static void ProcessVerifyInstruction(
         int idx,
         MethodDefinition method,
