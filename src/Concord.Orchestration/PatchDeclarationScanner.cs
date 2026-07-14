@@ -94,6 +94,15 @@ public static class PatchDeclarationScanner {
         }
 
         Type baseType = ResolveBaseType(declaration, explicitTarget);
+        bool debug = declaration.GetCustomAttribute<PatchDebugAttribute>() is not null;
+        string[] beforeOwners = ReadOrderOwners(
+            declaration,
+            declaration.GetCustomAttributes<PatchBeforeAttribute>().Select(static order => order.Owner),
+            "[PatchBefore]");
+        string[] afterOwners = ReadOrderOwners(
+            declaration,
+            declaration.GetCustomAttributes<PatchAfterAttribute>().Select(static order => order.Owner),
+            "[PatchAfter]");
 
         const BindingFlags declared = BindingFlags.Public |
                                       BindingFlags.NonPublic | // NOSONAR concord reaches private target members by design; validated at resolve time
@@ -121,7 +130,11 @@ public static class PatchDeclarationScanner {
             }
 
             MethodBase resolvedTarget = ResolveInjectionTarget(declaration, baseType, inject);
-            resolved.Add((resolvedTarget, new Injection(method, inject.ResolvedAt, declaration.FullName!, inject.ResolvedPriority)));
+            resolved.Add((resolvedTarget, new Injection(method, inject.ResolvedAt, declaration.FullName!, inject.ResolvedPriority) {
+                Debug = debug,
+                BeforeOwners = beforeOwners,
+                AfterOwners = afterOwners
+            }));
         }
 
         foreach ((MethodBase target, Injection injection) in resolved) {
@@ -163,6 +176,23 @@ public static class PatchDeclarationScanner {
         }
 
         throw new ConcordDeclarationException("Target type '" + name + "' could not be resolved from any loaded assembly.");
+    }
+
+    private static string[] ReadOrderOwners(Type declaration, IEnumerable<string> owners, string attributeName) {
+        HashSet<string> seen = new HashSet<string>(StringComparer.Ordinal);
+        List<string> resolved = [];
+        foreach (string owner in owners) {
+            if (string.IsNullOrWhiteSpace(owner)) {
+                throw new ConcordDeclarationException(
+                    attributeName + " on " + declaration.FullName + " requires a non-empty owner.");
+            }
+
+            if (seen.Add(owner)) {
+                resolved.Add(owner);
+            }
+        }
+
+        return resolved.ToArray();
     }
 
     private static MethodBase ResolveInjectionTarget(Type declaration, Type baseType, InjectAttribute inject) {

@@ -1,3 +1,5 @@
+using System.Reflection;
+using System.Reflection.Emit;
 using Concord.Emit;
 using Xunit;
 
@@ -139,5 +141,94 @@ public sealed class PatchDeclarationScannerTests {
         Assert.Throws<ConcordDeclarationException>(() => PatchDeclarationScanner.ScanType(typeof(HalfFailingDeclaration), applier, props));
 
         Assert.Empty(applier.AppliedHandles);
+    }
+
+    [Fact]
+    public void ScanType_PatchDebug_MarksInjectionForIlDump() {
+        Type declaration = CreateDebugDeclaration();
+        FakePatchApplier patches = new FakePatchApplier();
+        FakeAttachedPropertyRegistry props = new FakeAttachedPropertyRegistry();
+
+        PatchDeclarationScanner.ScanType(declaration, patches, props);
+
+        PatchCall call = Assert.Single(patches.Calls);
+        Assert.True(call.Injection.Debug);
+    }
+
+    [Fact]
+    public void ScanType_PatchBeforeType_StampsInjection() {
+        FakePatchApplier patches = new FakePatchApplier();
+        FakeAttachedPropertyRegistry props = new FakeAttachedPropertyRegistry();
+
+        PatchDeclarationScanner.ScanType(typeof(BeforeDeclaration), patches, props);
+
+        PatchCall call = Assert.Single(patches.Calls);
+        Assert.Equal([typeof(GoodDeclaration).FullName!], call.Injection.BeforeOwners);
+    }
+
+    [Fact]
+    public void ScanType_OrderAttributes_StampDeduplicatedOwners() {
+        FakePatchApplier patches = new FakePatchApplier();
+        FakeAttachedPropertyRegistry props = new FakeAttachedPropertyRegistry();
+
+        PatchDeclarationScanner.ScanType(typeof(OrderedDeclaration), patches, props);
+
+        PatchCall call = Assert.Single(patches.Calls);
+        Assert.Equal([typeof(GoodDeclaration).FullName!, "Optional.Mod.Before"], call.Injection.BeforeOwners);
+        Assert.Equal([typeof(FieldOnlyDeclaration).FullName!, "Optional.Mod.After"], call.Injection.AfterOwners);
+    }
+
+    [Fact]
+    public void ScanType_WhitespaceOrderOwner_ThrowsBeforeApplying() {
+        RecordingApplier patches = new RecordingApplier();
+        FakeAttachedPropertyRegistry props = new FakeAttachedPropertyRegistry();
+
+        Assert.Throws<ConcordDeclarationException>(() =>
+            PatchDeclarationScanner.ScanType(typeof(InvalidOrderDeclaration), patches, props));
+
+        Assert.Empty(patches.AppliedHandles);
+    }
+
+    [Fact]
+    public void ScanType_EmptyAfterOwner_ThrowsBeforeApplying() {
+        RecordingApplier patches = new RecordingApplier();
+        FakeAttachedPropertyRegistry props = new FakeAttachedPropertyRegistry();
+
+        Assert.Throws<ConcordDeclarationException>(() =>
+            PatchDeclarationScanner.ScanType(typeof(InvalidAfterDeclaration), patches, props));
+
+        Assert.Empty(patches.AppliedHandles);
+    }
+
+    private static Type CreateDebugDeclaration() {
+        AssemblyName assemblyName = new AssemblyName("ConcordPatchDebugTest_" + Guid.NewGuid().ToString("N"));
+        AssemblyBuilder assembly = AssemblyBuilder.DefineDynamicAssembly(assemblyName, AssemblyBuilderAccess.Run);
+        ModuleBuilder module = assembly.DefineDynamicModule(assemblyName.Name!);
+        TypeBuilder type = module.DefineType(
+            "DebugDeclaration",
+            TypeAttributes.Public | TypeAttributes.Abstract,
+            typeof(GameBase));
+
+        type.SetCustomAttribute(new CustomAttributeBuilder(
+            typeof(PatchAttribute).GetConstructor(Type.EmptyTypes)!,
+            []));
+        type.SetCustomAttribute(new CustomAttributeBuilder(
+            typeof(PatchDebugAttribute).GetConstructor(Type.EmptyTypes)!,
+            []));
+
+        MethodBuilder method = type.DefineMethod(
+            "OnStep",
+            MethodAttributes.Public,
+            typeof(void),
+            [typeof(ControlHandle)]);
+        method.GetILGenerator().Emit(OpCodes.Ret);
+
+        ConstructorInfo injectConstructor = typeof(InjectAttribute).GetConstructor(
+            [typeof(At), typeof(string), typeof(uint), typeof(Type[])])!;
+        method.SetCustomAttribute(new CustomAttributeBuilder(
+            injectConstructor,
+            [At.Head, nameof(GameBase.Step), 0u, null]));
+
+        return type.CreateType()!;
     }
 }

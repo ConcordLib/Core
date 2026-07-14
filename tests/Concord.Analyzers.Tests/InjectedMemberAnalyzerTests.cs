@@ -1271,6 +1271,168 @@ public sealed class InjectedMemberAnalyzerTests {
         Assert.Empty(diagnostics);
     }
 
+    [Fact]
+    public async Task PatchBefore_WithoutPatchAttribute_ReportsInvalidOrdering() {
+        const string source = AttributeSource + """
+
+            [Concord.PatchBefore("Other.Patch")]
+            public abstract class Patch {
+            }
+            """;
+
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(source);
+
+        Diagnostic diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(InjectedMemberAnalyzer.InvalidPatchOrderingDiagnosticId, diagnostic.Id);
+        AssertDiagnosticOnAttribute(source, diagnostic, "PatchBefore");
+    }
+
+    [Fact]
+    public async Task PatchAfter_WithoutPatchAttribute_ReportsInvalidOrdering() {
+        const string source = AttributeSource + """
+
+            [Concord.PatchAfter("Other.Patch")]
+            public abstract class Patch {
+            }
+            """;
+
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(source);
+
+        Diagnostic diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(InjectedMemberAnalyzer.InvalidPatchOrderingDiagnosticId, diagnostic.Id);
+        AssertDiagnosticOnAttribute(source, diagnostic, "PatchAfter");
+    }
+
+    [Fact]
+    public async Task PatchBefore_EmptyOwner_ReportsInvalidOrdering() {
+        const string source = AttributeSource + """
+
+            public sealed class Target {
+            }
+
+            [Concord.Patch(typeof(Target))]
+            [Concord.PatchBefore("")]
+            public abstract class Patch {
+            }
+            """;
+
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(source);
+
+        Diagnostic diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(InjectedMemberAnalyzer.InvalidPatchOrderingDiagnosticId, diagnostic.Id);
+        AssertDiagnosticOnAttribute(source, diagnostic, "PatchBefore");
+    }
+
+    [Fact]
+    public async Task PatchAfter_WhitespaceOwner_ReportsInvalidOrdering() {
+        const string source = AttributeSource + """
+
+            public sealed class Target {
+            }
+
+            [Concord.Patch(typeof(Target))]
+            [Concord.PatchAfter("   ")]
+            public abstract class Patch {
+            }
+            """;
+
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(source);
+
+        Diagnostic diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(InjectedMemberAnalyzer.InvalidPatchOrderingDiagnosticId, diagnostic.Id);
+        AssertDiagnosticOnAttribute(source, diagnostic, "PatchAfter");
+    }
+
+    [Fact]
+    public async Task PatchBefore_SelfTypeOwner_ReportsInvalidOrdering() {
+        const string source = AttributeSource + """
+
+            public sealed class Target {
+            }
+
+            [Concord.Patch(typeof(Target))]
+            [Concord.PatchBefore(typeof(Patch))]
+            public abstract class Patch {
+            }
+            """;
+
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(source);
+
+        Diagnostic diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(InjectedMemberAnalyzer.InvalidPatchOrderingDiagnosticId, diagnostic.Id);
+        AssertDiagnosticOnAttribute(source, diagnostic, "PatchBefore");
+    }
+
+    [Fact]
+    public async Task PatchAfter_SelfStringOwner_ReportsInvalidOrdering() {
+        const string source = AttributeSource + """
+
+            namespace Mod {
+                public sealed class Target {
+                }
+
+                [Concord.Patch(typeof(Target))]
+                [Concord.PatchAfter("Mod.Patch")]
+                public abstract class Patch {
+                }
+            }
+            """;
+
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(source);
+
+        Diagnostic diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(InjectedMemberAnalyzer.InvalidPatchOrderingDiagnosticId, diagnostic.Id);
+        AssertDiagnosticOnAttribute(source, diagnostic, "PatchAfter");
+    }
+
+    [Fact]
+    public async Task PatchBeforeAndAfter_SameOwner_ReportsInvalidOrdering() {
+        const string source = AttributeSource + """
+
+            public sealed class Target {
+            }
+
+            public abstract class OtherPatch {
+            }
+
+            [Concord.Patch(typeof(Target))]
+            [Concord.PatchBefore(typeof(OtherPatch))]
+            [Concord.PatchAfter("OtherPatch")]
+            public abstract class Patch {
+            }
+            """;
+
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(source);
+
+        Diagnostic diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(InjectedMemberAnalyzer.InvalidPatchOrderingDiagnosticId, diagnostic.Id);
+        AssertDiagnosticOnAttribute(source, diagnostic, "PatchAfter");
+    }
+
+    [Fact]
+    public async Task PatchBeforeAndAfter_ValidTypeAndStringOwners_ReportNothing() {
+        const string source = AttributeSource + """
+
+            namespace Mod {
+                public sealed class Target {
+                }
+
+                public abstract class OtherPatch {
+                }
+
+                [Concord.Patch(typeof(Target))]
+                [Concord.PatchBefore(typeof(OtherPatch))]
+                [Concord.PatchAfter("Optional.Mod.Patch")]
+                public abstract class Patch {
+                }
+            }
+            """;
+
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(source);
+
+        Assert.Empty(diagnostics);
+    }
+
     internal const string AttributeSource = """
     using System;
 
@@ -1293,6 +1455,24 @@ public sealed class InjectedMemberAnalyzerTests {
             }
 
             public PatchAttribute(string targetTypeName) {
+            }
+        }
+
+        [AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
+        public sealed class PatchBeforeAttribute : Attribute {
+            public PatchBeforeAttribute(Type patchType) {
+            }
+
+            public PatchBeforeAttribute(string owner) {
+            }
+        }
+
+        [AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
+        public sealed class PatchAfterAttribute : Attribute {
+            public PatchAfterAttribute(Type patchType) {
+            }
+
+            public PatchAfterAttribute(string owner) {
             }
         }
 

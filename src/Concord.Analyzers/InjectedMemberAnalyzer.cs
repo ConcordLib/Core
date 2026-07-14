@@ -110,6 +110,11 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     /// </summary>
     public const string AmbiguousAccessorNameDiagnosticId = "CONCORD020";
 
+    /// <summary>
+    ///     Diagnostic id for invalid patch ordering declarations.
+    /// </summary>
+    public const string InvalidPatchOrderingDiagnosticId = "CONCORD021";
+
     private static readonly DiagnosticDescriptor MissingMemberRule = new(
         MissingMemberDiagnosticId,
         "Injected member target was not found",
@@ -281,6 +286,15 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         true,
         "When a target or call-site name resolves to a property with both a getter and a setter, name it explicitly (get_X/set_X) unless an around-invoke Operation parameter disambiguates it.");
 
+    private static readonly DiagnosticDescriptor InvalidPatchOrderingRule = new(
+        InvalidPatchOrderingDiagnosticId,
+        "Patch ordering declaration is invalid",
+        "{0} is invalid: {1}",
+        "Concord.Patches",
+        DiagnosticSeverity.Error,
+        true,
+        "PatchBefore and PatchAfter must appear on patch declarations and name valid, non-conflicting patch owners.");
+
     private enum MetadataMemberKind {
         Field,
         Property,
@@ -308,7 +322,8 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             InvalidValueInjectionShapeRule,
             InvalidConstantPositionRule,
             AmbiguousArgumentInjectionRule,
-            AmbiguousAccessorNameRule);
+            AmbiguousAccessorNameRule,
+            InvalidPatchOrderingRule);
 
     /// <inheritdoc />
     public override void Initialize(AnalysisContext context) {
@@ -323,10 +338,19 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             return;
         }
 
+        ImmutableArray<AttributeData> orderingAttributes = patchType.GetAttributes()
+            .Where(IsPatchOrderingAttribute)
+            .ToImmutableArray();
         PatchTargetResult? patchTarget = GetPatchTarget(context.Compilation, patchType);
         if (patchTarget is null) {
+            foreach (AttributeData attribute in orderingAttributes) {
+                ReportInvalidPatchOrdering(context, patchType, attribute, "the declaring class is not marked with [Patch]");
+            }
+
             return;
         }
+
+        AnalyzePatchOrdering(context, patchType, orderingAttributes);
 
         if (patchTarget.UnresolvedTarget is not null) {
             ReportUnresolvedPatchTarget(context, patchTarget.PatchAttribute, patchType, patchTarget.UnresolvedTarget);
@@ -346,6 +370,51 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         AnalyzeInjectionMethods(context, patchType, targetType);
         AnalyzeAttachedFields(context, patchType, targetType);
         AnalyzeUnsupportedInjectionMembers(context, patchType, targetType);
+    }
+
+    private static void AnalyzePatchOrdering(
+        SymbolAnalysisContext context,
+        INamedTypeSymbol patchType,
+        ImmutableArray<AttributeData> orderingAttributes) {
+        string patchOwner = MetadataName(patchType);
+        HashSet<string> beforeOwners = new(StringComparer.Ordinal);
+        HashSet<string> afterOwners = new(StringComparer.Ordinal);
+        foreach (AttributeData attribute in orderingAttributes) {
+            string? owner = PatchOrderingOwner(attribute);
+            if (owner is null || string.IsNullOrWhiteSpace(owner)) {
+                ReportInvalidPatchOrdering(context, patchType, attribute, "the owner cannot be empty");
+                continue;
+            }
+
+            if (string.Equals(owner, patchOwner, StringComparison.Ordinal)) {
+                ReportInvalidPatchOrdering(context, patchType, attribute, "a patch cannot order itself");
+                continue;
+            }
+
+            bool isBefore = IsPatchBeforeAttribute(attribute);
+            HashSet<string> owners = isBefore ? beforeOwners : afterOwners;
+            HashSet<string> oppositeOwners = isBefore ? afterOwners : beforeOwners;
+            if (oppositeOwners.Contains(owner)) {
+                ReportInvalidPatchOrdering(
+                    context,
+                    patchType,
+                    attribute,
+                    $"owner '{owner}' appears in both [PatchBefore] and [PatchAfter]");
+            }
+
+            owners.Add(owner);
+        }
+    }
+
+    private static string? PatchOrderingOwner(AttributeData attribute) {
+        if (attribute.ConstructorArguments.Length == 0) {
+            return null;
+        }
+
+        TypedConstant owner = attribute.ConstructorArguments[0];
+        return owner.Kind == TypedConstantKind.Type && owner.Value is INamedTypeSymbol ownerType
+            ? MetadataName(ownerType)
+            : owner.Value as string;
     }
 
     private static PatchTargetResult? GetPatchTarget(Compilation compilation, INamedTypeSymbol patchType) {
@@ -1497,6 +1566,19 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             targetTypeName));
     }
 
+    private static void ReportInvalidPatchOrdering(
+        SymbolAnalysisContext context,
+        INamedTypeSymbol patchType,
+        AttributeData attribute,
+        string reason) {
+        string attributeName = IsPatchBeforeAttribute(attribute) ? "[PatchBefore]" : "[PatchAfter]";
+        context.ReportDiagnostic(Diagnostic.Create(
+            InvalidPatchOrderingRule,
+            LocationOf(attribute, patchType, context.CancellationToken),
+            attributeName,
+            reason));
+    }
+
     private static void ReportMissingInjectionTarget(
         SymbolAnalysisContext context,
         InjectionInfo injection,
@@ -2075,6 +2157,18 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
 
     private static bool IsPatchAttribute(AttributeData attribute) {
         return IsConcordAttribute(attribute, "PatchAttribute");
+    }
+
+    private static bool IsPatchOrderingAttribute(AttributeData attribute) {
+        return IsPatchBeforeAttribute(attribute) || IsPatchAfterAttribute(attribute);
+    }
+
+    private static bool IsPatchBeforeAttribute(AttributeData attribute) {
+        return IsConcordAttribute(attribute, "PatchBeforeAttribute");
+    }
+
+    private static bool IsPatchAfterAttribute(AttributeData attribute) {
+        return IsConcordAttribute(attribute, "PatchAfterAttribute");
     }
 
     private static bool IsInjectFieldAttribute(AttributeData attribute) {

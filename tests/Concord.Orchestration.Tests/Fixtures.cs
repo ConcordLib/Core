@@ -29,6 +29,39 @@ public abstract class GoodDeclaration : GameBase {
 }
 
 [Patch]
+[PatchBefore(typeof(GoodDeclaration))]
+public abstract class BeforeDeclaration : GameBase {
+    [Inject(At.Head, nameof(Step))]
+    public void OnStep(ControlHandle ch) { }
+}
+
+[Patch]
+[PatchBefore(typeof(GoodDeclaration))]
+[PatchBefore("Optional.Mod.Before")]
+[PatchBefore("Optional.Mod.Before")]
+[PatchAfter(typeof(FieldOnlyDeclaration))]
+[PatchAfter("Optional.Mod.After")]
+[PatchAfter("Optional.Mod.After")]
+public abstract class OrderedDeclaration : GameBase {
+    [Inject(At.Head, nameof(Step))]
+    public void OnStep(ControlHandle ch) { }
+}
+
+[Patch]
+[PatchBefore("  ")]
+public abstract class InvalidOrderDeclaration : GameBase {
+    [Inject(At.Head, nameof(Step))]
+    public void OnStep(ControlHandle ch) { }
+}
+
+[Patch]
+[PatchAfter("")]
+public abstract class InvalidAfterDeclaration : GameBase {
+    [Inject(At.Head, nameof(Step))]
+    public void OnStep(ControlHandle ch) { }
+}
+
+[Patch]
 public abstract class PropertyTargetDeclaration : GameBase {
     [Inject(At.Tail, nameof(Score))]
     public void OnScore(ControlHandle<int> ch) { }

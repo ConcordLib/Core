@@ -24,3 +24,4 @@ CONCORD017 | Concord.Patches | Error | At.Constant and At.Argument injection met
 CONCORD018 | Concord.Patches | Error | Constant [Inject] constructors require At.Constant, and At.Constant/At.Argument require their dedicated constructor.
 CONCORD019 | Concord.Patches | Error | At.Argument with arg: 0 must infer a unique argument by type on the resolved call site.
 CONCORD020 | Concord.Patches | Error | Target and call-site names resolving to a two-accessor property must be disambiguated.
+CONCORD021 | Concord.Patches | Error | Patch ordering attributes must appear on patch declarations and name valid, non-conflicting patch owners.

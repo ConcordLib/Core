@@ -41,13 +41,22 @@ internal sealed class TargetDetourRegistry {
     private IDetourHandle AddInternal(IReadOnlyList<Injection> added) {
         lock (gate) {
             List<long> owned = new List<long>(added.Count);
+            List<(long Seq, Injection Injection)> tentative = new List<(long Seq, Injection Injection)>(live.Count + added.Count);
+            tentative.AddRange(live);
+            bool debug = false;
+            long nextSequence = sequence;
             foreach (Injection injection in added) {
-                long seq = sequence++;
-                live.Add((seq, injection));
+                long seq = nextSequence++;
+                tentative.Add((seq, injection));
                 owned.Add(seq);
+                debug |= injection.Debug;
             }
 
-            Recompose();
+            Injection[] ordered = InjectionOrderer.OrderForComposition(tentative);
+            live.Clear();
+            live.AddRange(tentative);
+            sequence = nextSequence;
+            Recompose(ordered, debug);
             return new RegistryHandle(this, owned);
         }
     }
@@ -63,11 +72,11 @@ internal sealed class TargetDetourRegistry {
                 }
             }
 
-            Recompose();
+            Recompose(InjectionOrderer.OrderForComposition(live), false);
         }
     }
 
-    private void Recompose() {
+    private void Recompose(IReadOnlyList<Injection> ordered, bool debug) {
         ICoreDetour? old = detour;
         detour = null;
         if (old is { IsApplied: true }) {
@@ -76,18 +85,12 @@ internal sealed class TargetDetourRegistry {
 
         old?.Dispose();
 
-        if (live.Count == 0) {
+        if (ordered.Count == 0) {
             return;
         }
 
-        live.Sort(static (a, b) => {
-            int byPriority = b.Injection.Priority.CompareTo(a.Injection.Priority);
-            return byPriority != 0 ? byPriority : a.Seq.CompareTo(b.Seq);
-        });
-
-        Injection[] ordered = new Injection[live.Count];
-        for (int i = 0; i < live.Count; i++) {
-            ordered[i] = live[i].Injection;
+        if (debug) {
+            PatchDebugLog.Append(target, WrapperComposer.ComposeDump(target, ordered));
         }
 
         ComposeResult result = WrapperComposer.Compose(target, ordered);
