@@ -9,8 +9,10 @@ public sealed class OperationFamilyTests {
     [InlineData(typeof(Operation<int, int>))]
     [InlineData(typeof(Operation<int, string, bool>))]
     [InlineData(typeof(Operation<int, int, int, int>))]
+    [InlineData(typeof(Operation<int, int, int, int, int, int, int, int, int>))]
     [InlineData(typeof(VoidOperation<int>))]
     [InlineData(typeof(VoidOperation<int, string>))]
+    [InlineData(typeof(VoidOperation<int, int, int, int, int, int, int, int>))]
     public void IsOperationType_RecognizesEveryFamilyMember(System.Type type) {
         Assert.True(ControlHandleLowering.IsOperationType(type));
     }

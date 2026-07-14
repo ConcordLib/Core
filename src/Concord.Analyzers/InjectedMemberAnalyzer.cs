@@ -1792,13 +1792,19 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
                 0 => "Operation",
                 1 => "VoidOperation<" + displayNames[0] + ">",
                 2 => "VoidOperation<" + string.Join(", ", displayNames) + ">",
+                3 => "VoidOperation<" + string.Join(", ", displayNames) + ">",
+                4 => "VoidOperation<" + string.Join(", ", displayNames) + ">",
+                5 => "VoidOperation<" + string.Join(", ", displayNames) + ">",
+                6 => "VoidOperation<" + string.Join(", ", displayNames) + ">",
+                7 => "VoidOperation<" + string.Join(", ", displayNames) + ">",
+                8 => "VoidOperation<" + string.Join(", ", displayNames) + ">",
                 _ => "VoidOperation<...>",
             };
         }
 
         string[] withResult = displayNames.Concat(new[] { returnType.ToDisplayString() }).ToArray();
         return displayNames.Length switch {
-            0 or 1 or 2 or 3 => "Operation<" + string.Join(", ", withResult) + ">",
+            0 or 1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 => "Operation<" + string.Join(", ", withResult) + ">",
             _ => "Operation<...>",
         };
     }
