@@ -79,6 +79,59 @@ internal static class IlDump {
         return sb.ToString();
     }
 
+    internal static int PopCount(Instruction instruction, MethodDefinition method) {
+        switch (instruction.OpCode.StackBehaviourPop) {
+            case StackBehaviour.Pop0:
+                return 0;
+            case StackBehaviour.Pop1:
+            case StackBehaviour.Popi:
+            case StackBehaviour.Popref:
+                return 1;
+            case StackBehaviour.Pop1_pop1:
+            case StackBehaviour.Popi_pop1:
+            case StackBehaviour.Popi_popi:
+            case StackBehaviour.Popi_popi8:
+            case StackBehaviour.Popi_popr4:
+            case StackBehaviour.Popi_popr8:
+            case StackBehaviour.Popref_pop1:
+            case StackBehaviour.Popref_popi:
+                return 2;
+            case StackBehaviour.Popi_popi_popi:
+            case StackBehaviour.Popref_popi_popi:
+            case StackBehaviour.Popref_popi_popi8:
+            case StackBehaviour.Popref_popi_popr4:
+            case StackBehaviour.Popref_popi_popr8:
+            case StackBehaviour.Popref_popi_popref:
+                return 3;
+            case StackBehaviour.PopAll:
+                return 0;
+            case StackBehaviour.Varpop:
+                return VarPop(instruction, method);
+            default:
+                return 0;
+        }
+    }
+
+    internal static int PushCount(Instruction instruction) {
+        switch (instruction.OpCode.StackBehaviourPush) {
+            case StackBehaviour.Push0:
+                return 0;
+            case StackBehaviour.Push1:
+            case StackBehaviour.Pushi:
+            case StackBehaviour.Pushi8:
+            case StackBehaviour.Pushr4:
+            case StackBehaviour.Pushr8:
+            case StackBehaviour.Pushref:
+                return 1;
+            case StackBehaviour.Push1_push1:
+                return 2;
+            case StackBehaviour.Varpush:
+                return VarPush(instruction);
+            default:
+                return 0;
+        }
+    }
+
     private static string Verify(MethodDefinition method) {
         MethodBody body = method.Body;
         Dictionary<Instruction, int> indexOf = new Dictionary<Instruction, int>();
@@ -252,68 +305,15 @@ internal static class IlDump {
         return type.FullName + " @ " + (type.Scope?.Name ?? "?");
     }
 
-    private static int PopCount(Instruction instruction, MethodDefinition method) {
-        switch (instruction.OpCode.StackBehaviourPop) {
-            case StackBehaviour.Pop0:
-                return 0;
-            case StackBehaviour.Pop1:
-            case StackBehaviour.Popi:
-            case StackBehaviour.Popref:
-                return 1;
-            case StackBehaviour.Pop1_pop1:
-            case StackBehaviour.Popi_pop1:
-            case StackBehaviour.Popi_popi:
-            case StackBehaviour.Popi_popi8:
-            case StackBehaviour.Popi_popr4:
-            case StackBehaviour.Popi_popr8:
-            case StackBehaviour.Popref_pop1:
-            case StackBehaviour.Popref_popi:
-                return 2;
-            case StackBehaviour.Popi_popi_popi:
-            case StackBehaviour.Popref_popi_popi:
-            case StackBehaviour.Popref_popi_popi8:
-            case StackBehaviour.Popref_popi_popr4:
-            case StackBehaviour.Popref_popi_popr8:
-            case StackBehaviour.Popref_popi_popref:
-                return 3;
-            case StackBehaviour.PopAll:
-                return 0;
-            case StackBehaviour.Varpop:
-                return VarPop(instruction, method);
-            default:
-                return 0;
-        }
-    }
-
-    private static int PushCount(Instruction instruction) {
-        switch (instruction.OpCode.StackBehaviourPush) {
-            case StackBehaviour.Push0:
-                return 0;
-            case StackBehaviour.Push1:
-            case StackBehaviour.Pushi:
-            case StackBehaviour.Pushi8:
-            case StackBehaviour.Pushr4:
-            case StackBehaviour.Pushr8:
-            case StackBehaviour.Pushref:
-                return 1;
-            case StackBehaviour.Push1_push1:
-                return 2;
-            case StackBehaviour.Varpush:
-                return 1;
-            default:
-                return 0;
-        }
-    }
-
     private static int VarPop(Instruction instruction, MethodDefinition method) {
         if (instruction.Operand is MethodReference reference) {
-            int count = reference.Parameters.Count;
-            if (reference.HasThis && instruction.OpCode != OpCodes.Newobj) {
-                count++;
-            }
-
             if (instruction.OpCode == OpCodes.Newobj) {
                 return reference.Parameters.Count;
+            }
+
+            int count = reference.Parameters.Count;
+            if (reference.HasThis) {
+                count++;
             }
 
             return count;
@@ -324,5 +324,17 @@ internal static class IlDump {
         }
 
         return 0;
+    }
+
+    private static int VarPush(Instruction instruction) {
+        if (instruction.Operand is not MethodReference reference) {
+            return 1;
+        }
+
+        if (instruction.OpCode == OpCodes.Newobj) {
+            return 1;
+        }
+
+        return reference.ReturnType.FullName == "System.Void" ? 0 : 1;
     }
 }

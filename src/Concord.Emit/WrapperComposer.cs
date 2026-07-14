@@ -745,19 +745,17 @@ public static class WrapperComposer {
         }
 
         SpineTemplate template = SpineTemplate.Capture(spine, wrapperDefinition.Body.ExceptionHandlers, protocolLocals);
-        SpineCopy spineCopy = SpineCopy.Create(template, wrapperDefinition);
 
         foreach (ExceptionHandler handler in template.Handlers) {
             wrapperDefinition.Body.ExceptionHandlers.Remove(handler);
         }
 
-        foreach (ExceptionHandler handler in spineCopy.Handlers) {
-            wrapperDefinition.Body.ExceptionHandlers.Add(handler);
-        }
-
         InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
         using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
         EnsureOperationInvokeNotInLoop(injectionMethodDefinition.Definition.Body, injection.InjectionMethod);
+        EnsureAroundInvokePlacement(injectionMethodDefinition.Definition, template.Handlers.Count > 0, injection.InjectionMethod);
+
+        List<SpineCopy> spineCopies = [];
         aroundBody = BodyCopier.CopyInjection(
             injectionMethodDefinition.Definition,
             wrapperDefinition,
@@ -766,9 +764,16 @@ public static class WrapperComposer {
             injectedMembers,
             locals,
             epilogueStart,
-            spineCopy.Instructions,
-            spineCopy);
-        RetargetAroundSpineBranches(aroundBody, spineCopy.Instructions, afterSpine, epilogueStart, locals);
+            template,
+            spineCopies);
+
+        foreach (SpineCopy spineCopy in spineCopies) {
+            foreach (ExceptionHandler handler in spineCopy.Handlers) {
+                wrapperDefinition.Body.ExceptionHandlers.Add(handler);
+            }
+        }
+
+        RetargetAroundSpineBranches(aroundBody, spineCopies, afterSpine, epilogueStart, locals);
     }
 
     private static void ValidateWholeMethodOperationOnly(MethodBase injectionMethod, MethodBase target) {
@@ -829,6 +834,107 @@ public static class WrapperComposer {
         }
 
         return false;
+    }
+
+    private static void EnsureAroundInvokePlacement(MethodDefinition injectionDefinition, bool bodyHasHandlers, MethodBase injectionMethod) {
+        if (!bodyHasHandlers) {
+            return;
+        }
+
+        MethodBody injectionBody = injectionDefinition.Body;
+        List<Instruction> instructions = new List<Instruction>(injectionBody.Instructions);
+        if (instructions.Count == 0) {
+            return;
+        }
+
+        int[] entryDepth = ComputeEntryDepths(instructions, injectionDefinition);
+
+        for (int i = 0; i < instructions.Count; i++) {
+            Instruction instruction = instructions[i];
+            if (!ControlHandleLowering.IsOperationInvoke(instruction)) {
+                continue;
+            }
+
+            int ambientDepth = entryDepth[i] - IlDump.PopCount(instruction, injectionDefinition);
+            if (ambientDepth > 0) {
+                throw new ConcordEmitException(
+                    "CONC107",
+                    "The Operation handle Invoke(...) call in injection '" + injectionMethod.DeclaringType?.Name + "." + injectionMethod.Name +
+                    "' is used mid-expression on a target with exception handlers; splicing the original body clears the evaluation stack on any protected-region exit. " +
+                    "Use Invoke(...) only as a statement, a direct assignment, or a direct return.");
+            }
+        }
+    }
+
+    private static int[] ComputeEntryDepths(List<Instruction> instructions, MethodDefinition injectionDefinition) {
+        Dictionary<Instruction, int> indexOf = new Dictionary<Instruction, int>(instructions.Count);
+        for (int i = 0; i < instructions.Count; i++) {
+            indexOf[instructions[i]] = i;
+        }
+
+        int[] entryDepth = new int[instructions.Count];
+        bool[] seen = new bool[instructions.Count];
+        Queue<int> work = new Queue<int>();
+
+        seen[0] = true;
+        entryDepth[0] = 0;
+        work.Enqueue(0);
+
+        foreach (ExceptionHandler handler in injectionDefinition.Body.ExceptionHandlers) { // NOSONAR project forbids LINQ in loops (perf/determinism); for-loop is intentional
+            SeedDepth(handler.HandlerStart, handler.HandlerType == ExceptionHandlerType.Finally ? 0 : 1, indexOf, entryDepth, seen, work);
+            SeedDepth(handler.FilterStart, 1, indexOf, entryDepth, seen, work);
+        }
+
+        while (work.Count > 0) {
+            int idx = work.Dequeue();
+            Instruction instruction = instructions[idx];
+            int depth = entryDepth[idx];
+
+            int after = depth - IlDump.PopCount(instruction, injectionDefinition) + IlDump.PushCount(instruction);
+            if (after < 0) {
+                after = 0;
+            }
+
+            if (instruction.OpCode == OpCodes.Leave || instruction.OpCode == OpCodes.Leave_S) {
+                SeedDepth(instruction.Operand as Instruction, 0, indexOf, entryDepth, seen, work);
+                continue;
+            }
+
+            if (instruction.Operand is Instruction branchTarget) {
+                SeedDepth(branchTarget, after, indexOf, entryDepth, seen, work);
+            } else if (instruction.Operand is Instruction[] switchTargets) {
+                for (int t = 0; t < switchTargets.Length; t++) {
+                    SeedDepth(switchTargets[t], after, indexOf, entryDepth, seen, work);
+                }
+            }
+
+            FlowControl flow = instruction.OpCode.FlowControl;
+            if (flow is FlowControl.Branch or FlowControl.Return or FlowControl.Throw) {
+                continue;
+            }
+
+            if (idx + 1 < instructions.Count) {
+                SeedDepth(instructions[idx + 1], after, indexOf, entryDepth, seen, work);
+            }
+        }
+
+        return entryDepth;
+    }
+
+    private static void SeedDepth(
+        Instruction? target,
+        int depth,
+        Dictionary<Instruction, int> indexOf,
+        int[] entryDepth,
+        bool[] seen,
+        Queue<int> work) {
+        if (target is null || !indexOf.TryGetValue(target, out int idx) || seen[idx]) {
+            return;
+        }
+
+        seen[idx] = true;
+        entryDepth[idx] = depth;
+        work.Enqueue(idx);
     }
 
     private static void WrapCallSite(
@@ -1152,10 +1258,22 @@ public static class WrapperComposer {
 
     private static void RetargetAroundSpineBranches(
         List<Instruction> aroundBody,
-        List<Instruction> spine,
+        List<SpineCopy> spineCopies,
         Instruction afterSpine,
         Instruction epilogueStart,
         ProtocolLocals locals) {
+        foreach (SpineCopy spineCopy in spineCopies) {
+            RetargetSpineCopyBranches(aroundBody, spineCopy, afterSpine, epilogueStart, locals);
+        }
+    }
+
+    private static void RetargetSpineCopyBranches(
+        List<Instruction> aroundBody,
+        SpineCopy spineCopy,
+        Instruction afterSpine,
+        Instruction epilogueStart,
+        ProtocolLocals locals) {
+        List<Instruction> spine = spineCopy.Instructions;
         if (spine.Count == 0) {
             return;
         }
@@ -1177,8 +1295,8 @@ public static class WrapperComposer {
             }
         }
 
-        foreach (Instruction instruction in aroundBody) {
-            if (instruction.Operand == afterSpine) {
+        foreach (Instruction instruction in spine) {
+            if (ReferenceEquals(instruction.Operand, afterSpine)) {
                 instruction.Operand = spliceJoin;
             }
         }

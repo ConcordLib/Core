@@ -56,8 +56,8 @@ internal static class BodyCopier {
     /// <param name="injectedMembers">The resolved injected-member map for the injection's declaring type.</param>
     /// <param name="locals">Wrapper locals used for cancellation and return-value protocol state.</param>
     /// <param name="returnBranchTarget">The instruction to branch to when the injection method returns.</param>
-    /// <param name="spliceBody">Optional body to splice when an around injection method calls the target method.</param>
-    /// <param name="spineCopy">The whole-method Around spine copy being spliced, if any; carries the per-copy Invoke arg-locals map.</param>
+    /// <param name="spineTemplate">The whole-method Around spine template to splice a fresh copy from at each Invoke site, if any.</param>
+    /// <param name="spineCopies">Collects one <see cref="SpineCopy" /> per Invoke site spliced while copying, if any.</param>
     /// <returns>The copied and lowered instruction sequence.</returns>
     public static List<Instruction> CopyInjection(
         MethodDefinition injectionDefinition,
@@ -67,8 +67,8 @@ internal static class BodyCopier {
         InjectedMemberMap injectedMembers,
         ProtocolLocals locals,
         Instruction returnBranchTarget,
-        IReadOnlyList<Instruction>? spliceBody = null,
-        SpineCopy? spineCopy = null) {
+        SpineTemplate? spineTemplate = null,
+        List<SpineCopy>? spineCopies = null) {
         MethodBody injectionBody = injectionDefinition.Body;
         ModuleDefinition module = destination.Module;
 
@@ -92,8 +92,9 @@ internal static class BodyCopier {
                 returnBranchTarget,
                 injectionMethod,
                 target,
-                spliceBody,
-                spineCopy);
+                spineTemplate,
+                destination,
+                spineCopies);
             entries.Add((source_instruction, emitted));
         }
 
@@ -403,8 +404,9 @@ internal static class BodyCopier {
         Instruction returnBranchTarget,
         MethodBase injectionMethod,
         MethodBase? target = null,
-        IReadOnlyList<Instruction>? spliceBody = null,
-        SpineCopy? spineCopy = null) {
+        SpineTemplate? spineTemplate = null,
+        MethodDefinition? destination = null,
+        List<SpineCopy>? spineCopies = null) {
         if (ControlHandleLowering.IsControlHandleReceiverLoad(source, controlHandleArgIndex)) {
             EnsureNotStrayControlHandleUse(source, controlHandleArgIndex, target, injectionMethod);
             return new List<Instruction>(0);
@@ -415,43 +417,47 @@ internal static class BodyCopier {
             return new List<Instruction>(0);
         }
 
-        if (spliceBody is not null && ControlHandleLowering.IsOperationReceiverLoad(source, operationArgIndex)) {
+        if (spineTemplate is not null && ControlHandleLowering.IsOperationReceiverLoad(source, operationArgIndex)) {
             EnsureNotStrayOperationUse(source, operationArgIndex, injectionMethod);
             return new List<Instruction>(0);
         }
 
-        if (spliceBody is not null && IsOperationDup(source, operationArgIndex)) {
+        if (spineTemplate is not null && IsOperationDup(source, operationArgIndex)) {
             EnsureNotStrayOperationUse(source, operationArgIndex, injectionMethod);
             return new List<Instruction>(0);
         }
 
-        if (target is not null && spliceBody is not null && ControlHandleLowering.IsOperationInvoke(source)) {
-            List<Instruction> spliced = new List<Instruction>(target.GetParameters().Length + spliceBody.Count);
+        if (target is not null && spineTemplate is not null && ControlHandleLowering.IsOperationInvoke(source)) {
+            SpineCopy spineCopy = SpineCopy.Create(spineTemplate, destination!);
+            spineCopies!.Add(spineCopy);
+
+            List<Instruction> spliced = new List<Instruction>(target.GetParameters().Length + spineCopy.Instructions.Count);
             List<VariableDefinition> argLocals = SpillInvokeArgs(ctx, target, spliced);
 
-            if (spineCopy is not null) {
-                int targetOffset = target.IsStatic ? 0 : 1;
-                for (int i = 0; i < argLocals.Count; i++) {
-                    spineCopy.ArgLocals[i + targetOffset] = argLocals[i];
-                }
-
-                RewriteSpliceArgs(spineCopy.Instructions, spineCopy.ArgLocals);
+            int targetOffset = target.IsStatic ? 0 : 1;
+            for (int i = 0; i < argLocals.Count; i++) {
+                spineCopy.ArgLocals[i + targetOffset] = argLocals[i];
             }
 
-            spliced.AddRange(spliceBody);
+            RewriteSpliceArgs(spineCopy.Instructions, spineCopy.ArgLocals);
+
+            spliced.AddRange(spineCopy.Instructions);
             return spliced;
         }
 
-        if (target is not null && spliceBody is not null && ControlHandleLowering.IsOriginalBodySpliceCall(source, target)) {
+        if (target is not null && spineTemplate is not null && ControlHandleLowering.IsOriginalBodySpliceCall(source, target)) {
             int consumed = target.GetParameters().Length + (target.IsStatic ? 0 : 1);
             EnsureVerbatimArgForwards(source, consumed, injectionMethod);
 
-            List<Instruction> spliced = new List<Instruction>(consumed + spliceBody.Count);
+            SpineCopy spineCopy = SpineCopy.Create(spineTemplate, destination!);
+            spineCopies!.Add(spineCopy);
+
+            List<Instruction> spliced = new List<Instruction>(consumed + spineCopy.Instructions.Count);
             for (int p = 0; p < consumed; p++) {
                 spliced.Add(Instruction.Create(OpCodes.Pop));
             }
 
-            spliced.AddRange(spliceBody);
+            spliced.AddRange(spineCopy.Instructions);
             return spliced;
         }
 
@@ -473,7 +479,7 @@ internal static class BodyCopier {
         }
 
         if (source.OpCode == OpCodes.Ret) {
-            if (spliceBody is not null && locals.ReturnValue is not null) {
+            if (spineTemplate is not null && locals.ReturnValue is not null) {
                 return new List<Instruction> {
                     Instruction.Create(OpCodes.Stloc, locals.ReturnValue), Instruction.Create(OpCodes.Br, returnBranchTarget),
                 };

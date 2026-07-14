@@ -48,6 +48,36 @@ public static class AroundHandleInjectionMethods {
     }
 }
 
+public static class TryFinallyAroundTarget {
+    public static int Compute(int x) {
+        try {
+            return x * 2;
+        } finally {
+            AroundHandleLog.Entries.Add("finally");
+        }
+    }
+}
+
+public static class MultiInvokeAroundInjectionMethods {
+    public static int WrapTripleTwice(int x, Operation<int, int> original) {
+        return original.Invoke(x) + original.Invoke(x + 1);
+    }
+
+    public static int WrapSkip(int x, Operation<int, int> original) {
+        return 99;
+    }
+
+    public static int WrapTryFinallyTwice(int x, Operation<int, int> original) {
+        int a = original.Invoke(x);
+        int b = original.Invoke(x);
+        return a + b;
+    }
+
+    public static int WrapMidExpressionWithHandlers(int x, Operation<int, int> original) {
+        return 10 + original.Invoke(x);
+    }
+}
+
 public sealed class InstanceAroundTarget {
     public int Seed;
 
@@ -285,6 +315,60 @@ public sealed class AroundHandleTests {
             WrapperComposer.Compose(target, [around]));
 
         Assert.Equal("CONC113", ex.Code);
+    }
+
+    [Fact]
+    public void Around_WholeMethod_MultipleInvoke_RunsBodyTwiceAndSumsResults() {
+        MethodBase target = typeof(AroundHandleTarget).GetMethod(nameof(AroundHandleTarget.Triple))!;
+        MethodBase injectionMethod = typeof(MultiInvokeAroundInjectionMethods).GetMethod(nameof(MultiInvokeAroundInjectionMethods.WrapTripleTwice))!;
+        Injection around = new Injection(injectionMethod, new InjectAt.Around(), "test", 0);
+
+        ComposeResult result = WrapperComposer.Compose(target, [around]);
+
+        Assert.Equal(33, result.Wrapper.Invoke(null, [5]));
+    }
+
+    [Fact]
+    public void Around_WholeMethod_ZeroInvoke_SkipsBodyAndDropsHandlers() {
+        MethodBase target = typeof(TryFinallyAroundTarget).GetMethod(nameof(TryFinallyAroundTarget.Compute))!;
+        MethodBase injectionMethod = typeof(MultiInvokeAroundInjectionMethods).GetMethod(nameof(MultiInvokeAroundInjectionMethods.WrapSkip))!;
+        Injection around = new Injection(injectionMethod, new InjectAt.Around(), "test", 0);
+
+        AroundHandleLog.Clear();
+        string dump = WrapperComposer.ComposeDump(target, [around]);
+        ComposeResult result = WrapperComposer.Compose(target, [around]);
+
+        Assert.Equal(99, result.Wrapper.Invoke(null, [5]));
+        Assert.Empty(AroundHandleLog.Entries);
+        Assert.Contains("exceptionHandlers[0]:", dump);
+    }
+
+    [Fact]
+    public void Around_WholeMethod_MultipleInvokeOverTryFinally_RunsFinallyOncePerInvoke() {
+        MethodBase target = typeof(TryFinallyAroundTarget).GetMethod(nameof(TryFinallyAroundTarget.Compute))!;
+        MethodBase injectionMethod = typeof(MultiInvokeAroundInjectionMethods).GetMethod(nameof(MultiInvokeAroundInjectionMethods.WrapTryFinallyTwice))!;
+        Injection around = new Injection(injectionMethod, new InjectAt.Around(), "test", 0);
+
+        AroundHandleLog.Clear();
+        string dump = WrapperComposer.ComposeDump(target, [around]);
+        ComposeResult result = WrapperComposer.Compose(target, [around]);
+        object? value = result.Wrapper.Invoke(null, [5]);
+
+        Assert.Equal(20, value);
+        Assert.Equal(["finally", "finally"], AroundHandleLog.Entries);
+        Assert.Contains("exceptionHandlers[2]:", dump);
+    }
+
+    [Fact]
+    public void Compose_WholeMethodAround_MidExpressionInvokeOnHandlerBearingTarget_ThrowsCONC107() {
+        MethodBase target = typeof(TryFinallyAroundTarget).GetMethod(nameof(TryFinallyAroundTarget.Compute))!;
+        MethodBase injectionMethod = typeof(MultiInvokeAroundInjectionMethods).GetMethod(nameof(MultiInvokeAroundInjectionMethods.WrapMidExpressionWithHandlers))!;
+        Injection around = new Injection(injectionMethod, new InjectAt.Around(), "test", 0);
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() =>
+            WrapperComposer.Compose(target, [around]));
+
+        Assert.Equal("CONC107", ex.Code);
     }
 
     [Fact]
