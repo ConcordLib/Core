@@ -313,12 +313,13 @@ public static class WrapperComposer {
         }
 
         Instruction guardStart = Instruction.Create(OpCodes.Ldloc, locals.Cancel);
-        Instruction guardBranch = Instruction.Create(OpCodes.Brtrue, afterSpine);
+        Instruction guardBranch = Instruction.Create(OpCodes.Brtrue, hasAround ? epilogueStart : afterSpine);
 
         bool hasHead = false;
         List<List<Instruction>> headBodies = new List<List<Instruction>>();
         List<List<Instruction>> returnBodies = new List<List<Instruction>>();
         List<List<Instruction>> tailBodies = new List<List<Instruction>>();
+        Injection? aroundInjection = null;
         List<Instruction>? aroundBody = null;
         Instruction? lastExit = null;
 
@@ -351,7 +352,13 @@ public static class WrapperComposer {
             }
 
             if (injection.At is InjectAt.Around) {
-                ProcessAroundInjection(injection, wrapperDefinition, target, locals, epilogueStart, afterSpine, spine, ref aroundBody);
+                if (aroundInjection is not null) {
+                    throw new ConcordEmitException(
+                        "CONC051",
+                        $"Multiple Around injections on '{target.DeclaringType?.Name}.{target.Name}' are not supported; only one Around injection per target is allowed.");
+                }
+
+                aroundInjection = injection;
             }
         }
 
@@ -361,12 +368,22 @@ public static class WrapperComposer {
             spine.InsertRange(exitIndex, tails);
         }
 
+        if (aroundInjection is not null) {
+            ProcessAroundInjection(aroundInjection, wrapperDefinition, target, locals, epilogueStart, afterSpine, spine, ref aroundBody);
+        }
+
         List<Instruction> heads = ChainBodies(headBodies, guardStart);
         List<Instruction> returns = ChainBodies(returnBodies, epilogueStart);
 
         List<Instruction> assembled = new List<Instruction>();
 
         if (aroundBody is not null) {
+            assembled.AddRange(heads);
+            if (hasHead) {
+                assembled.Add(guardStart);
+                assembled.Add(guardBranch);
+            }
+
             assembled.AddRange(aroundBody);
             assembled.AddRange(epilogue);
         } else {
