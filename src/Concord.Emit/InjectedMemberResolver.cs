@@ -3,9 +3,19 @@ using System.Reflection;
 namespace Concord.Emit;
 
 internal static class InjectedMemberResolver {
+    private const string CodeCONC070 = "CONC070";
+    private const string CodeCONC071 = "CONC071";
+    private const string CodeCONC072 = "CONC072";
+    private const string CodeCONC073 = "CONC073";
+    private const string CodeCONC074 = "CONC074";
+    private const string InjectedPropertyDeclaration = "Injected property declaration '";
+    private const string HasType = "' has type '";
+
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S3011", Justification = "Concord resolves private target members by design; signatures are validated at resolve time.")]
     private const BindingFlags DeclaredMembers =
         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S3011", Justification = "Concord resolves private target members by design; signatures are validated at resolve time.")]
     private const BindingFlags TargetMembers =
         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
 
@@ -32,7 +42,7 @@ internal static class InjectedMemberResolver {
             }
 
             if (instanceProperty is not null) {
-                throw Error("CONC070", "Only one [InjectInstance] property is allowed on declaration '" + declarationType.Name + "'.");
+                throw Error(CodeCONC070, "Only one [InjectInstance] property is allowed on declaration '" + declarationType.Name + "'.");
             }
 
             instanceProperty = property;
@@ -44,21 +54,21 @@ internal static class InjectedMemberResolver {
 
         MethodInfo? getter = instanceProperty.GetGetMethod(true);
         if (getter is null || instanceProperty.GetSetMethod(true) is not null || getter.IsStatic) {
-            throw Error("CONC070", "[InjectInstance] on '" + declarationType.Name + "." + instanceProperty.Name + "' must be a non-static get-only property.");
+            throw Error(CodeCONC070, "[InjectInstance] on '" + declarationType.Name + "." + instanceProperty.Name + "' must be a non-static get-only property.");
         }
 
         if (target.IsStatic) {
-            throw Error("CONC074", "[InjectInstance] cannot be used when patching static target method '" + targetType.Name + "." + target.Name + "'.");
+            throw Error(CodeCONC074, "[InjectInstance] cannot be used when patching static target method '" + targetType.Name + "." + target.Name + "'.");
         }
 
         if (targetType.IsValueType) {
-            throw Error("CONC074", "[InjectInstance] does not support value-type target '" + targetType.Name + "'.");
+            throw Error(CodeCONC074, "[InjectInstance] does not support value-type target '" + targetType.Name + "'.");
         }
 
         if (!instanceProperty.PropertyType.IsAssignableFrom(targetType)) {
             throw Error(
-                "CONC072",
-                "[InjectInstance] property '" + declarationType.Name + "." + instanceProperty.Name + "' has type '" +
+                CodeCONC072,
+                "[InjectInstance] property '" + declarationType.Name + "." + instanceProperty.Name + HasType +
                 instanceProperty.PropertyType.FullName +
                 "', which cannot receive target instance type '" +
                 targetType.FullName +
@@ -79,8 +89,8 @@ internal static class InjectedMemberResolver {
             FieldInfo targetField = ResolveField(declarationType, targetType, declarationField, targetName);
             if (targetField.FieldType != declarationField.FieldType || targetField.IsStatic != declarationField.IsStatic) {
                 throw Error(
-                    "CONC072",
-                    "Injected field declaration '" + declarationType.Name + "." + declarationField.Name + "' has type '" +
+                    CodeCONC072,
+                    "Injected field declaration '" + declarationType.Name + "." + declarationField.Name + HasType +
                     declarationField.FieldType.FullName +
                     "' / static=" +
                     declarationField.IsStatic +
@@ -88,7 +98,7 @@ internal static class InjectedMemberResolver {
                     targetType.Name +
                     "." +
                     targetName +
-                    "' has type '" +
+                    HasType +
                     targetField.FieldType.FullName +
                     "' / static=" +
                     targetField.IsStatic +
@@ -112,14 +122,14 @@ internal static class InjectedMemberResolver {
 
             if (targetProperty.PropertyType != declarationProperty.PropertyType) {
                 throw Error(
-                    "CONC072",
-                    "Injected property declaration '" + declarationType.Name + "." + declarationProperty.Name + "' has type '" +
+                    CodeCONC072,
+                    InjectedPropertyDeclaration + declarationType.Name + "." + declarationProperty.Name + HasType +
                     declarationProperty.PropertyType.FullName +
                     "', but target property '" +
                     targetType.Name +
                     "." +
                     targetName +
-                    "' has type '" +
+                    HasType +
                     targetProperty.PropertyType.FullName +
                     "'. Signatures must match exactly.");
             }
@@ -144,7 +154,7 @@ internal static class InjectedMemberResolver {
                 targetMethod.IsStatic != declarationMethod.IsStatic ||
                 targetMethod.ContainsGenericParameters != declarationMethod.ContainsGenericParameters) {
                 throw Error(
-                    "CONC072",
+                    CodeCONC072,
                     "[InjectMethod] declaration '" + declarationType.Name + "." + declarationMethod.Name + "' does not match target method '" +
                     targetType.Name +
                     "." +
@@ -163,10 +173,10 @@ internal static class InjectedMemberResolver {
                 return targetField;
             }
         } catch (AmbiguousMatchException) {
-            throw Error("CONC073", "Injected field declaration '" + declarationType.Name + "." + declarationField.Name + "' ambiguously resolves target field '" + targetType.Name + "." + targetName + "'.");
+            throw Error(CodeCONC073, "Injected field declaration '" + declarationType.Name + "." + declarationField.Name + "' ambiguously resolves target field '" + targetType.Name + "." + targetName + "'.");
         }
 
-        throw Error("CONC071", "Injected field declaration '" + declarationType.Name + "." + declarationField.Name + "' could not find target field '" + targetType.Name + "." + targetName + "'.");
+        throw Error(CodeCONC071, "Injected field declaration '" + declarationType.Name + "." + declarationField.Name + "' could not find target field '" + targetType.Name + "." + targetName + "'.");
     }
 
     private static PropertyInfo ResolveProperty(Type declarationType, Type targetType, PropertyInfo declarationProperty, string targetName, Type[] indexTypes) {
@@ -176,10 +186,10 @@ internal static class InjectedMemberResolver {
                 return targetProperty;
             }
         } catch (AmbiguousMatchException) {
-            throw Error("CONC073", "Injected property declaration '" + declarationType.Name + "." + declarationProperty.Name + "' ambiguously resolves target property '" + targetType.Name + "." + targetName + "'.");
+            throw Error(CodeCONC073, InjectedPropertyDeclaration + declarationType.Name + "." + declarationProperty.Name + "' ambiguously resolves target property '" + targetType.Name + "." + targetName + "'.");
         }
 
-        throw Error("CONC071", "Injected property declaration '" + declarationType.Name + "." + declarationProperty.Name + "' could not find target property '" + targetType.Name + "." + targetName + "'.");
+        throw Error(CodeCONC071, InjectedPropertyDeclaration + declarationType.Name + "." + declarationProperty.Name + "' could not find target property '" + targetType.Name + "." + targetName + "'.");
     }
 
     private static MethodInfo ResolveMethod(Type declarationType, Type targetType, MethodInfo declarationMethod, string targetName, Type[] parameterTypes) {
@@ -189,10 +199,10 @@ internal static class InjectedMemberResolver {
                 return targetMethod;
             }
         } catch (AmbiguousMatchException) {
-            throw Error("CONC073", "[InjectMethod] declaration '" + declarationType.Name + "." + declarationMethod.Name + "' ambiguously resolves target method '" + targetType.Name + "." + targetName + "'.");
+            throw Error(CodeCONC073, "[InjectMethod] declaration '" + declarationType.Name + "." + declarationMethod.Name + "' ambiguously resolves target method '" + targetType.Name + "." + targetName + "'.");
         }
 
-        throw Error("CONC071", "[InjectMethod] declaration '" + declarationType.Name + "." + declarationMethod.Name + "' could not find target method '" + targetType.Name + "." + targetName + "'.");
+        throw Error(CodeCONC071, "[InjectMethod] declaration '" + declarationType.Name + "." + declarationMethod.Name + "' could not find target method '" + targetType.Name + "." + targetName + "'.");
     }
 
     private static void MapAccessor(
@@ -227,8 +237,8 @@ internal static class InjectedMemberResolver {
 
         if (targetAccessor.IsStatic != declarationAccessor.IsStatic) {
             throw Error(
-                "CONC072",
-                "Injected property declaration '" + declarationType.Name + "." + declarationProperty.Name + "' static-ness does not match target property '" +
+                CodeCONC072,
+                InjectedPropertyDeclaration + declarationType.Name + "." + declarationProperty.Name + "' static-ness does not match target property '" +
                 targetType.Name +
                 "." +
                 targetName +
