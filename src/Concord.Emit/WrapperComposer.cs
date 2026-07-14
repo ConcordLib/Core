@@ -127,6 +127,18 @@ public static class WrapperComposer {
         }
     }
 
+    internal static bool IsInsideProtectedRegion(Instruction instruction, IList<ExceptionHandler> handlers) {
+        foreach (ExceptionHandler handler in handlers) { // NOSONAR project forbids LINQ in loops (perf/determinism); for-loop is intentional
+            if (SpansInstruction(handler.TryStart, handler.TryEnd, instruction) ||
+                SpansInstruction(handler.HandlerStart, handler.HandlerEnd, instruction) ||
+                SpansInstruction(handler.FilterStart, handler.HandlerStart, instruction)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static IEnumerable<Type> EnumerateGenericArguments(MethodBase target) {
         Type? declaringType = target.DeclaringType;
         if (declaringType is { IsConstructedGenericType: true }) {
@@ -625,6 +637,30 @@ public static class WrapperComposer {
                 $"Multiple Around injections on '{target.DeclaringType?.Name}.{target.Name}' are not supported; only one Around injection per target is allowed.");
         }
 
+        HashSet<VariableDefinition> protocolLocals = [locals.Cancel];
+        if (locals.HasReturn is not null) {
+            protocolLocals.Add(locals.HasReturn);
+        }
+
+        if (locals.ReturnValue is not null) {
+            protocolLocals.Add(locals.ReturnValue);
+        }
+
+        if (locals.SpliceValue is not null) {
+            protocolLocals.Add(locals.SpliceValue);
+        }
+
+        SpineTemplate template = SpineTemplate.Capture(spine, wrapperDefinition.Body.ExceptionHandlers, protocolLocals);
+        SpineCopy spineCopy = SpineCopy.Create(template, wrapperDefinition);
+
+        foreach (ExceptionHandler handler in template.Handlers) {
+            wrapperDefinition.Body.ExceptionHandlers.Remove(handler);
+        }
+
+        foreach (ExceptionHandler handler in spineCopy.Handlers) {
+            wrapperDefinition.Body.ExceptionHandlers.Add(handler);
+        }
+
         InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
         using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
         aroundBody = BodyCopier.CopyInjection(
@@ -635,8 +671,8 @@ public static class WrapperComposer {
             injectedMembers,
             locals,
             epilogueStart,
-            spine);
-        RetargetAroundSpineBranches(aroundBody, spine, afterSpine, epilogueStart, locals);
+            spineCopy.Instructions);
+        RetargetAroundSpineBranches(aroundBody, spineCopy.Instructions, afterSpine, epilogueStart, locals);
     }
 
     private static void WrapCallSite(
@@ -929,18 +965,6 @@ public static class WrapperComposer {
                 handler.FilterStart = to;
             }
         }
-    }
-
-    private static bool IsInsideProtectedRegion(Instruction instruction, IList<ExceptionHandler> handlers) {
-        foreach (ExceptionHandler handler in handlers) { // NOSONAR project forbids LINQ in loops (perf/determinism); for-loop is intentional
-            if (SpansInstruction(handler.TryStart, handler.TryEnd, instruction) ||
-                SpansInstruction(handler.HandlerStart, handler.HandlerEnd, instruction) ||
-                SpansInstruction(handler.FilterStart, handler.HandlerStart, instruction)) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private static bool SpansInstruction(Instruction? start, Instruction? end, Instruction instruction) {
