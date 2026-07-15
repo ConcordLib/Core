@@ -185,6 +185,9 @@ jobs:
     needs: [test, test-mono]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    env:
+      # Hoisted to env because the secrets context is not valid in step-level `if`.
+      RUNTIME_DISPATCH_REPOS: ${{ secrets.RUNTIME_DISPATCH_REPOS }}
     permissions:
       contents: write        # semantic-release: push tag, create GitHub Release
       issues: write          # semantic-release: comment on resolved issues
@@ -285,34 +288,31 @@ jobs:
       # Masking runs first because secret auto-masking covers only the whole comma-joined
       # value, not the individual names an error message might echo.
       - name: Mask runtime repository names
-        if: steps.tag.outputs.tag != '' && secrets.RUNTIME_DISPATCH_REPOS != ''
-        env:
-          REPOS: ${{ secrets.RUNTIME_DISPATCH_REPOS }}
+        if: steps.tag.outputs.tag != '' && env.RUNTIME_DISPATCH_REPOS != ''
         run: |
           set -euo pipefail
-          IFS=',' read -ra repos <<< "$REPOS"
+          IFS=',' read -ra repos <<< "$RUNTIME_DISPATCH_REPOS"
           for repo in "${repos[@]}"; do
             echo "::add-mask::$(echo "$repo" | xargs)"
           done
 
       - name: Generate runtime dispatch token
-        if: steps.tag.outputs.tag != '' && secrets.RUNTIME_DISPATCH_REPOS != ''
+        if: steps.tag.outputs.tag != '' && env.RUNTIME_DISPATCH_REPOS != ''
         id: apptoken
         uses: actions/create-github-app-token@v1
         with:
           app-id: ${{ vars.RUNTIME_DISPATCH_APP_ID }}
           private-key: ${{ secrets.RUNTIME_DISPATCH_APP_PRIVATE_KEY }}
           owner: ConcordLib
-          repositories: ${{ secrets.RUNTIME_DISPATCH_REPOS }}
+          repositories: ${{ env.RUNTIME_DISPATCH_REPOS }}
 
       - name: Trigger runtime rebuilds
-        if: steps.tag.outputs.tag != '' && secrets.RUNTIME_DISPATCH_REPOS != ''
+        if: steps.tag.outputs.tag != '' && env.RUNTIME_DISPATCH_REPOS != ''
         env:
           GH_TOKEN: ${{ steps.apptoken.outputs.token }}
-          REPOS: ${{ secrets.RUNTIME_DISPATCH_REPOS }}
         run: |
           set -euo pipefail
-          IFS=',' read -ra repos <<< "$REPOS"
+          IFS=',' read -ra repos <<< "$RUNTIME_DISPATCH_REPOS"
           for repo in "${repos[@]}"; do
             repo=$(echo "$repo" | xargs)
             gh api "repos/ConcordLib/$repo/dispatches" \
