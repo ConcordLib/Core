@@ -10,6 +10,7 @@ public sealed class Operation<TResult> {
     ///     Invokes the original operation from inside a wrap injection.
     /// </summary>
     /// <returns>The value produced by the original operation.</returns>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Critical Code Smell", "S1186", Justification = "Marker signature erased and replaced by Concord IL lowering at emit time; a real body would be dead code.")]
     public TResult Invoke() {
         return default!;
     }

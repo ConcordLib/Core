@@ -7,6 +7,7 @@ namespace Concord;
 /// <typeparam name="T1">The wrapped call's or target method's first argument type.</typeparam>
 /// <typeparam name="T2">The wrapped call's or target method's second argument type.</typeparam>
 /// <typeparam name="TResult">The value type produced by the wrapped call or target method.</typeparam>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S2436", Justification = "Arity-N Operation handle; the type parameters mirror the wrapped target method's signature and are the handle's contract.")]
 public sealed class Operation<T1, T2, TResult> {
     /// <summary>
     ///     Invokes the original operation from inside a wrap injection.
@@ -14,6 +15,7 @@ public sealed class Operation<T1, T2, TResult> {
     /// <param name="arg1">The first value to pass to the original operation.</param>
     /// <param name="arg2">The second value to pass to the original operation.</param>
     /// <returns>The value produced by the original operation.</returns>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Critical Code Smell", "S1186", Justification = "Marker signature erased and replaced by Concord IL lowering at emit time; a real body would be dead code.")]
     public TResult Invoke(T1 arg1, T2 arg2) {
         return default!;
     }

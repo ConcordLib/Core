@@ -12,6 +12,7 @@ namespace Concord;
 /// <typeparam name="T6">The wrapped call's or target method's sixth argument type.</typeparam>
 /// <typeparam name="T7">The wrapped call's or target method's seventh argument type.</typeparam>
 /// <typeparam name="T8">The wrapped call's or target method's eighth argument type.</typeparam>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S2436", Justification = "Arity-N Operation handle; the type parameters mirror the wrapped target method's signature and are the handle's contract.")]
 public sealed class VoidOperation<T1, T2, T3, T4, T5, T6, T7, T8> {
     /// <summary>
     ///     Invokes the original operation from inside a wrap injection.
@@ -25,6 +26,7 @@ public sealed class VoidOperation<T1, T2, T3, T4, T5, T6, T7, T8> {
     /// <param name="arg7">The seventh value to pass to the original operation.</param>
     /// <param name="arg8">The eighth value to pass to the original operation.</param>
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S107", Justification = "Arity-8 VoidOperation handle; the parameters are the original operation's signature and mirror the target it wraps.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Critical Code Smell", "S1186", Justification = "Marker signature erased and replaced by Concord IL lowering at emit time; a real body would be dead code.")]
     public void Invoke(T1 arg1, T2 arg2, T3 arg3, T4 arg4, T5 arg5, T6 arg6, T7 arg7, T8 arg8) {
     }
 }

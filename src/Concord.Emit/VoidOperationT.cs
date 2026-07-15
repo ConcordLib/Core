@@ -10,6 +10,7 @@ public sealed class VoidOperation<T1> {
     ///     Invokes the original operation from inside a wrap injection.
     /// </summary>
     /// <param name="arg1">The value to pass to the original operation.</param>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Critical Code Smell", "S1186", Justification = "Marker signature erased and replaced by Concord IL lowering at emit time; a real body would be dead code.")]
     public void Invoke(T1 arg1) {
     }
 }
