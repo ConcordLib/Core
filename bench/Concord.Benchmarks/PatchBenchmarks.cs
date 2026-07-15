@@ -118,7 +118,7 @@ public class InstanceBench {
 [MemoryDiagnoser]
 [ShortRunJob]
 public class RealInstanceBench {
-    private BenchTargets.InstanceTarget _target = new();
+    private readonly BenchTargets.InstanceTarget _target = new();
     private static readonly MethodInfo TargetMethod =
         typeof(BenchTargets.InstanceTarget).GetMethod(nameof(BenchTargets.InstanceTarget.Compute))!;
 
@@ -309,8 +309,8 @@ public class StackedBench {
 [MemoryDiagnoser]
 [ShortRunJob]
 public class AttachedFieldBench {
+    private readonly object _target = new();
     private AttachedField<object, int> _field = null!;
-    private object _target = new();
 
     [GlobalSetup]
     public void Setup() {

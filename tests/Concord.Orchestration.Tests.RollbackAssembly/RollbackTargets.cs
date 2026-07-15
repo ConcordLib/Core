@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using Concord;
 
@@ -7,6 +8,7 @@ namespace Concord.Orchestration.Tests.RollbackAssembly;
 public static class RollbackGoodTarget {
     /// <summary>Returns a fixed value the good declaration adds one to.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
+    [SuppressMessage("Minor Code Smell", "S3400", Justification = "Must be a method so Concord can patch it; a const cannot be an injection target.")]
     public static int Compute() {
         return 7;
     }
@@ -16,6 +18,7 @@ public static class RollbackGoodTarget {
 public static class RollbackBadTarget {
     /// <summary>Returns a fixed value that is never reached once the bad declaration is scanned.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
+    [SuppressMessage("Minor Code Smell", "S3400", Justification = "Must be a method so Concord can patch it; a const cannot be an injection target.")]
     public static int Compute() {
         return 13;
     }

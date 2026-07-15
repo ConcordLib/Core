@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 
 namespace Concord.Benchmarks;
@@ -31,6 +32,7 @@ public static class BenchTargets {
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
+    [SuppressMessage("Major Code Smell", "S108", Justification = "empty benchmark target body is intentional")]
     public static void ControlHandleCancel() { }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -44,6 +46,7 @@ public static class BenchTargets {
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
+    [SuppressMessage("Critical Code Smell", "S1186", Justification = "empty finally block is intentional")]
     public static int TryFinallyTarget(int x) {
         try {
             return x + 1;
