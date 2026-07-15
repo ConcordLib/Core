@@ -80,12 +80,12 @@ public sealed class PatchScaffoldRefactoringProvider : CodeRefactoringProvider {
 
         context.RegisterRefactoring(CodeAction.Create(
             "Concord: create patch for " + method.Name + "()",
-            token => CreatePatchAsync(context.Document, root, containingType, method, token),
+            _ => CreatePatchAsync(context.Document, root, containingType, method),
             equivalenceKey: "ConcordCreatePatch:" + method.ToDisplayString()));
     }
 
     private static Task<Document> CreatePatchAsync(
-        Document document, SyntaxNode root, INamedTypeSymbol target, IMethodSymbol method, CancellationToken token) {
+        Document document, SyntaxNode root, INamedTypeSymbol target, IMethodSymbol method) {
         string targetType = target.ToDisplayString(TypeFormat);
         string handle = method.ReturnsVoid
             ? "global::Concord.ControlHandle"

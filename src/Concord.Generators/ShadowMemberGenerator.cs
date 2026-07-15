@@ -17,7 +17,7 @@ public sealed class ShadowMemberGenerator : IIncrementalGenerator {
         "CONC100",
         "Shadow member not found",
         "Target type '{0}' has no member named '{1}'",
-        "Concord.Generators",
+        DiagnosticCategory,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
@@ -25,7 +25,7 @@ public sealed class ShadowMemberGenerator : IIncrementalGenerator {
         "CONC101",
         "Shadow member ambiguous",
         "Target member '{0}.{1}' has {2} overloads; disambiguate with parameter types on [Shadow]",
-        "Concord.Generators",
+        DiagnosticCategory,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
@@ -33,7 +33,7 @@ public sealed class ShadowMemberGenerator : IIncrementalGenerator {
         "CONC102",
         "Declaration class must be partial",
         "Class '{0}' uses [Shadow] and must be declared partial{1}",
-        "Concord.Generators",
+        DiagnosticCategory,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
@@ -41,7 +41,7 @@ public sealed class ShadowMemberGenerator : IIncrementalGenerator {
         "CONC103",
         "Shadow target unresolvable",
         "Target type of declaration '{0}' cannot be resolved at compile time; shadow generation skipped",
-        "Concord.Generators",
+        DiagnosticCategory,
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
 
@@ -49,9 +49,11 @@ public sealed class ShadowMemberGenerator : IIncrementalGenerator {
         "CONC105",
         "Shadow member kind unsupported",
         "Member '{0}.{1}' cannot be shadowed: {2}",
-        "Concord.Generators",
+        DiagnosticCategory,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
+
+    private const string DiagnosticCategory = "Concord.Generators";
 
     private static readonly SymbolDisplayFormat TypeFormat =
         SymbolDisplayFormat.FullyQualifiedFormat.AddMiscellaneousOptions(
@@ -162,46 +164,47 @@ public sealed class ShadowMemberGenerator : IIncrementalGenerator {
             return;
         }
 
-        EmitNonFieldMember(context, declaration, target, memberName, candidates, parameterTypes, location, members);
+        EmitNonFieldMember(
+            new EmitRequest(context, declaration, target, memberName, location, members), candidates, parameterTypes);
     }
 
     private static void EmitNonFieldMember(
-        SourceProductionContext context,
-        INamedTypeSymbol declaration,
-        INamedTypeSymbol target,
-        string memberName,
-        ImmutableArray<ISymbol> candidates,
-        ImmutableArray<TypedConstant> parameterTypes,
-        Location location,
-        StringBuilder members) {
-        if (!declaration.IsAbstract) {
-            context.ReportDiagnostic(Diagnostic.Create(
-                NotPartial, location, declaration.Name, " and abstract for method/property shadows"));
+        EmitRequest request, ImmutableArray<ISymbol> candidates, ImmutableArray<TypedConstant> parameterTypes) {
+        if (!request.Declaration.IsAbstract) {
+            request.Context.ReportDiagnostic(Diagnostic.Create(
+                NotPartial, request.Location, request.Declaration.Name, " and abstract for method/property shadows"));
             return;
         }
 
         if (candidates[0] is IPropertySymbol property) {
-            if (property.IsStatic) {
-                context.ReportDiagnostic(Diagnostic.Create(
-                    UnsupportedMember, location, target.Name, memberName, "static properties are not supported"));
-                return;
-            }
-
-            if (property.IsIndexer) {
-                context.ReportDiagnostic(Diagnostic.Create(
-                    UnsupportedMember, location, target.Name, memberName, "indexers are not supported"));
-                return;
-            }
-
-            string accessors = (property.GetMethod is not null ? "get; " : string.Empty) +
-                               (property.SetMethod is not null ? "set; " : string.Empty);
-            members.AppendLine("    [global::Concord.InjectProperty(\"" + property.Name + "\")]");
-            members.AppendLine(
-                "    protected abstract " + property.Type.ToDisplayString(TypeFormat) + " " + property.Name +
-                " { " + accessors.TrimEnd() + " }");
+            EmitProperty(request, property);
             return;
         }
 
+        EmitMethod(request, candidates, parameterTypes);
+    }
+
+    private static void EmitProperty(EmitRequest request, IPropertySymbol property) {
+        if (property.IsStatic) {
+            request.ReportUnsupported("static properties are not supported");
+            return;
+        }
+
+        if (property.IsIndexer) {
+            request.ReportUnsupported("indexers are not supported");
+            return;
+        }
+
+        string accessors = (property.GetMethod is not null ? "get; " : string.Empty) +
+                           (property.SetMethod is not null ? "set; " : string.Empty);
+        request.Members.AppendLine("    [global::Concord.InjectProperty(\"" + property.Name + "\")]");
+        request.Members.AppendLine(
+            "    protected abstract " + property.Type.ToDisplayString(TypeFormat) + " " + property.Name +
+            " { " + accessors.TrimEnd() + " }");
+    }
+
+    private static void EmitMethod(
+        EmitRequest request, ImmutableArray<ISymbol> candidates, ImmutableArray<TypedConstant> parameterTypes) {
         List<IMethodSymbol> methods = [];
         foreach (ISymbol candidate in candidates) {
             if (candidate is IMethodSymbol { MethodKind: MethodKind.Ordinary } method) {
@@ -210,24 +213,27 @@ public sealed class ShadowMemberGenerator : IIncrementalGenerator {
         }
 
         if (methods.Count == 0) {
-            context.ReportDiagnostic(Diagnostic.Create(
-                UnsupportedMember, location, target.Name, memberName, "only fields, properties, and ordinary methods are supported"));
+            request.ReportUnsupported("only fields, properties, and ordinary methods are supported");
             return;
         }
 
         IMethodSymbol? selected = SelectOverload(methods, parameterTypes);
         if (selected is null) {
-            context.ReportDiagnostic(Diagnostic.Create(
-                AmbiguousMember, location, target.Name, memberName, methods.Count));
+            request.Context.ReportDiagnostic(Diagnostic.Create(
+                AmbiguousMember, request.Location, request.Target.Name, request.MemberName, methods.Count));
             return;
         }
 
         if (selected.IsStatic || selected.IsGenericMethod) {
-            context.ReportDiagnostic(Diagnostic.Create(
-                UnsupportedMember, location, target.Name, memberName, "static and generic methods are not supported"));
+            request.ReportUnsupported("static and generic methods are not supported");
             return;
         }
 
+        request.Members.AppendLine("    [global::Concord.InjectMethod(\"" + selected.Name + "\")]");
+        request.Members.AppendLine(BuildMethodSignature(selected));
+    }
+
+    private static string BuildMethodSignature(IMethodSymbol selected) {
         StringBuilder signature = new StringBuilder();
         signature.Append("    protected abstract ");
         signature.Append(selected.ReturnsVoid ? "void" : selected.ReturnType.ToDisplayString(TypeFormat));
@@ -245,9 +251,7 @@ public sealed class ShadowMemberGenerator : IIncrementalGenerator {
         }
 
         signature.Append(");");
-
-        members.AppendLine("    [global::Concord.InjectMethod(\"" + selected.Name + "\")]");
-        members.AppendLine(signature.ToString());
+        return signature.ToString();
     }
 
     private static string RefKindPrefix(RefKind refKind) {
@@ -323,5 +327,29 @@ public sealed class ShadowMemberGenerator : IIncrementalGenerator {
         }
 
         return source.ToString();
+    }
+
+    private readonly struct EmitRequest(
+        SourceProductionContext context,
+        INamedTypeSymbol declaration,
+        INamedTypeSymbol target,
+        string memberName,
+        Location location,
+        StringBuilder members) {
+        public SourceProductionContext Context { get; } = context;
+
+        public INamedTypeSymbol Declaration { get; } = declaration;
+
+        public INamedTypeSymbol Target { get; } = target;
+
+        public string MemberName { get; } = memberName;
+
+        public Location Location { get; } = location;
+
+        public StringBuilder Members { get; } = members;
+
+        public void ReportUnsupported(string reason) {
+            Context.ReportDiagnostic(Diagnostic.Create(UnsupportedMember, Location, Target.Name, MemberName, reason));
+        }
     }
 }

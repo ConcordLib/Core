@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -26,12 +27,7 @@ public sealed class PatchRegistryGenerator : IIncrementalGenerator {
             });
 
         context.RegisterSourceOutput(declarations.Collect(), static (productionContext, names) => {
-            List<string> sorted = [];
-            foreach (string? name in names) {
-                if (name is not null) {
-                    sorted.Add(name);
-                }
-            }
+            List<string> sorted = names.OfType<string>().ToList();
 
             if (sorted.Count == 0) {
                 return;
