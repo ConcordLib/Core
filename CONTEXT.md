@@ -33,7 +33,7 @@ An injection that controls the whole target method by using an injection-method 
 _Avoid_: Invoke injection, operation injection
 
 **Invoke Injection**:
-An injection that controls a call site inside the target method.
+An injection that targets a method or property call inside the target method, or a field read when using Head or Tail.
 _Avoid_: Around injection, method wrapper
 
 **Operation**:

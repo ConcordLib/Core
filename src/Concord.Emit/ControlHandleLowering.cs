@@ -155,10 +155,22 @@ internal static class ControlHandleLowering {
         return resolved.Name == target.Name && resolved.DeclaringType == target.DeclaringType;
     }
 
-    internal static List<Instruction> FindInvokeCallSites(IReadOnlyList<Instruction> spine, Type declaringType, string methodName, Type[]? parameterTypes = null) {
+    internal static List<Instruction> FindInvokeCallSites(
+        IReadOnlyList<Instruction> spine,
+        Type declaringType,
+        string methodName,
+        Type[]? parameterTypes = null,
+        bool includeFieldReads = false) {
         List<Instruction> matches = new List<Instruction>();
 
         foreach (Instruction instruction in spine) {
+            if (includeFieldReads &&
+                (parameterTypes is null || parameterTypes.Length == 0) &&
+                IsMatchingFieldRead(instruction, declaringType, methodName)) {
+                matches.Add(instruction);
+                continue;
+            }
+
             if (instruction.OpCode != OpCodes.Call && instruction.OpCode != OpCodes.Callvirt) {
                 continue;
             }
@@ -232,6 +244,19 @@ internal static class ControlHandleLowering {
         }
 
         return -1;
+    }
+
+    private static bool IsMatchingFieldRead(Instruction instruction, Type declaringType, string fieldName) {
+        if (instruction.OpCode != OpCodes.Ldfld && instruction.OpCode != OpCodes.Ldsfld) {
+            return false;
+        }
+
+        if (instruction.Operand is not FieldReference reference) {
+            return false;
+        }
+
+        FieldInfo resolved = reference.ResolveReflection();
+        return resolved.Name == fieldName && resolved.DeclaringType == declaringType;
     }
 
     private static bool ParameterTypesMatch(MethodBase method, Type[] parameterTypes) {

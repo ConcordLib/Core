@@ -720,11 +720,17 @@ public static class WrapperComposer {
             injection.InjectionMethod,
             invoke.Shift is At.Around);
 
-        List<Instruction> allSites = ControlHandleLowering.FindInvokeCallSites(spine, invoke.DeclaringType, effectiveName, invoke.ParameterTypes);
+        bool includeFieldReads = invoke.Shift is At.Head or At.Tail;
+        List<Instruction> allSites = ControlHandleLowering.FindInvokeCallSites(
+            spine,
+            invoke.DeclaringType,
+            effectiveName,
+            invoke.ParameterTypes,
+            includeFieldReads);
         if (allSites.Count == 0) {
             throw new ConcordEmitException(
                 "CONC031",
-                $"Injection on '{target.DeclaringType?.Name}.{target.Name}' targets call site '{invoke.DeclaringType.Name}.{invoke.Method}' which does not occur in the method body.");
+                $"Injection on '{target.DeclaringType?.Name}.{target.Name}' targets invoke site '{invoke.DeclaringType.Name}.{invoke.Method}' which does not occur in the method body.");
         }
 
         List<Instruction> sites = SelectInvokeSites(allSites, invoke.By, target, invoke);
@@ -742,11 +748,12 @@ public static class WrapperComposer {
 
         bool after = invoke.Shift is At.Tail;
         foreach (Instruction site in sites) {
+            int siteIndex = spine.IndexOf(site);
+            Instruction continuation = after ? spine[siteIndex + 1] : site;
             List<Instruction> invokeBody = BodyCopier.CopyInjection(
                 new InjectionCopyRequest(injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers),
                 locals,
-                site);
-            int siteIndex = spine.IndexOf(site);
+                continuation);
             spine.InsertRange(after ? siteIndex + 1 : siteIndex, invokeBody);
         }
     }
@@ -1263,7 +1270,7 @@ public static class WrapperComposer {
         if (by > allSites.Count) {
             throw new ConcordEmitException(
                 "CONC033",
-                $"Injection on '{target.DeclaringType?.Name}.{target.Name}' targets occurrence {by} of call site '{invoke.DeclaringType.Name}.{invoke.Method}', but only {allSites.Count} occurrence(s) exist in the method body.");
+                $"Injection on '{target.DeclaringType?.Name}.{target.Name}' targets occurrence {by} of invoke site '{invoke.DeclaringType.Name}.{invoke.Method}', but only {allSites.Count} occurrence(s) exist in the method body.");
         }
 
         return [allSites[(int)(by - 1)]];

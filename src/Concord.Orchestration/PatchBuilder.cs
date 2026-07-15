@@ -165,26 +165,25 @@ public sealed class PatchBuilder {
     }
 
     /// <summary>
-    ///     Records an invoke-splice injection on a call to <paramref name="callSiteMethod" /> on
-    ///     <paramref name="callSiteType" /> inside the target, using the supplied injection method.
+    ///     Records an invoke-splice injection on a named member access inside the target, using the supplied
+    ///     injection method. Head and Tail also support field reads.
     /// </summary>
-    /// <param name="callSiteType">The type that declares the call-site method to splice.</param>
-    /// <param name="callSiteMethod">The name of the method to splice.</param>
+    /// <param name="callSiteType">The type that declares the member access to splice.</param>
+    /// <param name="callSiteMethod">The method, property, or field name to splice.</param>
     /// <param name="injectionMethod">The method that supplies the injected body.</param>
     /// <param name="shift">
-    ///     Where the injection method runs relative to the matched call: <see cref="At.Head" /> before,
-    ///     <see cref="At.Tail" /> after, or <see cref="At.Around" /> wrapping it.
+    ///     Where the injection method runs relative to the matched access. Around supports method and property
+    ///     calls only.
     /// </param>
-    /// <param name="by">The 1-based occurrence to target, or <c>0</c> for every matching call.</param>
+    /// <param name="by">The 1-based occurrence to target, or <c>0</c> for every matching access.</param>
     /// <returns>This builder, for chaining.</returns>
     public PatchBuilder Invoke(Type callSiteType, string callSiteMethod, MethodInfo injectionMethod, At shift, uint by = 0) {
         return Inject(new InjectAt.Invoke(callSiteType, callSiteMethod, shift, by), injectionMethod);
     }
 
     /// <summary>
-    ///     Records an invoke-splice injection on a call to <paramref name="callSiteMethod" /> on
-    ///     <paramref name="callSiteType" /> inside the target, using the supplied injection method, disambiguating
-    ///     the call site by parameter types.
+    ///     Records an invoke-splice injection on a method or property call inside the target, using the supplied
+    ///     injection method and disambiguating the call site by parameter types.
     /// </summary>
     /// <param name="callSiteType">The type that declares the call-site method to splice.</param>
     /// <param name="callSiteMethod">The name of the method to splice.</param>
@@ -204,27 +203,26 @@ public sealed class PatchBuilder {
     }
 
     /// <summary>
-    ///     Records an invoke-splice injection on a call to <paramref name="callSiteMethod" /> on
-    ///     <paramref name="callSiteType" /> inside the target, resolving the injection method by name.
+    ///     Records an invoke-splice injection on a named member access inside the target, resolving the injection
+    ///     method by name. Head and Tail also support field reads.
     /// </summary>
-    /// <param name="callSiteType">The type that declares the call-site method to splice.</param>
-    /// <param name="callSiteMethod">The name of the method to splice.</param>
+    /// <param name="callSiteType">The type that declares the member access to splice.</param>
+    /// <param name="callSiteMethod">The method, property, or field name to splice.</param>
     /// <param name="injectionMethodType">The type that declares the injection method.</param>
     /// <param name="injectionMethodName">The name of the injection method.</param>
     /// <param name="shift">
-    ///     Where the injection method runs relative to the matched call: <see cref="At.Head" /> before,
-    ///     <see cref="At.Tail" /> after, or <see cref="At.Around" /> wrapping it.
+    ///     Where the injection method runs relative to the matched access. Around supports method and property
+    ///     calls only.
     /// </param>
-    /// <param name="by">The 1-based occurrence to target, or <c>0</c> for every matching call.</param>
+    /// <param name="by">The 1-based occurrence to target, or <c>0</c> for every matching access.</param>
     /// <returns>This builder, for chaining.</returns>
     public PatchBuilder Invoke(Type callSiteType, string callSiteMethod, Type injectionMethodType, string injectionMethodName, At shift, uint by = 0) {
         return Inject(new InjectAt.Invoke(callSiteType, callSiteMethod, shift, by), ResolveInjectionMethod(injectionMethodType, injectionMethodName));
     }
 
     /// <summary>
-    ///     Records an invoke-splice injection on a call to <paramref name="callSiteMethod" /> on
-    ///     <paramref name="callSiteType" /> inside the target, resolving the injection method by name and
-    ///     disambiguating the call site by parameter types.
+    ///     Records an invoke-splice injection on a method or property call inside the target, resolving the
+    ///     injection method by name and disambiguating the call site by parameter types.
     /// </summary>
     /// <param name="callSiteType">The type that declares the call-site method to splice.</param>
     /// <param name="callSiteMethod">The name of the method to splice.</param>

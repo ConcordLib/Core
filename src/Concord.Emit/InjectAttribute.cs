@@ -92,26 +92,24 @@ public sealed class InjectAttribute : Attribute {
     }
 
     /// <summary>
-    ///     Initializes a new injection declaration at an invoke-splice position, targeting a call inside
-    ///     the target method.
+    ///     Initializes a new injection declaration at an invoke-splice position, targeting a member access
+    ///     inside the target method.
     /// </summary>
     /// <param name="method">The target method name. Private names are validated by Concord tooling.</param>
-    /// <param name="invokeDeclaringType">The type that declares the call-site method to match.</param>
-    /// <param name="invokeDeclaringMethod">The name of the call-site method to match.</param>
+    /// <param name="invokeDeclaringType">The type that declares the member access to match.</param>
+    /// <param name="invokeDeclaringMethod">The method, property, or field name to match.</param>
     /// <param name="shift">
-    ///     Where the injection method runs relative to the matched call: <see cref="At.Head" /> before the
-    ///     call, <see cref="At.Tail" /> after the call, <see cref="At.Around" /> wrapping
-    ///     the call (the injection method receives an <see cref="Operation" /> family handle matching the call's shape),
-    ///     or <see cref="At.Argument" /> to rewrite one of the call's arguments.
+    ///     Where the injection method runs relative to the matched access. Head and Tail support method calls,
+    ///     property calls, and field reads. Around and Argument support method and property calls only.
     /// </param>
-    /// <param name="by">The 1-based occurrence of the matched call to target, or <c>0</c> for every matching call.</param>
+    /// <param name="by">The 1-based occurrence of the matched access to target, or <c>0</c> for every match.</param>
     /// <param name="targetParameterTypes">
     ///     When non-<see langword="null" />, selects a specific overload of <paramref name="method" /> on the
     ///     patch target by parameter types.
     /// </param>
     /// <param name="invokeParameterTypes">
-    ///     When non-<see langword="null" />, only call sites whose parameter types match this array are
-    ///     considered when matching <paramref name="invokeDeclaringMethod" />.
+    ///     For method or property calls, restricts matches by parameter types. Leave this <see langword="null" />
+    ///     or empty when matching a field read.
     /// </param>
     /// <param name="arg">
     ///     For <see cref="At.Argument" />, the 1-based argument to rewrite, or <c>0</c> to infer by unique

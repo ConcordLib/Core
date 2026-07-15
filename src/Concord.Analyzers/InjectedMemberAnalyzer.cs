@@ -746,13 +746,30 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             return new InjectionTarget(ConstructorName, false, null, constructor.Parameters, true);
         }
 
-        ImmutableArray<IMethodSymbol> candidates = FindMethodCandidates(targetType, injection.TargetMemberName)
+        string? effectiveName = ResolveAccessorName(
+            targetType,
+            injection.TargetMemberName,
+            injection.Method,
+            false,
+            out bool ambiguousAccessor);
+        if (ambiguousAccessor) {
+            context.ReportDiagnostic(Diagnostic.Create(
+                AmbiguousAccessorNameRule,
+                ArgumentLocation(injection.Attribute, "method", context.CancellationToken) ??
+                LocationOf(injection.Attribute, injection.Method, context.CancellationToken),
+                targetType.ToDisplayString() + "." + injection.TargetMemberName,
+                "get_" + injection.TargetMemberName,
+                "set_" + injection.TargetMemberName));
+            return null;
+        }
+
+        ImmutableArray<IMethodSymbol> candidates = FindMethodCandidates(targetType, effectiveName!)
             .Where(method => ParameterTypesMatch(injection.ParameterTypes, method.Parameters))
             .ToImmutableArray();
 
         if (candidates.Length == 0) {
-            if (MetadataMemberExists(context.Compilation, targetType, injection.TargetMemberName, MetadataMemberKind.Method)) {
-                return new InjectionTarget(injection.TargetMemberName, false, null, ImmutableArray<IParameterSymbol>.Empty, false);
+            if (MetadataMemberExists(context.Compilation, targetType, effectiveName!, MetadataMemberKind.Method)) {
+                return new InjectionTarget(effectiveName!, false, null, ImmutableArray<IParameterSymbol>.Empty, false);
             }
 
             ReportMissingInjectionTarget(context, injection, targetType);
@@ -780,7 +797,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
 
         for (INamedTypeSymbol? current = targetType; current is not null && !IsObject(current); current = current.BaseType) {
             foreach (IMethodSymbol method in current.GetMembers(targetName).OfType<IMethodSymbol>()) {
-                if (method.MethodKind != MethodKind.Ordinary) {
+                if (method.MethodKind is not (MethodKind.Ordinary or MethodKind.PropertyGet or MethodKind.PropertySet)) {
                     continue;
                 }
 

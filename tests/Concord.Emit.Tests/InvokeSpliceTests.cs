@@ -27,6 +27,34 @@ public class InvokeTarget {
     }
 }
 
+public static class InvokeFieldSource {
+    public static readonly string Value = "field";
+}
+
+public class InvokeFieldTarget {
+    public string Read() {
+        InvokeLog.Entries.Add("before-read");
+        string value = InvokeFieldSource.Value;
+        InvokeLog.Entries.Add(value);
+        return value;
+    }
+}
+
+public sealed class InvokeInstanceFieldSource {
+    public readonly string Value = "instance-field";
+}
+
+public class InvokeInstanceFieldTarget {
+    private readonly InvokeInstanceFieldSource source = new InvokeInstanceFieldSource();
+
+    public string Read() {
+        InvokeLog.Entries.Add("before-read");
+        string value = source.Value;
+        InvokeLog.Entries.Add(value);
+        return value;
+    }
+}
+
 public static class InvokeAllocHelper {
     public static void Tick() { }
 }
@@ -43,6 +71,10 @@ public static class InvokeInjectionMethods {
     }
 
     public static void BeforeTick(ControlHandle ch) { }
+
+    public static void AtFieldRead(ControlHandle<string> ch) {
+        InvokeLog.Entries.Add("field-injection");
+    }
 }
 
 public static class OverloadedCallSiteHelper {
@@ -86,6 +118,22 @@ public sealed class InvokeSpliceTests {
     }
 
     [Fact]
+    public void Compose_InvokeInjection_SplicesAfterCallSite() {
+        MethodBase target = typeof(InvokeTarget).GetMethod(nameof(InvokeTarget.Run))!;
+        MethodBase injectionMethod = typeof(InvokeInjectionMethods).GetMethod(nameof(InvokeInjectionMethods.BeforeStep))!;
+
+        Injection injection = new Injection(injectionMethod, new InjectAt.Invoke(typeof(InvokeHelper), nameof(InvokeHelper.Step), At.Tail, 0), "test", 0);
+
+        InvokeLog.Clear();
+        ComposeResult result = WrapperComposer.Compose(target, [injection]);
+
+        InvokeTarget instance = new InvokeTarget();
+        result.Wrapper.Invoke(null, [instance]);
+
+        Assert.Equal(["spine-before", "step", "injected", "spine-after"], InvokeLog.Entries);
+    }
+
+    [Fact]
     public void Compose_InvokeInjection_MissingSite_ThrowsCONC031() {
         MethodBase target = typeof(InvokeTarget).GetMethod(nameof(InvokeTarget.Run))!;
         MethodBase injectionMethod = typeof(InvokeInjectionMethods).GetMethod(nameof(InvokeInjectionMethods.BeforeStep))!;
@@ -96,6 +144,48 @@ public sealed class InvokeSpliceTests {
             WrapperComposer.Compose(target, [injection]));
 
         Assert.Equal("CONC031", ex.Code);
+    }
+
+    [Theory]
+    [InlineData(At.Head, new[] { "before-read", "field-injection", "field" })]
+    [InlineData(At.Tail, new[] { "before-read", "field-injection", "field" })]
+    public void Compose_InvokeFieldRead_SplicesAtSelectedPosition(At shift, string[] expected) {
+        MethodBase target = typeof(InvokeFieldTarget).GetMethod(nameof(InvokeFieldTarget.Read))!;
+        MethodBase injectionMethod = typeof(InvokeInjectionMethods).GetMethod(nameof(InvokeInjectionMethods.AtFieldRead))!;
+
+        Injection injection = new Injection(
+            injectionMethod,
+            new InjectAt.Invoke(typeof(InvokeFieldSource), nameof(InvokeFieldSource.Value), shift, 0),
+            "test",
+            0);
+
+        InvokeLog.Clear();
+        ComposeResult result = WrapperComposer.Compose(target, [injection]);
+
+        InvokeFieldTarget instance = new InvokeFieldTarget();
+        result.Wrapper.Invoke(null, [instance]);
+
+        Assert.Equal(expected, InvokeLog.Entries);
+    }
+
+    [Fact]
+    public void Compose_InvokeInstanceFieldRead_SplicesAfterRead() {
+        MethodBase target = typeof(InvokeInstanceFieldTarget).GetMethod(nameof(InvokeInstanceFieldTarget.Read))!;
+        MethodBase injectionMethod = typeof(InvokeInjectionMethods).GetMethod(nameof(InvokeInjectionMethods.AtFieldRead))!;
+
+        Injection injection = new Injection(
+            injectionMethod,
+            new InjectAt.Invoke(typeof(InvokeInstanceFieldSource), nameof(InvokeInstanceFieldSource.Value), At.Tail, 0),
+            "test",
+            0);
+
+        InvokeLog.Clear();
+        ComposeResult result = WrapperComposer.Compose(target, [injection]);
+
+        InvokeInstanceFieldTarget instance = new InvokeInstanceFieldTarget();
+        result.Wrapper.Invoke(null, [instance]);
+
+        Assert.Equal(["before-read", "field-injection", "instance-field"], InvokeLog.Entries);
     }
 
     [Fact]

@@ -41,21 +41,22 @@ public abstract record InjectAt {
     public sealed record Constant(object Value, uint By = 0) : InjectAt;
 
     /// <summary>
-    ///     Targets a call to a named method inside the target body.
+    ///     Targets a named method or property call inside the target body. <see cref="At.Head" /> and
+    ///     <see cref="At.Tail" /> also target field reads.
     /// </summary>
-    /// <param name="DeclaringType">The declaring type of the call-site method to match.</param>
-    /// <param name="Method">The call-site method name to match.</param>
+    /// <param name="DeclaringType">The declaring type of the member access to match.</param>
+    /// <param name="Method">The method, property, or field name to match.</param>
     /// <param name="Shift">
-    ///     Where the injection method runs relative to the matched call: <see cref="At.Head" /> before the
-    ///     call, <see cref="At.Tail" /> after the call, or <see cref="At.Around" /> wrapping
-    ///     the call (the injection method receives an <see cref="Operation" /> family handle matching the call's shape).
+    ///     Where the injection method runs relative to the matched access: <see cref="At.Head" /> before it,
+    ///     <see cref="At.Tail" /> after it, or <see cref="At.Around" /> wrapping a method or property call.
+    ///     Field reads support Head and Tail only.
     /// </param>
     /// <param name="By">
-    ///     The 1-based occurrence of the matched call to target, or <c>0</c> to target every matching call.
+    ///     The 1-based occurrence of the matched access to target, or <c>0</c> to target every matching access.
     /// </param>
     /// <param name="ParameterTypes">
-    ///     When non-<see langword="null" />, only call sites whose parameter types match this array are
-    ///     considered, allowing overloaded call-site methods to be disambiguated.
+    ///     For method or property calls, restricts matches by parameter types. Leave this <see langword="null" />
+    ///     or empty when matching a field read.
     /// </param>
     /// <param name="Arg">The 1-based argument to rewrite for At.Argument, or 0 to infer by unique type match.</param>
     public sealed record Invoke(Type DeclaringType, string Method, At Shift, uint By = 0, Type[]? ParameterTypes = null, uint Arg = 0) : InjectAt;

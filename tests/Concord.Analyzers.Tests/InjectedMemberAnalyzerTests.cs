@@ -451,6 +451,38 @@ public sealed class InjectedMemberAnalyzerTests {
     }
 
     [Fact]
+    public async Task Inject_InvokeFieldInsideTargetGetterByPropertyName_DoesNotReportDiagnostic() {
+        MetadataReference targetReference = CreateReference(
+            "GameAssembly",
+            """
+            namespace Game {
+                public class Target {
+                    public string Description => Values.Baseliner;
+                }
+
+                public static class Values {
+                    public static readonly string Baseliner = "value";
+                }
+            }
+            """);
+
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            [Concord.Patch]
+            public abstract class Patch : Game.Target {
+                [Concord.Inject(nameof(Description), typeof(Game.Values), nameof(Game.Values.Baseliner), Concord.At.Tail)]
+                private void AfterBaselinerRead(Concord.ControlHandle<string> ch) {
+                }
+            }
+            """,
+            targetReference);
+
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
     public async Task Inject_PublicTargetMethodStringLiteral_ReportsNameofSuggestion() {
         ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
             AttributeSource +
