@@ -21,6 +21,19 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      runtime_version:
+        description: Released Core tag to resend to a runtime repository (for example, v0.7.1)
+        required: false
+        type: string
+      runtime_repository:
+        description: Runtime repository to rebuild
+        required: false
+        default: RimWorld
+        type: choice
+        options:
+          - RimWorld
+          - Runtime
 
 permissions:
   contents: read
@@ -293,17 +306,18 @@ jobs:
             -F "client_payload[core_version]=${{ steps.tag.outputs.tag }}"
 
       - name: Generate cross-repo token (RimWorld)
-        if: steps.tag.outputs.tag != '' && vars.RIMWORLD_DISPATCH_APP_ID != ''
+        if: steps.tag.outputs.tag != '' && (vars.RIMWORLD_DISPATCH_APP_ID != '' || vars.RUNTIME_DISPATCH_APP_ID != '')
         id: apptoken_rimworld
         uses: actions/create-github-app-token@v1
         with:
-          app-id: ${{ vars.RIMWORLD_DISPATCH_APP_ID }}
-          private-key: ${{ secrets.RIMWORLD_DISPATCH_APP_PRIVATE_KEY }}
+          # A dedicated RimWorld app can override the shared release-dispatch app.
+          app-id: ${{ vars.RIMWORLD_DISPATCH_APP_ID || vars.RUNTIME_DISPATCH_APP_ID }}
+          private-key: ${{ secrets.RIMWORLD_DISPATCH_APP_PRIVATE_KEY || secrets.RUNTIME_DISPATCH_APP_PRIVATE_KEY }}
           owner: ConcordLib
           repositories: RimWorld
 
       - name: Trigger RimWorld rebuild
-        if: steps.tag.outputs.tag != '' && vars.RIMWORLD_DISPATCH_APP_ID != ''
+        if: steps.tag.outputs.tag != '' && (vars.RIMWORLD_DISPATCH_APP_ID != '' || vars.RUNTIME_DISPATCH_APP_ID != '')
         env:
           GH_TOKEN: ${{ steps.apptoken_rimworld.outputs.token }}
         run: |
@@ -311,3 +325,32 @@ jobs:
           gh api repos/ConcordLib/RimWorld/dispatches \
             -f event_type=core-released \
             -F "client_payload[core_version]=${{ steps.tag.outputs.tag }}"
+
+  # Retry path for a runtime dispatch that was skipped or failed after Core was already
+  # published. Supplying no runtime_version preserves the existing build-only manual run.
+  dispatch-runtime:
+    name: Dispatch runtime rebuild
+    if: github.event_name == 'workflow_dispatch' && inputs.runtime_version != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Generate runtime-repository token
+        id: apptoken
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.RUNTIME_DISPATCH_APP_ID || vars.RIMWORLD_DISPATCH_APP_ID || vars.RUNTIME_DISPATCH_APP_ID }}
+          private-key: ${{ secrets.RUNTIME_DISPATCH_APP_PRIVATE_KEY || secrets.RIMWORLD_DISPATCH_APP_PRIVATE_KEY || secrets.RUNTIME_DISPATCH_APP_PRIVATE_KEY }}
+          owner: ConcordLib
+          repositories: ${{ inputs.runtime_repository }}
+
+      - name: Trigger runtime rebuild
+        env:
+          GH_TOKEN: ${{ steps.apptoken.outputs.token }}
+          RUNTIME_REPOSITORY: ${{ inputs.runtime_repository }}
+          RUNTIME_VERSION: ${{ inputs.runtime_version }}
+        run: |
+          set -euo pipefail
+          gh api "repos/ConcordLib/${RUNTIME_REPOSITORY}/dispatches" \
+            -f event_type=core-released \
+            -F "client_payload[core_version]=${RUNTIME_VERSION}"
