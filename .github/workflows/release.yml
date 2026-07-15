@@ -30,10 +30,7 @@ on:
         description: Runtime repository to rebuild
         required: false
         default: RimWorld
-        type: choice
-        options:
-          - RimWorld
-          - Runtime
+        type: string
 
 permissions:
   contents: read
@@ -281,50 +278,47 @@ jobs:
             echo "::warning::Discord announce failed with HTTP $STATUS (release itself is unaffected)"
           fi
 
-      # Runtime bundles Core's Concord.dll, so a new Core release must rebuild and re-release it.
-      # GITHUB_TOKEN cannot trigger workflows in another repo, so mint a short-lived token from a
-      # GitHub App installed on both repos. The App id is a var, the private key a secret. If the
-      # App var is absent the dispatch steps no-op, so this stays dormant until configured.
-      - name: Generate cross-repo token
-        if: steps.tag.outputs.tag != '' && vars.RUNTIME_DISPATCH_APP_ID != ''
+      # Runtime repositories bundle Core's Concord.dll, so a new Core release must rebuild
+      # and re-release them. GITHUB_TOKEN cannot trigger workflows in another repo, so mint
+      # a short-lived token from a GitHub App installed on the runtime repos. The repo list
+      # lives in the RUNTIME_DISPATCH_REPOS secret; when it is absent these steps no-op.
+      # Masking runs first because secret auto-masking covers only the whole comma-joined
+      # value, not the individual names an error message might echo.
+      - name: Mask runtime repository names
+        if: steps.tag.outputs.tag != '' && secrets.RUNTIME_DISPATCH_REPOS != ''
+        env:
+          REPOS: ${{ secrets.RUNTIME_DISPATCH_REPOS }}
+        run: |
+          set -euo pipefail
+          IFS=',' read -ra repos <<< "$REPOS"
+          for repo in "${repos[@]}"; do
+            echo "::add-mask::$(echo "$repo" | xargs)"
+          done
+
+      - name: Generate runtime dispatch token
+        if: steps.tag.outputs.tag != '' && secrets.RUNTIME_DISPATCH_REPOS != ''
         id: apptoken
         uses: actions/create-github-app-token@v1
         with:
           app-id: ${{ vars.RUNTIME_DISPATCH_APP_ID }}
           private-key: ${{ secrets.RUNTIME_DISPATCH_APP_PRIVATE_KEY }}
           owner: ConcordLib
-          repositories: Runtime
+          repositories: ${{ secrets.RUNTIME_DISPATCH_REPOS }}
 
-      - name: Trigger Runtime rebuild
-        if: steps.tag.outputs.tag != '' && vars.RUNTIME_DISPATCH_APP_ID != ''
+      - name: Trigger runtime rebuilds
+        if: steps.tag.outputs.tag != '' && secrets.RUNTIME_DISPATCH_REPOS != ''
         env:
           GH_TOKEN: ${{ steps.apptoken.outputs.token }}
+          REPOS: ${{ secrets.RUNTIME_DISPATCH_REPOS }}
         run: |
           set -euo pipefail
-          gh api repos/ConcordLib/Runtime/dispatches \
-            -f event_type=core-released \
-            -F "client_payload[core_version]=${{ steps.tag.outputs.tag }}"
-
-      - name: Generate cross-repo token (RimWorld)
-        if: steps.tag.outputs.tag != '' && (vars.RIMWORLD_DISPATCH_APP_ID != '' || vars.RUNTIME_DISPATCH_APP_ID != '')
-        id: apptoken_rimworld
-        uses: actions/create-github-app-token@v1
-        with:
-          # A dedicated RimWorld app can override the shared release-dispatch app.
-          app-id: ${{ vars.RIMWORLD_DISPATCH_APP_ID || vars.RUNTIME_DISPATCH_APP_ID }}
-          private-key: ${{ secrets.RIMWORLD_DISPATCH_APP_PRIVATE_KEY || secrets.RUNTIME_DISPATCH_APP_PRIVATE_KEY }}
-          owner: ConcordLib
-          repositories: RimWorld
-
-      - name: Trigger RimWorld rebuild
-        if: steps.tag.outputs.tag != '' && (vars.RIMWORLD_DISPATCH_APP_ID != '' || vars.RUNTIME_DISPATCH_APP_ID != '')
-        env:
-          GH_TOKEN: ${{ steps.apptoken_rimworld.outputs.token }}
-        run: |
-          set -euo pipefail
-          gh api repos/ConcordLib/RimWorld/dispatches \
-            -f event_type=core-released \
-            -F "client_payload[core_version]=${{ steps.tag.outputs.tag }}"
+          IFS=',' read -ra repos <<< "$REPOS"
+          for repo in "${repos[@]}"; do
+            repo=$(echo "$repo" | xargs)
+            gh api "repos/ConcordLib/$repo/dispatches" \
+              -f event_type=core-released \
+              -F "client_payload[core_version]=${{ steps.tag.outputs.tag }}"
+          done
 
   # Retry path for a runtime dispatch that was skipped or failed after Core was already
   # published. Supplying no runtime_version preserves the existing build-only manual run.
@@ -339,8 +333,8 @@ jobs:
         id: apptoken
         uses: actions/create-github-app-token@v1
         with:
-          app-id: ${{ vars.RUNTIME_DISPATCH_APP_ID || vars.RIMWORLD_DISPATCH_APP_ID || vars.RUNTIME_DISPATCH_APP_ID }}
-          private-key: ${{ secrets.RUNTIME_DISPATCH_APP_PRIVATE_KEY || secrets.RIMWORLD_DISPATCH_APP_PRIVATE_KEY || secrets.RUNTIME_DISPATCH_APP_PRIVATE_KEY }}
+          app-id: ${{ vars.RUNTIME_DISPATCH_APP_ID }}
+          private-key: ${{ secrets.RUNTIME_DISPATCH_APP_PRIVATE_KEY }}
           owner: ConcordLib
           repositories: ${{ inputs.runtime_repository }}
 
@@ -351,6 +345,7 @@ jobs:
           RUNTIME_VERSION: ${{ inputs.runtime_version }}
         run: |
           set -euo pipefail
+          echo "::add-mask::${RUNTIME_REPOSITORY}"
           gh api "repos/ConcordLib/${RUNTIME_REPOSITORY}/dispatches" \
             -f event_type=core-released \
             -F "client_payload[core_version]=${RUNTIME_VERSION}"
