@@ -378,6 +378,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         AnalyzeUnsupportedInjectionMembers(context, patchType, targetType);
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Minor Code Smell", "S4158", Justification = "False positive: beforeOwners/afterOwners accumulate across loop iterations via owners.Add, so oppositeOwners is not empty on later iterations; the Contains check detects owners declared in both [PatchBefore] and [PatchAfter].")]
     private static void AnalyzePatchOrdering(
         SymbolAnalysisContext context,
         INamedTypeSymbol patchType,

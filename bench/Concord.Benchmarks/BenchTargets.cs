@@ -32,7 +32,7 @@ public static class BenchTargets {
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    [SuppressMessage("Major Code Smell", "S108", Justification = "empty benchmark target body is intentional")]
+    [SuppressMessage("Critical Code Smell", "S1186", Justification = "Empty benchmark target body is intentional; the patch under benchmark is what runs.")]
     public static void ControlHandleCancel() { }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -46,7 +46,7 @@ public static class BenchTargets {
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    [SuppressMessage("Critical Code Smell", "S1186", Justification = "empty finally block is intentional")]
+    [SuppressMessage("Major Code Smell", "S108", Justification = "Empty finally block is the benchmark shape under test.")]
     public static int TryFinallyTarget(int x) {
         try {
             return x + 1;
