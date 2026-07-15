@@ -321,6 +321,8 @@ public static class WrapperComposer {
 
         if (lastExit is not null) {
             List<Instruction> tails = ChainBodies(buffers.TailBodies, lastExit);
+            RedirectProtectedRegionExits(spine, lastExit, tails[0]);
+            RetargetHandlerBoundaries(body.ExceptionHandlers, lastExit, tails[0]);
             int exitIndex = spine.IndexOf(lastExit);
             spine.InsertRange(exitIndex, tails);
         }
@@ -588,6 +590,8 @@ public static class WrapperComposer {
                 new InjectionCopyRequest(injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers),
                 locals,
                 exit);
+            RedirectIntermediateBranches(spine, exit, siteBody[0]);
+            RetargetHandlerBoundaries(wrapperDefinition.Body.ExceptionHandlers, exit, siteBody[0]);
             int exitIndex = spine.IndexOf(exit);
             spine.InsertRange(exitIndex, siteBody);
         }
@@ -620,6 +624,10 @@ public static class WrapperComposer {
                     exit,
                     insideAround: true);
                 BodyCopier.RewriteSpliceArgs(siteBody, spineCopy.ArgLocals);
+
+                RedirectIntermediateBranches(spineCopy.Instructions, exit, siteBody[0]);
+                RedirectIntermediateBranches(aroundBody, exit, siteBody[0]);
+                RetargetHandlerBoundaries(spineCopy.Handlers, exit, siteBody[0]);
 
                 int spineCopyExitIndex = spineCopy.Instructions.IndexOf(exit);
                 spineCopy.Instructions.InsertRange(spineCopyExitIndex, siteBody);
@@ -660,6 +668,7 @@ public static class WrapperComposer {
 
             RedirectIntermediateBranches(spineCopy.Instructions, lastExit, siteBody[0]);
             RedirectIntermediateBranches(aroundBody, lastExit, siteBody[0]);
+            RetargetHandlerBoundaries(spineCopy.Handlers, lastExit, siteBody[0]);
 
             int spineCopyExitIndex = spineCopy.Instructions.IndexOf(lastExit);
             spineCopy.Instructions.InsertRange(spineCopyExitIndex, siteBody);
@@ -681,6 +690,15 @@ public static class WrapperComposer {
     private static void RedirectIntermediateBranches(List<Instruction> instructions, Instruction originalTarget, Instruction newTarget) {
         foreach (Instruction instruction in instructions.Where(instruction => !ReferenceEquals(instruction, originalTarget) && ReferenceEquals(instruction.Operand, originalTarget))) {
             instruction.Operand = newTarget;
+        }
+    }
+
+    private static void RedirectProtectedRegionExits(List<Instruction> instructions, Instruction originalTarget, Instruction newTarget) {
+        foreach (Instruction instruction in instructions) {
+            if ((instruction.OpCode == OpCodes.Leave || instruction.OpCode == OpCodes.Leave_S)
+                && ReferenceEquals(instruction.Operand, originalTarget)) {
+                instruction.Operand = newTarget;
+            }
         }
     }
 

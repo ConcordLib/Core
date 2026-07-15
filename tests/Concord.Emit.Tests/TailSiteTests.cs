@@ -125,7 +125,241 @@ public static class MultiReturnInTryInjectionMethods {
     }
 }
 
+public static class TryCatchVoidTailTarget {
+    public static int BodyCalls;
+    public static int CatchCalls;
+
+    public static void Run() {
+        try {
+            BodyCalls++;
+        } catch (Exception) {
+            BodyCalls = -1;
+        }
+    }
+
+    public static void RunCaughtException() {
+        try {
+            throw new InvalidOperationException();
+        } catch (InvalidOperationException) {
+            CatchCalls++;
+        }
+    }
+}
+
+public static class TryCatchVoidTailInjectionMethods {
+    public static int TailCalls;
+    public static int ReturnCalls;
+    public static int AroundBeforeCalls;
+    public static int AroundAfterCalls;
+    public static int ObservedCatchCalls;
+    public static int ObservedFinallyCalls;
+
+    public static void Mark() {
+        TailCalls++;
+    }
+
+    public static void MarkReturn() {
+        ReturnCalls++;
+    }
+
+    public static void Around(Operation original) {
+        AroundBeforeCalls++;
+        original.Invoke();
+        AroundAfterCalls++;
+    }
+
+    public static void ObserveCatch() {
+        ObservedCatchCalls = TryCatchVoidTailTarget.CatchCalls;
+    }
+
+    public static void ObserveFinally() {
+        ObservedFinallyCalls = TryFinallyVoidTailTarget.FinallyCalls;
+    }
+}
+
+public static class TryCatchValueTailTarget {
+    public static int Run() {
+        try {
+            return 42;
+        } catch (Exception) {
+            throw;
+        }
+    }
+}
+
+public static class TryCatchValueTailInjectionMethods {
+    public static int ObservedReturnValue;
+
+    public static void Observe(ControlHandle<int> handle) {
+        ObservedReturnValue = handle.ReturnValue;
+    }
+}
+
+public static class TryFinallyVoidTailTarget {
+    public static int BodyCalls;
+    public static int FinallyCalls;
+
+    public static void Run() {
+        try {
+            BodyCalls++;
+        } finally {
+            FinallyCalls++;
+        }
+    }
+}
+
+public static class TryCatchReturnPlacementTarget {
+    public static int AfterTryCalls;
+
+    public static void Run(bool returnInsideTry) {
+        try {
+            if (returnInsideTry) {
+                return;
+            }
+        } catch (Exception) {
+            AfterTryCalls = -1;
+        }
+
+        AfterTryCalls++;
+    }
+}
+
 public sealed class TailSiteTests {
+    [Fact]
+    public void Tail_RunsOnNormalExit_WhenTargetBodyHasTryCatch() {
+        TryCatchVoidTailTarget.BodyCalls = 0;
+        TryCatchVoidTailInjectionMethods.TailCalls = 0;
+        MethodBase target = typeof(TryCatchVoidTailTarget).GetMethod(nameof(TryCatchVoidTailTarget.Run))!;
+        MethodBase injectionMethod = typeof(TryCatchVoidTailInjectionMethods).GetMethod(nameof(TryCatchVoidTailInjectionMethods.Mark))!;
+        Injection tail = new Injection(injectionMethod, new InjectAt.Tail(), "test", 0);
+
+        ComposeResult result = WrapperComposer.Compose(target, [tail]);
+        result.Wrapper.Invoke(null, null);
+
+        Assert.Equal((1, 1), (TryCatchVoidTailTarget.BodyCalls, TryCatchVoidTailInjectionMethods.TailCalls));
+    }
+
+    [Fact]
+    public void Tail_ReadsReturnValueOnNormalExit_WhenNonVoidTargetBodyHasTryCatch() {
+        TryCatchValueTailInjectionMethods.ObservedReturnValue = 0;
+        MethodBase target = typeof(TryCatchValueTailTarget).GetMethod(nameof(TryCatchValueTailTarget.Run))!;
+        MethodBase injectionMethod = typeof(TryCatchValueTailInjectionMethods).GetMethod(nameof(TryCatchValueTailInjectionMethods.Observe))!;
+        Injection tail = new Injection(injectionMethod, new InjectAt.Tail(), "test", 0);
+
+        ComposeResult result = WrapperComposer.Compose(target, [tail]);
+        object? returnValue = result.Wrapper.Invoke(null, null);
+
+        Assert.Equal((42, 42), (returnValue, TryCatchValueTailInjectionMethods.ObservedReturnValue));
+    }
+
+    [Fact]
+    public void Tail_RunsAfterFinally_WhenTargetBodyHasTryFinally() {
+        TryFinallyVoidTailTarget.BodyCalls = 0;
+        TryFinallyVoidTailTarget.FinallyCalls = 0;
+        TryCatchVoidTailInjectionMethods.ObservedFinallyCalls = 0;
+        MethodBase target = typeof(TryFinallyVoidTailTarget).GetMethod(nameof(TryFinallyVoidTailTarget.Run))!;
+        MethodBase injectionMethod = typeof(TryCatchVoidTailInjectionMethods).GetMethod(nameof(TryCatchVoidTailInjectionMethods.ObserveFinally))!;
+        Injection tail = new Injection(injectionMethod, new InjectAt.Tail(), "test", 0);
+
+        ComposeResult result = WrapperComposer.Compose(target, [tail]);
+        result.Wrapper.Invoke(null, null);
+
+        Assert.Equal((1, 1, 1), (TryFinallyVoidTailTarget.BodyCalls, TryFinallyVoidTailTarget.FinallyCalls, TryCatchVoidTailInjectionMethods.ObservedFinallyCalls));
+    }
+
+    [Theory]
+    [InlineData(true, 0)]
+    [InlineData(false, 1)]
+    public void Tail_RunsOnFinalExit_WhenTargetReturnsInsideOrAfterTry(bool returnInsideTry, int expectedAfterTryCalls) {
+        TryCatchReturnPlacementTarget.AfterTryCalls = 0;
+        TryCatchVoidTailInjectionMethods.TailCalls = 0;
+        MethodBase target = typeof(TryCatchReturnPlacementTarget).GetMethod(nameof(TryCatchReturnPlacementTarget.Run))!;
+        MethodBase injectionMethod = typeof(TryCatchVoidTailInjectionMethods).GetMethod(nameof(TryCatchVoidTailInjectionMethods.Mark))!;
+        Injection tail = new Injection(injectionMethod, new InjectAt.Tail(), "test", 0);
+
+        ComposeResult result = WrapperComposer.Compose(target, [tail]);
+        result.Wrapper.Invoke(null, [returnInsideTry]);
+
+        Assert.Equal((expectedAfterTryCalls, 1), (TryCatchReturnPlacementTarget.AfterTryCalls, TryCatchVoidTailInjectionMethods.TailCalls));
+    }
+
+    [Fact]
+    public void Tail_RunsAfterCaughtException_WhenTargetCompletesNormally() {
+        TryCatchVoidTailTarget.CatchCalls = 0;
+        TryCatchVoidTailInjectionMethods.ObservedCatchCalls = 0;
+        MethodBase target = typeof(TryCatchVoidTailTarget).GetMethod(nameof(TryCatchVoidTailTarget.RunCaughtException))!;
+        MethodBase injectionMethod = typeof(TryCatchVoidTailInjectionMethods).GetMethod(nameof(TryCatchVoidTailInjectionMethods.ObserveCatch))!;
+        Injection tail = new Injection(injectionMethod, new InjectAt.Tail(), "test", 0);
+
+        ComposeResult result = WrapperComposer.Compose(target, [tail]);
+        result.Wrapper.Invoke(null, null);
+
+        Assert.Equal((1, 1), (TryCatchVoidTailTarget.CatchCalls, TryCatchVoidTailInjectionMethods.ObservedCatchCalls));
+    }
+
+    [Fact]
+    public void Return_RunsOnNormalExit_WhenTargetBodyHasTryCatch() {
+        TryCatchVoidTailTarget.BodyCalls = 0;
+        TryCatchVoidTailInjectionMethods.ReturnCalls = 0;
+        MethodBase target = typeof(TryCatchVoidTailTarget).GetMethod(nameof(TryCatchVoidTailTarget.Run))!;
+        MethodBase injectionMethod = typeof(TryCatchVoidTailInjectionMethods).GetMethod(nameof(TryCatchVoidTailInjectionMethods.MarkReturn))!;
+        Injection ret = new Injection(injectionMethod, new InjectAt.Return(0), "test", 0);
+
+        ComposeResult result = WrapperComposer.Compose(target, [ret]);
+        result.Wrapper.Invoke(null, null);
+
+        Assert.Equal((1, 1), (TryCatchVoidTailTarget.BodyCalls, TryCatchVoidTailInjectionMethods.ReturnCalls));
+    }
+
+    [Fact]
+    public void Around_WrapsNormalExit_WhenTargetBodyHasTryCatch() {
+        TryCatchVoidTailTarget.BodyCalls = 0;
+        TryCatchVoidTailInjectionMethods.AroundBeforeCalls = 0;
+        TryCatchVoidTailInjectionMethods.AroundAfterCalls = 0;
+        MethodBase target = typeof(TryCatchVoidTailTarget).GetMethod(nameof(TryCatchVoidTailTarget.Run))!;
+        MethodBase injectionMethod = typeof(TryCatchVoidTailInjectionMethods).GetMethod(nameof(TryCatchVoidTailInjectionMethods.Around))!;
+        Injection around = new Injection(injectionMethod, new InjectAt.Around(), "test", 0);
+
+        ComposeResult result = WrapperComposer.Compose(target, [around]);
+        result.Wrapper.Invoke(null, null);
+
+        Assert.Equal(
+            (1, 1, 1),
+            (TryCatchVoidTailTarget.BodyCalls, TryCatchVoidTailInjectionMethods.AroundBeforeCalls, TryCatchVoidTailInjectionMethods.AroundAfterCalls));
+    }
+
+    [Fact]
+    public void Tail_WithAround_RunsOnNormalExit_WhenTargetBodyHasTryCatch() {
+        TryCatchVoidTailTarget.BodyCalls = 0;
+        TryCatchVoidTailInjectionMethods.TailCalls = 0;
+        MethodBase target = typeof(TryCatchVoidTailTarget).GetMethod(nameof(TryCatchVoidTailTarget.Run))!;
+        MethodBase aroundMethod = typeof(TryCatchVoidTailInjectionMethods).GetMethod(nameof(TryCatchVoidTailInjectionMethods.Around))!;
+        MethodBase tailMethod = typeof(TryCatchVoidTailInjectionMethods).GetMethod(nameof(TryCatchVoidTailInjectionMethods.Mark))!;
+        Injection around = new Injection(aroundMethod, new InjectAt.Around(), "test", 0);
+        Injection tail = new Injection(tailMethod, new InjectAt.Tail(), "test", 1);
+
+        ComposeResult result = WrapperComposer.Compose(target, [around, tail]);
+        result.Wrapper.Invoke(null, null);
+
+        Assert.Equal((1, 1), (TryCatchVoidTailTarget.BodyCalls, TryCatchVoidTailInjectionMethods.TailCalls));
+    }
+
+    [Fact]
+    public void Return_WithAround_RunsOnNormalExit_WhenTargetBodyHasTryCatch() {
+        TryCatchVoidTailTarget.BodyCalls = 0;
+        TryCatchVoidTailInjectionMethods.ReturnCalls = 0;
+        MethodBase target = typeof(TryCatchVoidTailTarget).GetMethod(nameof(TryCatchVoidTailTarget.Run))!;
+        MethodBase aroundMethod = typeof(TryCatchVoidTailInjectionMethods).GetMethod(nameof(TryCatchVoidTailInjectionMethods.Around))!;
+        MethodBase returnMethod = typeof(TryCatchVoidTailInjectionMethods).GetMethod(nameof(TryCatchVoidTailInjectionMethods.MarkReturn))!;
+        Injection around = new Injection(aroundMethod, new InjectAt.Around(), "test", 0);
+        Injection ret = new Injection(returnMethod, new InjectAt.Return(0), "test", 1);
+
+        ComposeResult result = WrapperComposer.Compose(target, [around, ret]);
+        result.Wrapper.Invoke(null, null);
+
+        Assert.Equal((1, 1), (TryCatchVoidTailTarget.BodyCalls, TryCatchVoidTailInjectionMethods.ReturnCalls));
+    }
+
     [Theory]
     [InlineData(0, 10)]
     [InlineData(1, 20)]

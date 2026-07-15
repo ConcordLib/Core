@@ -14,7 +14,10 @@ public enum At {
     /// </summary>
     Return,
 
-    /// <summary>Run the injection method once at the end of the target, just before the wrapper returns.</summary>
+    /// <summary>
+    ///     Run the injection method once at the end of the target, just before the wrapper returns. This includes
+    ///     completion after a caught exception, but not an exception that escapes the target.
+    /// </summary>
     Tail,
 
     /// <summary>Wrap the whole target body.</summary>
