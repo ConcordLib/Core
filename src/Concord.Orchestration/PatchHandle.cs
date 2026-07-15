@@ -30,6 +30,7 @@ internal sealed class PatchHandle : IPatchHandle {
 
     public IReadOnlyList<IDetourHandle> Detours { get; }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Blocker Code Smell", "S3877", Justification = "Dispose aggregates and surfaces detour-revert failures; silently swallowing them would hide broken unpatching.")]
     public void Dispose() {
         if (Interlocked.Exchange(ref disposed, 1) != 0) {
             return;

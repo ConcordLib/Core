@@ -104,54 +104,14 @@ public static class PatchDeclarationScanner {
             declaration.GetCustomAttributes<PatchAfterAttribute>().Select(static order => order.Owner),
             "[PatchAfter]");
 
-        const BindingFlags declared = BindingFlags.Public |
-                                      BindingFlags.NonPublic | // NOSONAR concord reaches private target members by design; validated at resolve time
-                                      BindingFlags.Instance |
-                                      BindingFlags.Static |
-                                      BindingFlags.DeclaredOnly;
-
-        List<(MethodBase Target, Injection Injection)> resolved = [];
-        foreach (MethodInfo method in declaration.GetMethods(declared)) {
-            InjectAttribute? inject = method.GetCustomAttribute<InjectAttribute>();
-            if (inject == null) {
-                continue;
-            }
-
-            if (inject.HasConstant && inject.At != Concord.At.Constant) {
-                throw new ConcordDeclarationException(
-                    InjectOnPrefix + declaration.FullName + " passes a constant but position " + inject.At + "; constant injections require At.Constant.");
-            }
-
-            if (!inject.HasConstant &&
-                inject.ResolvedAt is not InjectAt.Invoke &&
-                (inject.At == Concord.At.Constant || inject.At == Concord.At.Argument)) {
-                throw new ConcordDeclarationException(
-                    InjectOnPrefix + declaration.FullName + " uses position " + inject.At + " without its dedicated constructor form.");
-            }
-
-            MethodBase resolvedTarget = ResolveInjectionTarget(declaration, baseType, inject);
-            resolved.Add((resolvedTarget, new Injection(method, inject.ResolvedAt, declaration.FullName!, inject.ResolvedPriority) {
-                Debug = debug,
-                BeforeOwners = beforeOwners,
-                AfterOwners = afterOwners
-            }));
-        }
+        List<(MethodBase Target, Injection Injection)> resolved =
+            ResolveInjections(declaration, baseType, debug, beforeOwners, afterOwners);
 
         foreach ((MethodBase target, Injection injection) in resolved) {
             patches.ApplyPatch(target, injection);
         }
 
-        foreach (FieldInfo field in declaration.GetFields(declared)) {
-            if (field.IsStatic) {
-                continue;
-            }
-
-            if (field.GetCustomAttribute<InjectFieldAttribute>() is not null) {
-                continue;
-            }
-
-            props.RegisterAttachedProperty(baseType, field.Name, field.FieldType);
-        }
+        RegisterAttachedProperties(declaration, baseType, props);
     }
 
     /// <summary>
@@ -176,6 +136,72 @@ public static class PatchDeclarationScanner {
         }
 
         throw new ConcordDeclarationException("Target type '" + name + "' could not be resolved from any loaded assembly.");
+    }
+
+    private static List<(MethodBase Target, Injection Injection)> ResolveInjections(
+        Type declaration,
+        Type baseType,
+        bool debug,
+        string[] beforeOwners,
+        string[] afterOwners) {
+        const BindingFlags declared = BindingFlags.Public |
+                                      BindingFlags.NonPublic | // NOSONAR concord reaches private target members by design; validated at resolve time
+                                      BindingFlags.Instance |
+                                      BindingFlags.Static |
+                                      BindingFlags.DeclaredOnly;
+
+        List<(MethodBase Target, Injection Injection)> resolved = [];
+        foreach (MethodInfo method in declaration.GetMethods(declared)) {
+            InjectAttribute? inject = method.GetCustomAttribute<InjectAttribute>();
+            if (inject == null) {
+                continue;
+            }
+
+            ValidateInjectAttribute(declaration, inject);
+
+            MethodBase resolvedTarget = ResolveInjectionTarget(declaration, baseType, inject);
+            resolved.Add((resolvedTarget, new Injection(method, inject.ResolvedAt, declaration.FullName!, inject.ResolvedPriority) {
+                Debug = debug,
+                BeforeOwners = beforeOwners,
+                AfterOwners = afterOwners
+            }));
+        }
+
+        return resolved;
+    }
+
+    private static void ValidateInjectAttribute(Type declaration, InjectAttribute inject) {
+        if (inject.HasConstant && inject.At != Concord.At.Constant) {
+            throw new ConcordDeclarationException(
+                InjectOnPrefix + declaration.FullName + " passes a constant but position " + inject.At + "; constant injections require At.Constant.");
+        }
+
+        if (!inject.HasConstant &&
+            inject.ResolvedAt is not InjectAt.Invoke &&
+            (inject.At == Concord.At.Constant || inject.At == Concord.At.Argument)) {
+            throw new ConcordDeclarationException(
+                InjectOnPrefix + declaration.FullName + " uses position " + inject.At + " without its dedicated constructor form.");
+        }
+    }
+
+    private static void RegisterAttachedProperties(Type declaration, Type baseType, IAttachedPropertyRegistry props) {
+        const BindingFlags declared = BindingFlags.Public |
+                                      BindingFlags.NonPublic | // NOSONAR concord reaches private target members by design; validated at resolve time
+                                      BindingFlags.Instance |
+                                      BindingFlags.Static |
+                                      BindingFlags.DeclaredOnly;
+
+        foreach (FieldInfo field in declaration.GetFields(declared)) {
+            if (field.IsStatic) {
+                continue;
+            }
+
+            if (field.GetCustomAttribute<InjectFieldAttribute>() is not null) {
+                continue;
+            }
+
+            props.RegisterAttachedProperty(baseType, field.Name, field.FieldType);
+        }
     }
 
     private static string[] ReadOrderOwners(Type declaration, IEnumerable<string> owners, string attributeName) {

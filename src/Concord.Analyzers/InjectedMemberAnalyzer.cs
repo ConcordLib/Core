@@ -2241,7 +2241,11 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
 
     private static bool IsConcordAttribute(AttributeData attribute, string name) {
         INamedTypeSymbol? attributeClass = attribute.AttributeClass;
-        return attributeClass?.Name == name &&
+        if (attributeClass is null) {
+            return false;
+        }
+
+        return attributeClass.Name == name &&
                attributeClass.ContainingNamespace.ToDisplayString() == ConcordNamespace;
     }
 
