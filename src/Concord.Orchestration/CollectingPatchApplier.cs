@@ -10,8 +10,9 @@ internal sealed class CollectingPatchApplier : IPatchApplier {
     public IReadOnlyList<IDetourHandle> Handles => handles;
 
     public void ApplyPatch(MethodBase target, Injection injection) {
-        WrapperComposer.RejectSharedGenericInstantiation(target);
-        IDetourHandle handle = DetourBackend.Current.ApplyComposed(target, [injection]);
+        MethodBase canonical = WrapperComposer.ResolveStateMachineTarget(target);
+        WrapperComposer.RejectSharedGenericInstantiation(canonical);
+        IDetourHandle handle = DetourBackend.Current.ApplyComposed(canonical, [injection]);
         handles.Add(handle);
     }
 }
