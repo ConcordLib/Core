@@ -2,8 +2,30 @@ using Concord.Emit;
 
 namespace Concord.Detour;
 
-internal static class InjectionOrderer {
-    internal static Injection[] OrderForComposition(IReadOnlyList<(long Seq, Injection Injection)> live) {
+/// <summary>
+/// Topologically sorts injections for composition order.
+/// </summary>
+public static class InjectionOrderer {
+    /// <summary>
+    /// Returns injections in composition order: the order in which patch bodies are nested.
+    /// </summary>
+    /// <remarks>
+    /// The returned array is composition order: bodies are composed in array order, and each
+    /// later-composed body wraps the ones before it, so the last element runs first at runtime.
+    ///
+    /// Runtime ordering: an injection runs before every injection whose <see cref="Injection.Owner"/>
+    /// appears in its <see cref="Injection.BeforeOwners"/>, and after every injection whose owner
+    /// appears in its <see cref="Injection.AfterOwners"/>. Among unconstrained injections, lower
+    /// <see cref="Injection.Priority"/> runs earlier; among equal priorities, higher <c>Seq</c>
+    /// (later registration) runs earlier. Equivalently, in the returned array: higher priority
+    /// composes earlier, and lower <c>Seq</c> composes earlier.
+    ///
+    /// A constraint cycle throws <see cref="ConcordEmitException"/> (code CONC052).
+    /// </remarks>
+    /// <param name="live">Injections paired with registration sequence number.</param>
+    /// <returns>Injections in composition order (the order bodies are composed/nested).</returns>
+    /// <exception cref="ConcordEmitException">If ordering constraints form a cycle.</exception>
+    public static Injection[] OrderForComposition(IReadOnlyList<(long Seq, Injection Injection)> live) {
         int count = live.Count;
         if (count == 0) {
             return [];
