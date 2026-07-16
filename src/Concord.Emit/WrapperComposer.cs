@@ -23,10 +23,7 @@ public static class WrapperComposer {
     /// <param name="ordered">The injections to compose, ordered by their caller.</param>
     /// <returns>The generated wrapper method and original body copy.</returns>
     public static ComposeResult Compose(MethodBase target, IReadOnlyList<Injection> ordered) {
-        if (HasWholeMethodAround(ordered)) {
-            ValidateWholeMethodAroundEligible(target);
-            RejectCallSiteInjectionsWithWholeMethodAround(ordered, target);
-        }
+        ValidateComposition(target, ordered);
 
         MethodBase resolved = ResolveStateMachineTarget(target);
 
@@ -39,7 +36,7 @@ public static class WrapperComposer {
         using DynamicMethodDefinition wrapper = new DynamicMethodDefinition(WrapperName(resolved), returnType, parameterTypes);
         BodyCopier.CopySpine(source.Definition, wrapper.Definition);
 
-        Assemble(wrapper.Definition, resolved, ordered, returnType);
+        AssembleInto(wrapper.Definition, resolved, ordered, returnType);
         MethodInfo wrapperMethod = wrapper.Generate();
         return new ComposeResult(wrapperMethod, originalBody);
     }
@@ -111,6 +108,18 @@ public static class WrapperComposer {
         }
     }
 
+    internal static void ValidateComposition(MethodBase target, IReadOnlyList<Injection> ordered) {
+        if (HasWholeMethodAround(ordered)) {
+            ValidateWholeMethodAroundEligible(target);
+            RejectCallSiteInjectionsWithWholeMethodAround(ordered, target);
+        }
+    }
+
+    internal static void AssembleInto(MethodDefinition wrapperDefinition, MethodBase target, IReadOnlyList<Injection> ordered, Type returnType) {
+        ValidateComposition(target, ordered);
+        Assemble(wrapperDefinition, target, ordered, returnType);
+    }
+
     internal static void ValidateOperationShape(MethodBase injectionMethod, CallSiteShape shape, MethodBase target, bool allowValueReceiver = false) {
         if (!allowValueReceiver && shape.HasThis && shape.ReceiverType is { IsValueType: true }) {
             throw new ConcordEmitException(
@@ -140,6 +149,37 @@ public static class WrapperComposer {
             SpansInstruction(handler.TryStart, handler.TryEnd, instruction) ||
             SpansInstruction(handler.HandlerStart, handler.HandlerEnd, instruction) ||
             SpansInstruction(handler.FilterStart, handler.HandlerStart, instruction));
+    }
+
+    internal static Type ResolveReturnType(MethodBase target) {
+        return target is MethodInfo method ? method.ReturnType : typeof(void);
+    }
+
+    internal static Type[] ResolveParameterTypes(MethodBase target) {
+        ParameterInfo[] parameters = target.GetParameters();
+        bool hasThis = !target.IsStatic;
+        Type[] result = new Type[parameters.Length + (hasThis ? 1 : 0)];
+
+        int offset = 0;
+        if (hasThis) {
+            result[0] = ThisParameterType(target);
+            offset = 1;
+        }
+
+        for (int i = 0; i < parameters.Length; i++) {
+            result[offset + i] = parameters[i].ParameterType;
+        }
+
+        return result;
+    }
+
+    internal static Type ThisParameterType(MethodBase target) {
+        Type declaring = target.DeclaringType!;
+        return declaring.IsValueType ? declaring.MakeByRefType() : declaring;
+    }
+
+    internal static string WrapperName(MethodBase target) {
+        return $"{target.DeclaringType?.Name}.{target.Name}‹concord›";
     }
 
     private static bool HasWholeMethodAround(IReadOnlyList<Injection> ordered) {
@@ -1634,36 +1674,5 @@ public static class WrapperComposer {
         };
 
         aroundBody.InsertRange(firstSpineIndex, guardEntry);
-    }
-
-    private static Type ResolveReturnType(MethodBase target) {
-        return target is MethodInfo method ? method.ReturnType : typeof(void);
-    }
-
-    private static Type[] ResolveParameterTypes(MethodBase target) {
-        ParameterInfo[] parameters = target.GetParameters();
-        bool hasThis = !target.IsStatic;
-        Type[] result = new Type[parameters.Length + (hasThis ? 1 : 0)];
-
-        int offset = 0;
-        if (hasThis) {
-            result[0] = ThisParameterType(target);
-            offset = 1;
-        }
-
-        for (int i = 0; i < parameters.Length; i++) {
-            result[offset + i] = parameters[i].ParameterType;
-        }
-
-        return result;
-    }
-
-    private static Type ThisParameterType(MethodBase target) {
-        Type declaring = target.DeclaringType!;
-        return declaring.IsValueType ? declaring.MakeByRefType() : declaring;
-    }
-
-    private static string WrapperName(MethodBase target) {
-        return $"{target.DeclaringType?.Name}.{target.Name}\u2039concord\u203A";
     }
 }

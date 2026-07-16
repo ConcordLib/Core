@@ -3,6 +3,7 @@ using Xunit;
 
 namespace Concord.Emit.Tests.NeutralRoundTrip;
 
+[Collection("ExceptionRegionTargets")]
 public class PureRoundTripTests {
     private static MethodInfo RoundTripOf(Type declaring, string name) {
         MethodBase target = declaring.GetMethod(name)!;

@@ -1,9 +1,17 @@
+using System.Collections.Generic;
 using System.Reflection;
+using Concord.Emit;
 using MonoMod.Utils;
 
 namespace Concord.Emit.Tests.NeutralRoundTrip;
 
 public static class RoundTrip {
+    public static MethodInfo ComposeThroughNeutralBody(MethodBase target, IReadOnlyList<Injection> ordered) {
+        NeutralBody supplied = BodyTransformer.FromMethod(target);
+        NeutralBody composed = BodyTransformer.Transform(target, supplied, ordered);
+        return Generate(composed, target);
+    }
+
     public static NeutralBody Extract(MethodBase target) {
         MethodBase resolved = WrapperComposer.ResolveStateMachineTarget(target);
         using DynamicMethodDefinition source = new DynamicMethodDefinition(resolved);
