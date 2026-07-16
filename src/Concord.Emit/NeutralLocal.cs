@@ -28,22 +28,22 @@ public sealed class NeutralLocal {
     }
 
     /// <summary>
-    /// Gets the local variable id.
+    /// The local variable id.
     /// </summary>
     public int Id { get; }
 
     /// <summary>
-    /// Gets the local variable type.
+    /// The local variable type.
     /// </summary>
     public Type Type { get; }
 
     /// <summary>
-    /// Gets whether the local is pinned in memory.
+    /// Whether the local is pinned in memory.
     /// </summary>
     public bool Pinned { get; }
 
     /// <summary>
-    /// Gets whether the local is owned by IL generation.
+    /// Whether the local is owned by IL generation.
     /// </summary>
     public bool IlgenOwned { get; }
 }

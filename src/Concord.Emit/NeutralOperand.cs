@@ -17,12 +17,12 @@ public sealed class NeutralOperand {
     }
 
     /// <summary>
-    /// Gets the kind of operand.
+    /// The kind of operand.
     /// </summary>
     public NeutralOperandKind Kind { get; }
 
     /// <summary>
-    /// Gets the raw value of the operand.
+    /// The raw value of the operand.
     /// </summary>
     public object? Value { get; }
 

@@ -16,17 +16,17 @@ public sealed class NeutralInstruction {
     }
 
     /// <summary>
-    /// Gets the opcode name.
+    /// The opcode name.
     /// </summary>
     public string OpcodeName { get; }
 
     /// <summary>
-    /// Gets the instruction operand.
+    /// The instruction operand.
     /// </summary>
     public NeutralOperand Operand { get; }
 
     /// <summary>
-    /// Gets the list of label ids that precede this instruction.
+    /// The list of label ids that precede this instruction.
     /// </summary>
     public List<int> Labels { get; }
 }

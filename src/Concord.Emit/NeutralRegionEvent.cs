@@ -17,17 +17,17 @@ public sealed class NeutralRegionEvent {
     }
 
     /// <summary>
-    /// Gets the kind of region event.
+    /// The kind of region event.
     /// </summary>
     public NeutralRegionEventKind Kind { get; }
 
     /// <summary>
-    /// Gets the label id marking the event position.
+    /// The label id marking the event position.
     /// </summary>
     public int PositionLabelId { get; }
 
     /// <summary>
-    /// Gets the catch type, if this is a catch event; null otherwise.
+    /// The catch type, if this is a catch event; null otherwise.
     /// </summary>
     public Type? CatchType { get; }
 }

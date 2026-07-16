@@ -5,13 +5,13 @@ using MonoMod.Utils;
 namespace Concord.Emit;
 
 /// <summary>
-///     Composes Concord injections against a caller-supplied neutral IL body instead of the
-///     target's pristine body. This is the body-source-agnostic seam a bridge transpiler feeds
-///     with a stream converted from an external patching framework.
+///     Composes Concord injections onto a body the caller supplies, rather than the target
+///     method's own IL. This lets a caller compose against a body it got from somewhere else,
+///     such as an instruction stream handed in by another patching library.
 /// </summary>
 public static class BodyTransformer {
     /// <summary>Extracts the canonical target's current IL as a neutral body.</summary>
-    /// <param name="target">The method whose body should be extracted.</param>
+    /// <param name="target">The method to read the current IL from.</param>
     /// <returns>A neutral body representing <paramref name="target" />'s current IL.</returns>
     public static NeutralBody FromMethod(MethodBase target) {
         MethodBase resolved = WrapperComposer.ResolveStateMachineTarget(target);
@@ -20,7 +20,7 @@ public static class BodyTransformer {
     }
 
     /// <summary>Composes ordered injections onto a supplied body and returns the composed neutral body.</summary>
-    /// <param name="canonicalTarget">The method the composed body's shape (return type, parameters) is derived from.</param>
+    /// <param name="canonicalTarget">The method that defines the composed body's shape (return type and parameters).</param>
     /// <param name="source">The neutral body to compose the injections onto.</param>
     /// <param name="ordered">The injections to compose, in application order.</param>
     /// <returns>A new neutral body containing <paramref name="source" /> with <paramref name="ordered" /> composed in.</returns>

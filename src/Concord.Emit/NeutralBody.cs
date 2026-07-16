@@ -14,7 +14,7 @@ public sealed class NeutralBody {
     /// </summary>
     /// <param name="instructions">The list of instructions in the body.</param>
     /// <param name="locals">The list of local variables in the body.</param>
-    /// <param name="initLocals">Whether locals should be initialized to zero.</param>
+    /// <param name="initLocals">Whether locals are initialized to zero.</param>
     /// <param name="regionEvents">The list of exception handling region events.</param>
     public NeutralBody(List<NeutralInstruction> instructions, List<NeutralLocal> locals, bool initLocals, List<NeutralRegionEvent> regionEvents) {
         Instructions = instructions;
@@ -24,22 +24,22 @@ public sealed class NeutralBody {
     }
 
     /// <summary>
-    /// Gets the list of instructions in the body.
+    /// The list of instructions in the body.
     /// </summary>
     public List<NeutralInstruction> Instructions { get; }
 
     /// <summary>
-    /// Gets the list of local variables in the body.
+    /// The list of local variables in the body.
     /// </summary>
     public List<NeutralLocal> Locals { get; }
 
     /// <summary>
-    /// Gets whether locals should be initialized to zero.
+    /// Whether locals are initialized to zero.
     /// </summary>
     public bool InitLocals { get; }
 
     /// <summary>
-    /// Gets the list of exception handling region events.
+    /// The list of exception handling region events.
     /// </summary>
     public List<NeutralRegionEvent> RegionEvents { get; }
 }
