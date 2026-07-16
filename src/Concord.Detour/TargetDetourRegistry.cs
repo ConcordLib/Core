@@ -116,8 +116,8 @@ internal sealed class TargetDetourRegistry {
                 return;
             }
 
-            disposed = true;
             owner.Remove(owned);
+            disposed = true;
         }
     }
 }
