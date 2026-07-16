@@ -30,6 +30,32 @@ public class CanonicalTargetTests {
     private static void Head() {
     }
 
+    private sealed class GenericAsyncContainer<T> {
+        public async Task<int> FooAsync() {
+            await Task.Yield();
+            return 1;
+        }
+    }
+
+    [Fact]
+    public void ConstructedGenericAsyncTarget_RawTargetIsRejected() {
+        RecordingBackend backend = new RecordingBackend();
+        IDetourBackend previous = DetourBackend.Current;
+        DetourBackend.Current = backend;
+        try {
+            CollectingPatchApplier applier = new CollectingPatchApplier();
+            MethodBase entry = typeof(GenericAsyncContainer<string>).GetMethod(nameof(GenericAsyncContainer<string>.FooAsync))!;
+            Injection head = new Injection(typeof(CanonicalTargetTests).GetMethod(nameof(Head), BindingFlags.Static | BindingFlags.NonPublic)!, new InjectAt.Head(), "test", 0);
+
+            ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() => applier.ApplyPatch(entry, head));
+
+            Assert.Equal("CONC061", ex.Code);
+            Assert.Null(backend.LastTarget);
+        } finally {
+            DetourBackend.Current = previous;
+        }
+    }
+
     [Fact]
     public void AsyncTargetReachesBackendAsMoveNext() {
         RecordingBackend backend = new RecordingBackend();
