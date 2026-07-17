@@ -37,20 +37,19 @@ internal sealed class PatchHandle : IPatchHandle {
         }
 
         List<Exception>? failures = null;
-        try {
-            foreach (IDetourHandle detour in Detours) {
-                try {
-                    detour.Dispose();
-                } catch (Exception ex) {
-                    (failures ??= []).Add(ex);
-                }
+        foreach (IDetourHandle detour in Detours) {
+            try {
+                detour.Dispose();
+            } catch (Exception ex) {
+                (failures ??= []).Add(ex);
             }
-        } finally {
-            onDispose?.Invoke();
         }
 
         if (failures is not null) {
+            Volatile.Write(ref disposed, 0);
             throw new AggregateException("One or more detours failed to revert.", failures);
         }
+
+        onDispose?.Invoke();
     }
 }

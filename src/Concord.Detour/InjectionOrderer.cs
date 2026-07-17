@@ -5,7 +5,7 @@ namespace Concord.Detour;
 /// <summary>
 /// Topologically sorts injections for composition order.
 /// </summary>
-internal static class InjectionOrderer {
+public static class InjectionOrderer {
     /// <summary>
     /// Returns injections in composition order: the order in which patch bodies are nested.
     /// </summary>
@@ -25,7 +25,7 @@ internal static class InjectionOrderer {
     /// <param name="live">Injections paired with registration sequence number.</param>
     /// <returns>Injections in composition order (the order bodies are composed/nested).</returns>
     /// <exception cref="ConcordEmitException">If ordering constraints form a cycle.</exception>
-    internal static Injection[] OrderForComposition(IReadOnlyList<(long Seq, Injection Injection)> live) {
+    public static Injection[] OrderForComposition(IReadOnlyList<(long Seq, Injection Injection)> live) {
         int count = live.Count;
         if (count == 0) {
             return [];

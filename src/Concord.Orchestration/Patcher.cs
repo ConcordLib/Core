@@ -216,8 +216,20 @@ public static class Patcher {
     internal static IPatchHandle ApplyInjections(IReadOnlyList<(MethodBase Target, Injection Injection)> items) {
         lock (Gate) {
             CollectingPatchApplier applier = new CollectingPatchApplier();
-            foreach ((MethodBase target, Injection injection) in items) {
-                applier.ApplyPatch(target, injection);
+            try {
+                foreach ((MethodBase target, Injection injection) in items) {
+                    applier.ApplyPatch(target, injection);
+                }
+            } catch {
+                foreach (IDetourHandle handle in applier.Handles) {
+                    try {
+                        handle.Dispose();
+                    } catch (Exception ex) {
+                        Debug.WriteLine("[Concord] rollback dispose failed: " + ex.Message);
+                    }
+                }
+
+                throw;
             }
 
             return RegisterLive(applier.Handles);

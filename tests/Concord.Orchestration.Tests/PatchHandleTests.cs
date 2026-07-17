@@ -72,7 +72,7 @@ public sealed class PatchHandleTests {
     }
 
     [Fact]
-    public void Dispose_ThrowingDetour_StillRunsOnDisposeAndDisposesRest() {
+    public void Dispose_ThrowingDetour_DisposesRestWithoutRunningOnDispose() {
         CountingDetour survivor = new CountingDetour();
         bool onDisposeRan = false;
         PatchHandle handle = new PatchHandle([new ThrowingDetour(), survivor], () => onDisposeRan = true);
@@ -80,8 +80,7 @@ public sealed class PatchHandleTests {
         Assert.Throws<AggregateException>(() => handle.Dispose());
 
         Assert.Equal(1, survivor.DisposeCount);
-        Assert.True(onDisposeRan);
-        Assert.False(handle.IsApplied);
+        Assert.False(onDisposeRan);
     }
 
     private sealed class ThrowingDetour : IDetourHandle {
