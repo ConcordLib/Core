@@ -156,7 +156,7 @@ public sealed class InjectAttribute : Attribute {
     ///     Gets or sets the ordering priority for this injection when multiple injections target the same method.
     ///     Higher priority injections execute later (more outer) in tail chains. Defaults to 0.
     /// </summary>
-    public int Priority { get; init; }
+    public int Priority { get; set; }
 
     /// <summary>
     ///     Gets a value indicating whether this declaration was created through one of the constant-targeting

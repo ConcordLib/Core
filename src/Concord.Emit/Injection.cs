@@ -13,15 +13,15 @@ public sealed record Injection(MethodBase InjectionMethod, InjectAt At, string O
     /// <summary>
     ///     Gets whether applying this injection writes the composed wrapper IL to the desktop debug log.
     /// </summary>
-    public bool Debug { get; init; }
+    public bool Debug { get; set; }
 
     /// <summary>
     ///     The patch owners that should run after this injection.
     /// </summary>
-    public IReadOnlyList<string> BeforeOwners { get; init; } = [];
+    public IReadOnlyList<string> BeforeOwners { get; set; } = [];
 
     /// <summary>
     ///     The patch owners that should run before this injection.
     /// </summary>
-    public IReadOnlyList<string> AfterOwners { get; init; } = [];
+    public IReadOnlyList<string> AfterOwners { get; set; } = [];
 }
