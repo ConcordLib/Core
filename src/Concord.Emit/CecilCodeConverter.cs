@@ -33,7 +33,7 @@ internal static class CecilCodeConverter {
             byInstruction[instruction] = converted;
         }
 
-        AttachExceptionBlocks(body, byInstruction);
+        AttachExceptionBlocks(body, byInstruction, context);
 
         return instructions;
     }
@@ -61,7 +61,7 @@ internal static class CecilCodeConverter {
             FixupOperand(emitted[i], instructions[i], instructionByLabel);
         }
 
-        ApplyBlocks(definition, emitted, instructions);
+        ApplyBlocks(definition, emitted, instructions, context);
 
         body.Instructions.Clear();
         ILProcessor il = body.GetILProcessor();
@@ -206,7 +206,7 @@ internal static class CecilCodeConverter {
         return methodReference.ResolveReflection() ?? throw new ConcordEmitException("CONC118", $"Could not resolve CLR method for '{methodReference.FullName}'.");
     }
 
-    private static void AttachExceptionBlocks(MethodBody body, Dictionary<Instruction, CodeInstruction> byInstruction) {
+    private static void AttachExceptionBlocks(MethodBody body, Dictionary<Instruction, CodeInstruction> byInstruction, TranspilerContext context) {
         if (body.ExceptionHandlers.Count == 0) {
             return;
         }
@@ -218,12 +218,12 @@ internal static class CecilCodeConverter {
             indexOf[instruction] = index++;
         }
 
-        List<ExceptionEnvelope> envelopes = BuildEnvelopes(body.ExceptionHandlers, indexOf, lastInstruction);
+        List<ExceptionEnvelope> envelopes = BuildEnvelopes(body.ExceptionHandlers, indexOf, lastInstruction, body.Instructions.Count);
         List<ExceptionEnvelope> roots = LinkEnvelopes(envelopes);
         roots.Sort((a, b) => a.TryStartIndex.CompareTo(b.TryStartIndex));
 
         foreach (ExceptionEnvelope root in roots) {
-            EmitEnvelope(root, byInstruction, indexOf, lastInstruction);
+            EmitEnvelope(root, byInstruction, indexOf, context);
         }
     }
 
@@ -232,7 +232,14 @@ internal static class CecilCodeConverter {
     // envelopes (the finally's protected range encloses the try body AND the catch handler), not one
     // flat group. Grouping must key on the exact (TryStart, TryEnd) pair - true multi-catch siblings
     // share both; a catch nested inside an enclosing finally does not.
-    private static List<ExceptionEnvelope> BuildEnvelopes(IEnumerable<ExceptionHandler> handlers, Dictionary<Instruction, int> indexOf, Instruction lastInstruction) {
+    //
+    // HandlerEnd is legally null when a handler runs to the literal end of the method body (no
+    // trailing instruction exists to mark where it stops). That envelope's real extent is "one past
+    // the last instruction" for containment purposes - using the last real instruction's index here
+    // would make it indistinguishable from (and possibly subordinate to) a sibling envelope that
+    // genuinely ends at that same last instruction, so the synthetic index must be strictly greater
+    // than every real index (instructionCount, never a valid index into body.Instructions).
+    private static List<ExceptionEnvelope> BuildEnvelopes(IEnumerable<ExceptionHandler> handlers, Dictionary<Instruction, int> indexOf, Instruction lastInstruction, int instructionCount) {
         Dictionary<(Instruction TryStart, Instruction TryEnd), List<ExceptionHandler>> byRange = new Dictionary<(Instruction, Instruction), List<ExceptionHandler>>();
         List<(Instruction TryStart, Instruction TryEnd)> order = new List<(Instruction, Instruction)>();
 
@@ -254,16 +261,19 @@ internal static class CecilCodeConverter {
 
             Instruction endInstruction = key.TryStart;
             int endIndex = -1;
+            bool endsAtBodyEnd = false;
             foreach (ExceptionHandler handler in group) {
-                Instruction handlerEnd = handler.HandlerEnd ?? lastInstruction;
-                int handlerEndIndex = indexOf[handlerEnd];
+                bool handlerEndsAtBodyEnd = handler.HandlerEnd is null;
+                Instruction handlerEndInstruction = handlerEndsAtBodyEnd ? lastInstruction : handler.HandlerEnd!;
+                int handlerEndIndex = handlerEndsAtBodyEnd ? instructionCount : indexOf[handlerEndInstruction];
                 if (handlerEndIndex > endIndex) {
                     endIndex = handlerEndIndex;
-                    endInstruction = handlerEnd;
+                    endInstruction = handlerEndInstruction;
+                    endsAtBodyEnd = handlerEndsAtBodyEnd;
                 }
             }
 
-            envelopes.Add(new ExceptionEnvelope(group, key.TryStart, indexOf[key.TryStart], endInstruction, endIndex));
+            envelopes.Add(new ExceptionEnvelope(group, key.TryStart, indexOf[key.TryStart], endInstruction, endIndex, endsAtBodyEnd));
         }
 
         return envelopes;
@@ -319,22 +329,22 @@ internal static class CecilCodeConverter {
     // NEXT boundary is emitted, even when that next boundary lands on the exact same instruction
     // (a finally's handler always encloses its guarded catch, and the catch's close commonly lands
     // on the same instruction the finally's handler begins).
-    private static void EmitEnvelope(ExceptionEnvelope envelope, Dictionary<Instruction, CodeInstruction> byInstruction, Dictionary<Instruction, int> indexOf, Instruction lastInstruction) {
-        List<(int Index, Instruction Position, ExceptionBlock Block)> ownPoints = BuildOwnPoints(envelope, indexOf, lastInstruction);
+    private static void EmitEnvelope(ExceptionEnvelope envelope, Dictionary<Instruction, CodeInstruction> byInstruction, Dictionary<Instruction, int> indexOf, TranspilerContext context) {
+        List<(int Index, Instruction Position, ExceptionBlock Block)> ownPoints = BuildOwnPoints(envelope, indexOf, context);
         int childCursor = 0;
 
         for (int i = 0; i < ownPoints.Count; i++) {
             (int pointIndex, Instruction position, ExceptionBlock block) = ownPoints[i];
 
             while (childCursor < envelope.Children.Count && envelope.Children[childCursor].TryStartIndex < pointIndex) {
-                EmitEnvelope(envelope.Children[childCursor], byInstruction, indexOf, lastInstruction);
+                EmitEnvelope(envelope.Children[childCursor], byInstruction, indexOf, context);
                 childCursor++;
             }
 
             byInstruction[position].blocks.Add(block);
 
             while (childCursor < envelope.Children.Count && envelope.Children[childCursor].TryStartIndex == pointIndex) {
-                EmitEnvelope(envelope.Children[childCursor], byInstruction, indexOf, lastInstruction);
+                EmitEnvelope(envelope.Children[childCursor], byInstruction, indexOf, context);
                 childCursor++;
             }
         }
@@ -344,7 +354,7 @@ internal static class CecilCodeConverter {
         }
     }
 
-    private static List<(int Index, Instruction Position, ExceptionBlock Block)> BuildOwnPoints(ExceptionEnvelope envelope, Dictionary<Instruction, int> indexOf, Instruction lastInstruction) {
+    private static List<(int Index, Instruction Position, ExceptionBlock Block)> BuildOwnPoints(ExceptionEnvelope envelope, Dictionary<Instruction, int> indexOf, TranspilerContext context) {
         List<(int Index, Instruction Position, ExceptionBlock Block)> points = new List<(int, Instruction, ExceptionBlock)> {
             (envelope.TryStartIndex, envelope.TryStart, new ExceptionBlock(ExceptionBlockType.BeginExceptionBlock)),
         };
@@ -363,7 +373,12 @@ internal static class CecilCodeConverter {
             }
         }
 
-        points.Add((envelope.EndIndex, envelope.EndInstruction, new ExceptionBlock(ExceptionBlockType.EndExceptionBlock)));
+        ExceptionBlock endBlock = new ExceptionBlock(ExceptionBlockType.EndExceptionBlock);
+        if (envelope.EndsAtBodyEnd) {
+            context.EndOfBodyBlocks.Add(endBlock);
+        }
+
+        points.Add((envelope.EndIndex, envelope.EndInstruction, endBlock));
         return points;
     }
 
@@ -443,13 +458,13 @@ internal static class CecilCodeConverter {
         throw new ConcordEmitException("CONC118", $"Label '{label}' referenced by opcode '{source.opcode.Name}' is not attached to any instruction.");
     }
 
-    private static void ApplyBlocks(MethodDefinition definition, List<Instruction> emitted, IReadOnlyList<CodeInstruction> instructions) {
+    private static void ApplyBlocks(MethodDefinition definition, List<Instruction> emitted, IReadOnlyList<CodeInstruction> instructions, TranspilerContext context) {
         List<ExceptionFrame> open = new List<ExceptionFrame>();
         definition.Body.ExceptionHandlers.Clear();
 
         for (int i = 0; i < instructions.Count; i++) {
             foreach (ExceptionBlock block in instructions[i].blocks) {
-                ApplyBlock(definition, emitted[i], block, open, i);
+                ApplyBlock(definition, emitted[i], block, open, i, context);
             }
         }
 
@@ -458,7 +473,7 @@ internal static class CecilCodeConverter {
         }
     }
 
-    private static void ApplyBlock(MethodDefinition definition, Instruction position, ExceptionBlock block, List<ExceptionFrame> open, int index) {
+    private static void ApplyBlock(MethodDefinition definition, Instruction position, ExceptionBlock block, List<ExceptionFrame> open, int index, TranspilerContext context) {
         if (block.blockType == ExceptionBlockType.BeginExceptionBlock) {
             open.Add(new ExceptionFrame(position));
             return;
@@ -475,7 +490,14 @@ internal static class CecilCodeConverter {
                 throw new ConcordEmitException("CONC118", $"Exception block at instruction {index} closes a try region that opened no handlers.");
             }
 
-            CloseCurrentHandler(definition, frame, position, index);
+            // HandlerEnd is exclusive in Cecil - there is no instruction one past the end of the
+            // body, so a handler that legitimately runs to end-of-body was recorded in
+            // context.EndOfBodyBlocks (by the same ExceptionBlock object reference) when this stream
+            // was produced by ToInstructions. Restore null rather than the carrier instruction the
+            // marker happened to be attached to, or the handler is silently truncated by one
+            // instruction.
+            Instruction? handlerEnd = context.EndOfBodyBlocks.Contains(block) ? null : position;
+            CloseCurrentHandler(definition, frame, handlerEnd, index);
             open.RemoveAt(open.Count - 1);
             return;
         }
@@ -523,7 +545,7 @@ internal static class CecilCodeConverter {
         frame.CurrentAwaitsHandlerStart = false;
     }
 
-    private static void CloseCurrentHandler(MethodDefinition definition, ExceptionFrame frame, Instruction endPosition, int index) {
+    private static void CloseCurrentHandler(MethodDefinition definition, ExceptionFrame frame, Instruction? endPosition, int index) {
         if (frame.Current is null) {
             return;
         }
@@ -552,12 +574,13 @@ internal static class CecilCodeConverter {
     }
 
     private sealed class ExceptionEnvelope {
-        internal ExceptionEnvelope(List<ExceptionHandler> handlers, Instruction tryStart, int tryStartIndex, Instruction endInstruction, int endIndex) {
+        internal ExceptionEnvelope(List<ExceptionHandler> handlers, Instruction tryStart, int tryStartIndex, Instruction endInstruction, int endIndex, bool endsAtBodyEnd) {
             Handlers = handlers;
             TryStart = tryStart;
             TryStartIndex = tryStartIndex;
             EndInstruction = endInstruction;
             EndIndex = endIndex;
+            EndsAtBodyEnd = endsAtBodyEnd;
         }
 
         internal List<ExceptionHandler> Handlers { get; }
@@ -569,6 +592,8 @@ internal static class CecilCodeConverter {
         internal Instruction EndInstruction { get; }
 
         internal int EndIndex { get; }
+
+        internal bool EndsAtBodyEnd { get; }
 
         internal List<ExceptionEnvelope> Children { get; } = new List<ExceptionEnvelope>();
     }

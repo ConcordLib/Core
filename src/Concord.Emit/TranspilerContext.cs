@@ -20,6 +20,12 @@ internal sealed class TranspilerContext : ITranspilerContext {
 
     internal Dictionary<Instruction, Label> LabelsByInstruction { get; } = new Dictionary<Instruction, Label>();
 
+    // Cecil's HandlerEnd is null when a handler runs to the literal end of the method body - there is
+    // no instruction to attach a closing ExceptionBlock to, so the marker is still attached to a real
+    // instruction (the body's last one) but tracked here by reference. WriteBack consults this set to
+    // restore null instead of truncating the handler by one instruction.
+    internal HashSet<ExceptionBlock> EndOfBodyBlocks { get; } = new HashSet<ExceptionBlock>();
+
     public Label DefineLabel() {
         return LabelFactory.Create(NextLabelId++);
     }

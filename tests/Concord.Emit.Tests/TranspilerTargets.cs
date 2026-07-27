@@ -139,6 +139,24 @@ public static class TranspilerTargets {
         return total;
     }
 
+    // Every path throws, so Roslyn emits no trailing `ret` and the outermost handler's HandlerEnd
+    // is null (legally - the handler runs to the literal end of the method body).
+    public static int AlwaysThrows(int mode) {
+        try {
+            throw new InvalidOperationException();
+        } catch (InvalidOperationException) {
+            throw new ArgumentException();
+        }
+    }
+
+    public static int AlwaysThrowsFinally(int mode) {
+        try {
+            throw new InvalidOperationException();
+        } finally {
+            Console.Write(mode);
+        }
+    }
+
     public static unsafe int Fault(int mode) {
         int[] local = new int[1];
         fixed (int* p = &local[0]) {

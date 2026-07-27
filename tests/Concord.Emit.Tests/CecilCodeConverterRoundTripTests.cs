@@ -112,6 +112,45 @@ public sealed class CecilCodeConverterRoundTripTests {
         IlAssert.BodiesMatch(expected.Definition, actual.Definition);
     }
 
+    [Theory]
+    [InlineData(nameof(TranspilerTargets.AlwaysThrows))]
+    [InlineData(nameof(TranspilerTargets.AlwaysThrowsFinally))]
+    public void RoundTrip_HandlerRunsToEndOfBody_PreservesNullHandlerEnd(string name) {
+        MethodBase target = typeof(TranspilerTargets).GetMethod(name)!;
+        using DynamicMethodDefinition expected = new DynamicMethodDefinition(target);
+        using DynamicMethodDefinition actual = new DynamicMethodDefinition(target);
+
+        Assert.Null(expected.Definition.Body.ExceptionHandlers[expected.Definition.Body.ExceptionHandlers.Count - 1].HandlerEnd);
+
+        TranspilerContext context = new TranspilerContext(target);
+        List<CodeInstruction> instructions = CecilCodeConverter.ToInstructions(actual.Definition, context);
+        CecilCodeConverter.WriteBack(actual.Definition, instructions, context);
+
+        // MonoMod's own DynamicMethodDefinition.Generate() throws InvalidProgramException on a null
+        // HandlerEnd even for the unmodified body, so this is checked structurally only - Generate()/
+        // Invoke() cannot exercise this shape regardless of what the converter does.
+        IlAssert.BodiesMatch(expected.Definition, actual.Definition);
+        Assert.Null(actual.Definition.Body.ExceptionHandlers[actual.Definition.Body.ExceptionHandlers.Count - 1].HandlerEnd);
+    }
+
+    [Fact]
+    public void RoundTrip_HandBuiltNullHandlerEnd_PreservesNull() {
+        MethodBase target = typeof(TranspilerTargets).GetMethod(nameof(TranspilerTargets.Priced))!;
+        using DynamicMethodDefinition expected = new DynamicMethodDefinition(target);
+        using DynamicMethodDefinition actual = new DynamicMethodDefinition(target);
+
+        BuildNullEndedFinally(expected.Definition);
+        BuildNullEndedFinally(actual.Definition);
+
+        TranspilerContext context = new TranspilerContext(target);
+        List<CodeInstruction> instructions = CecilCodeConverter.ToInstructions(actual.Definition, context);
+        CecilCodeConverter.WriteBack(actual.Definition, instructions, context);
+
+        IlAssert.BodiesMatch(expected.Definition, actual.Definition);
+        Assert.Single(actual.Definition.Body.ExceptionHandlers);
+        Assert.Null(actual.Definition.Body.ExceptionHandlers[0].HandlerEnd);
+    }
+
     private static void AssertExecutionMatches(MethodBase target, DynamicMethodDefinition expected, DynamicMethodDefinition actual) {
         MethodInfo expectedMethod = expected.Generate();
         MethodInfo actualMethod = actual.Generate();
@@ -173,6 +212,29 @@ public sealed class CecilCodeConverterRoundTripTests {
             TryEnd = ldcFault,
             HandlerStart = ldcFault,
             HandlerEnd = ldloc,
+        };
+        body.ExceptionHandlers.Add(handler);
+    }
+
+    private static void BuildNullEndedFinally(MethodDefinition definition) {
+        MethodBody body = definition.Body;
+        body.Instructions.Clear();
+        body.ExceptionHandlers.Clear();
+
+        ILProcessor il = body.GetILProcessor();
+        Instruction tryStart = il.Create(OpCodes.Nop);
+        Instruction handlerStart = il.Create(OpCodes.Nop);
+        Instruction endfinally = il.Create(OpCodes.Endfinally);
+
+        il.Append(tryStart);
+        il.Append(handlerStart);
+        il.Append(endfinally);
+
+        ExceptionHandler handler = new ExceptionHandler(ExceptionHandlerType.Finally) {
+            TryStart = tryStart,
+            TryEnd = handlerStart,
+            HandlerStart = handlerStart,
+            HandlerEnd = null,
         };
         body.ExceptionHandlers.Add(handler);
     }
