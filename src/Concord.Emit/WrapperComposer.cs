@@ -63,7 +63,11 @@ public static class WrapperComposer {
         using DynamicMethodDefinition wrapper = new DynamicMethodDefinition(WrapperName(resolved), returnType, parameterTypes);
         BodyCopier.CopySpine(source.Definition, wrapper.Definition);
 
-        Assemble(wrapper.Definition, resolved, ordered, returnType);
+        PartitionTranspilers(ordered, out List<Injection> preTranspilers, out List<Injection> finalTranspilers, out List<Injection> declarative);
+
+        RunTranspilers(wrapper.Definition, resolved, preTranspilers);
+
+        Assemble(wrapper.Definition, resolved, declarative, returnType);
 
         return IlDump.Format(wrapper.Definition);
     }

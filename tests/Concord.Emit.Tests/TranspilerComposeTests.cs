@@ -33,6 +33,11 @@ public static class PricePlusOne {
     }
 }
 
+public static class PriceHeadInjection {
+    public static void NoOp() {
+    }
+}
+
 public sealed class TranspilerComposeTests {
     private static Injection Transpiler(string name, int priority = 0, bool final = false) {
         MethodBase method = typeof(PriceTranspilers).GetMethod(name)!;
@@ -82,5 +87,16 @@ public sealed class TranspilerComposeTests {
         Func<int> run = result.Wrapper.CreateDelegate<Func<int>>();
 
         Assert.Equal(6, run());
+    }
+
+    [Fact]
+    public void ComposeDump_WithTranspilerAndDeclarativeInjection_ReflectsRewrittenBody() {
+        MethodBase target = typeof(TranspilerTargets).GetMethod(nameof(TranspilerTargets.Priced))!;
+        MethodBase headMethod = typeof(PriceHeadInjection).GetMethod(nameof(PriceHeadInjection.NoOp))!;
+        Injection head = new Injection(headMethod, new InjectAt.Head(), "test-head", 0);
+
+        string dump = WrapperComposer.ComposeDump(target, [Transpiler(nameof(PriceTranspilers.FiveToTen)), head]);
+
+        Assert.Contains("10 [Int32]", dump);
     }
 }
