@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 using Mono.Cecil.Cil;
 
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Concord.Emit.Tests")]
+
 namespace Concord.Emit;
 
 /// <summary>
