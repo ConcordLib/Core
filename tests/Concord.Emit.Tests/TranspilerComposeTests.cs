@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Reflection.Emit;
 using Concord;
+using Concord.Emit.Tests.ForeignTargets;
 using Xunit;
 
 namespace Concord.Emit.Tests;
@@ -35,6 +36,42 @@ public static class PricePlusOne {
 
 public static class PriceHeadInjection {
     public static void NoOp() {
+    }
+}
+
+public static class ForeignCallTranspilers {
+    public static IEnumerable<CodeInstruction> CallForeignMethod(IEnumerable<CodeInstruction> instructions) {
+        List<CodeInstruction> output = new List<CodeInstruction>(instructions);
+        MethodInfo ping = typeof(ForeignCallTarget).GetMethod(nameof(ForeignCallTarget.Ping))!;
+        output.Insert(0, new CodeInstruction(OpCodes.Call, ping));
+        return output;
+    }
+
+    public static IEnumerable<CodeInstruction> WriteAndReadForeignField(IEnumerable<CodeInstruction> instructions) {
+        List<CodeInstruction> output = new List<CodeInstruction>(instructions);
+        FieldInfo counter = typeof(ForeignFieldTarget).GetField(nameof(ForeignFieldTarget.Counter))!;
+        CodeInstruction[] preamble = [
+            new CodeInstruction(OpCodes.Ldc_I4, 42),
+            new CodeInstruction(OpCodes.Stsfld, counter),
+            new CodeInstruction(OpCodes.Ldsfld, counter),
+            new CodeInstruction(OpCodes.Pop),
+        ];
+        output.InsertRange(0, preamble);
+        return output;
+    }
+
+    public static IEnumerable<CodeInstruction> ConstructForeignType(IEnumerable<CodeInstruction> instructions) {
+        List<CodeInstruction> output = new List<CodeInstruction>(instructions);
+        ConstructorInfo ctor = typeof(ForeignTypeTarget).GetConstructor(Type.EmptyTypes)!;
+        FieldInfo marker = typeof(ForeignTypeTarget).GetField(nameof(ForeignTypeTarget.Marker))!;
+        CodeInstruction[] preamble = [
+            new CodeInstruction(OpCodes.Newobj, ctor),
+            new CodeInstruction(OpCodes.Castclass, typeof(ForeignTypeTarget)),
+            new CodeInstruction(OpCodes.Ldfld, marker),
+            new CodeInstruction(OpCodes.Pop),
+        ];
+        output.InsertRange(0, preamble);
+        return output;
     }
 }
 
@@ -98,5 +135,44 @@ public sealed class TranspilerComposeTests {
         string dump = WrapperComposer.ComposeDump(target, [Transpiler(nameof(PriceTranspilers.FiveToTen)), head]);
 
         Assert.Contains("10 [Int32]", dump);
+    }
+
+    [Fact]
+    public void Transpiler_InsertingForeignMethodCall_ResolvesCrossModuleOperand() {
+        MethodBase target = typeof(TranspilerTargets).GetMethod(nameof(TranspilerTargets.Priced))!;
+        MethodBase method = typeof(ForeignCallTranspilers).GetMethod(nameof(ForeignCallTranspilers.CallForeignMethod))!;
+
+        ForeignCallTarget.Runs = 0;
+        ComposeResult result = WrapperComposer.Compose(target, [new Injection(method, new InjectAt.Transpiler(false), "test", 0)]);
+        Func<int> run = result.Wrapper.CreateDelegate<Func<int>>();
+
+        Assert.Equal(5, run());
+        Assert.Equal(1, ForeignCallTarget.Runs);
+    }
+
+    [Fact]
+    public void Transpiler_InsertingForeignFieldAccess_ResolvesCrossModuleOperand() {
+        MethodBase target = typeof(TranspilerTargets).GetMethod(nameof(TranspilerTargets.Priced))!;
+        MethodBase method = typeof(ForeignCallTranspilers).GetMethod(nameof(ForeignCallTranspilers.WriteAndReadForeignField))!;
+
+        ForeignFieldTarget.Counter = 0;
+        ComposeResult result = WrapperComposer.Compose(target, [new Injection(method, new InjectAt.Transpiler(false), "test", 0)]);
+        Func<int> run = result.Wrapper.CreateDelegate<Func<int>>();
+
+        Assert.Equal(5, run());
+        Assert.Equal(42, ForeignFieldTarget.Counter);
+    }
+
+    [Fact]
+    public void Transpiler_InsertingForeignTypeConstruction_ResolvesCrossModuleOperand() {
+        MethodBase target = typeof(TranspilerTargets).GetMethod(nameof(TranspilerTargets.Priced))!;
+        MethodBase method = typeof(ForeignCallTranspilers).GetMethod(nameof(ForeignCallTranspilers.ConstructForeignType))!;
+
+        ForeignTypeTarget.Constructed = 0;
+        ComposeResult result = WrapperComposer.Compose(target, [new Injection(method, new InjectAt.Transpiler(false), "test", 0)]);
+        Func<int> run = result.Wrapper.CreateDelegate<Func<int>>();
+
+        Assert.Equal(5, run());
+        Assert.Equal(1, ForeignTypeTarget.Constructed);
     }
 }
