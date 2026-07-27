@@ -66,6 +66,11 @@ jobs:
       - name: Pack reference assembly
         run: dotnet pack src/Concord.Ref/Concord.Ref.csproj -c Release -o artifacts
 
+      # Concord.Harmony is a real (lib/) package, not merged into Concord.dll: it needs a
+      # 0Harmony reference and Concord.Ref keeps its public metadata free of third-party types.
+      - name: Pack Harmony host
+        run: dotnet pack src/Concord.Harmony/Concord.Harmony.csproj -c Release -o artifacts
+
       - name: Upload runtime assembly
         uses: actions/upload-artifact@v4
         with:
@@ -244,6 +249,7 @@ jobs:
           dotnet pack src/Concord.Ref/Concord.Ref.csproj -c Release -o artifacts
           dotnet pack src/Concord.Analyzers/Concord.Analyzers.csproj -c Release -o artifacts
           dotnet pack src/Concord.Generators/Concord.Generators.csproj -c Release -o artifacts
+          dotnet pack src/Concord.Harmony/Concord.Harmony.csproj -c Release -o artifacts
           dotnet pack src/Concord/Concord.csproj -c Release -o artifacts
 
       - name: NuGet login

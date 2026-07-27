@@ -1,0 +1,58 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Concord.Harmony — coexistence glue for games that ship Harmony.
+       Implements IForeignPatchHost by handing Concord's injections to Harmony as one
+       lowest-priority transpiler, so Harmony keeps the entry point and Concord's injections
+       ride inside the method body it builds.
+
+       This is a real (not ref-only) assembly and is NOT merged into Concord.dll: it needs a
+       0Harmony reference, and Concord.Ref deliberately keeps its public metadata free of
+       third-party types. Hosts side-load it only after finding a supported Harmony. -->
+
+  <PropertyGroup>
+    <TargetFramework></TargetFramework>
+    <TargetFrameworks>net10.0;netstandard2.0;net472</TargetFrameworks>
+    <RootNamespace>Concord.Harmony</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Concord.Harmony</PackageId>
+    <Description>Harmony coexistence host for Concord. Lets Concord patches share a method with Harmony patches instead of fighting over the entry point.</Description>
+    <!-- Both dependencies are supplied by the host at runtime: Concord.dll by the target
+         runtime, 0Harmony by the game. Neither belongs in this package's dependency group. -->
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <!-- Suppressing dependencies leaves lib/ folders with no matching dependency group, which
+         the SDK flags as NU5128. That is the intended shape here, so keep it a warning rather
+         than suppressing it outright. Concord.Ref does the same. -->
+    <WarningsNotAsErrors>NU5128</WarningsNotAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../Shared/Polyfills.cs" Link="Polyfills.cs"/>
+  </ItemGroup>
+
+  <!-- Harmony is supplied by the host game at runtime, exactly like Concord itself.
+       ExcludeAssets=runtime keeps 0Harmony.dll out of this package's runtime graph. -->
+  <ItemGroup>
+    <PackageReference Include="Lib.Harmony" Version="2.4.2" ExcludeAssets="runtime"/>
+  </ItemGroup>
+
+  <!-- Compile against the metadata-only Concord ref assembly, exactly like a mod does, so this
+       binds to whatever Concord.dll the target runtime supplies. Referencing Concord.Detour and
+       Concord.Emit directly would instead bake in package dependencies that are never published
+       standalone (they are merged into Concord.dll). -->
+  <ItemGroup>
+    <ProjectReference Include="../Concord.Ref/Concord.Ref.csproj" PrivateAssets="all"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Concord.Harmony.Tests"/>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net472'">
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all"/>
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework></TargetFramework>
+    <TargetFrameworks>net10.0;net472</TargetFrameworks>
+    <IsPackable>false</IsPackable>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.7.0"/>
+    <PackageReference Include="xunit" Version="2.9.3"/>
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5"/>
+    <!-- Real Harmony, not a stub: these are binary-level coexistence tests. -->
+    <PackageReference Include="Lib.Harmony" Version="2.4.2"/>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net472'">
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all"/>
+    <PackageReference Include="xunit.runner.console" Version="2.9.3" PrivateAssets="all"/>
+  </ItemGroup>
+
+  <!-- Concord.Harmony compiles against the metadata-only Concord ref assembly, so its tests must
+       run against the ILRepack-merged runtime that carries the same 'Concord' assembly identity.
+       Referencing Concord.Detour/Concord.Emit directly instead would give the types a different
+       assembly identity and nothing would bind. -->
+  <ItemGroup>
+    <ProjectReference Include="../../src/Concord.Harmony/Concord.Harmony.csproj"/>
+    <!-- Order-only: build the merged runtime first, but do not let MSBuild pick its reference,
+         which resolves to the metadata-only Concord.Ref output instead of the ILRepack result. -->
+    <ProjectReference Include="../../src/Concord/Concord.csproj" ReferenceOutputAssembly="false"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Concord">
+      <HintPath>../../Assemblies/$(TargetFramework)/Concord.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+</Project>

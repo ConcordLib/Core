@@ -7,12 +7,14 @@
     <Project Path="src/Concord.Emit/Concord.Emit.csproj"/>
     <Project Path="src/Concord.AttachedData/Concord.AttachedData.csproj"/>
     <Project Path="src/Concord.Orchestration/Concord.Orchestration.csproj"/>
+    <Project Path="src/Concord.Harmony/Concord.Harmony.csproj"/>
     <Project Path="src/Concord.Ref/Concord.Ref.csproj"/>
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Concord.Analyzers.Tests/Concord.Analyzers.Tests.csproj"/>
     <Project Path="tests/Concord.Generators.Tests/Concord.Generators.Tests.csproj"/>
     <Project Path="tests/Concord.Detour.Tests/Concord.Detour.Tests.csproj"/>
+    <Project Path="tests/Concord.Harmony.Tests/Concord.Harmony.Tests.csproj"/>
     <Project Path="tests/Concord.Emit.Tests/Concord.Emit.Tests.csproj"/>
     <Project Path="tests/Concord.Emit.Tests.ForeignTargets/Concord.Emit.Tests.ForeignTargets.csproj"/>
     <Project Path="tests/Concord.AttachedData.Tests/Concord.AttachedData.Tests.csproj"/>
