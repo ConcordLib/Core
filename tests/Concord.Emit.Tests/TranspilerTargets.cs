@@ -62,6 +62,83 @@ public static class TranspilerTargets {
         return value;
     }
 
+    public static int TryCatchFinally(int mode) {
+        int total = 0;
+        try {
+            total += mode;
+            if (mode == 1) {
+                throw new InvalidOperationException();
+            }
+        } catch (InvalidOperationException) {
+            total = 1;
+        } finally {
+            total += 100;
+        }
+
+        return total;
+    }
+
+    public static int TryCatchCatchFinally(int mode) {
+        int total = 0;
+        try {
+            total += mode;
+            if (mode == 1) {
+                throw new InvalidOperationException();
+            }
+
+            if (mode == 2) {
+                throw new ArgumentException();
+            }
+        } catch (InvalidOperationException) {
+            total = 1;
+        } catch (ArgumentException) {
+            total = 2;
+        } finally {
+            total += 100;
+        }
+
+        return total;
+    }
+
+    public static int TryNestedInCatch(int mode) {
+        int total = 0;
+        try {
+            total += mode;
+            if (mode != 0) {
+                throw new InvalidOperationException();
+            }
+        } catch (InvalidOperationException) {
+            try {
+                total += 1;
+                if (mode == 2) {
+                    throw new ArgumentException();
+                }
+            } catch (ArgumentException) {
+                total += 2;
+            }
+        }
+
+        return total;
+    }
+
+    public static int TryNestedInFinally(int mode) {
+        int total = 0;
+        try {
+            total += mode;
+        } finally {
+            try {
+                total += 1;
+                if (mode == 2) {
+                    throw new ArgumentException();
+                }
+            } catch (ArgumentException) {
+                total += 2;
+            }
+        }
+
+        return total;
+    }
+
     public static unsafe int Fault(int mode) {
         int[] local = new int[1];
         fixed (int* p = &local[0]) {

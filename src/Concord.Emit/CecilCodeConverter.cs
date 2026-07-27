@@ -207,55 +207,164 @@ internal static class CecilCodeConverter {
     }
 
     private static void AttachExceptionBlocks(MethodBody body, Dictionary<Instruction, CodeInstruction> byInstruction) {
-        foreach (List<ExceptionHandler> group in GroupHandlersByTry(body.ExceptionHandlers)) {
-            ExceptionHandler first = group[0];
-            byInstruction[first.TryStart].blocks.Add(new ExceptionBlock(ExceptionBlockType.BeginExceptionBlock));
+        if (body.ExceptionHandlers.Count == 0) {
+            return;
+        }
 
-            foreach (ExceptionHandler handler in group) {
-                AttachHandlerOpen(byInstruction, handler);
-            }
+        Instruction lastInstruction = body.Instructions[body.Instructions.Count - 1];
+        Dictionary<Instruction, int> indexOf = new Dictionary<Instruction, int>(body.Instructions.Count);
+        int index = 0;
+        foreach (Instruction instruction in body.Instructions) {
+            indexOf[instruction] = index++;
+        }
 
-            ExceptionHandler last = group[group.Count - 1];
-            byInstruction[last.HandlerEnd].blocks.Add(new ExceptionBlock(ExceptionBlockType.EndExceptionBlock));
+        List<ExceptionEnvelope> envelopes = BuildEnvelopes(body.ExceptionHandlers, indexOf, lastInstruction);
+        List<ExceptionEnvelope> roots = LinkEnvelopes(envelopes);
+        roots.Sort((a, b) => a.TryStartIndex.CompareTo(b.TryStartIndex));
+
+        foreach (ExceptionEnvelope root in roots) {
+            EmitEnvelope(root, byInstruction, indexOf, lastInstruction);
         }
     }
 
-    private static void AttachHandlerOpen(Dictionary<Instruction, CodeInstruction> byInstruction, ExceptionHandler handler) {
-        if (handler.HandlerType == ExceptionHandlerType.Filter) {
-            byInstruction[handler.FilterStart].blocks.Add(new ExceptionBlock(ExceptionBlockType.BeginExceptFilterBlock));
-            byInstruction[handler.HandlerStart].blocks.Add(new ExceptionBlock(ExceptionBlockType.BeginCatchBlock));
-            return;
-        }
-
-        if (handler.HandlerType == ExceptionHandlerType.Fault) {
-            byInstruction[handler.HandlerStart].blocks.Add(new ExceptionBlock(ExceptionBlockType.BeginFaultBlock));
-            return;
-        }
-
-        if (handler.HandlerType == ExceptionHandlerType.Finally) {
-            byInstruction[handler.HandlerStart].blocks.Add(new ExceptionBlock(ExceptionBlockType.BeginFinallyBlock));
-            return;
-        }
-
-        Type? catchType = handler.CatchType is null ? null : ResolveType(handler.CatchType);
-        byInstruction[handler.HandlerStart].blocks.Add(new ExceptionBlock(ExceptionBlockType.BeginCatchBlock, catchType));
-    }
-
-    private static List<List<ExceptionHandler>> GroupHandlersByTry(IEnumerable<ExceptionHandler> handlers) {
-        List<List<ExceptionHandler>> groups = new List<List<ExceptionHandler>>();
-        Dictionary<Instruction, List<ExceptionHandler>> byTryStart = new Dictionary<Instruction, List<ExceptionHandler>>();
+    // Cecil lists exception handlers innermost-first, but two handlers can legitimately share the
+    // same TryStart while protecting different-sized regions - a try/catch/finally is TWO nested
+    // envelopes (the finally's protected range encloses the try body AND the catch handler), not one
+    // flat group. Grouping must key on the exact (TryStart, TryEnd) pair - true multi-catch siblings
+    // share both; a catch nested inside an enclosing finally does not.
+    private static List<ExceptionEnvelope> BuildEnvelopes(IEnumerable<ExceptionHandler> handlers, Dictionary<Instruction, int> indexOf, Instruction lastInstruction) {
+        Dictionary<(Instruction TryStart, Instruction TryEnd), List<ExceptionHandler>> byRange = new Dictionary<(Instruction, Instruction), List<ExceptionHandler>>();
+        List<(Instruction TryStart, Instruction TryEnd)> order = new List<(Instruction, Instruction)>();
 
         foreach (ExceptionHandler handler in handlers) {
-            if (!byTryStart.TryGetValue(handler.TryStart, out List<ExceptionHandler>? group)) {
+            (Instruction TryStart, Instruction TryEnd) key = (handler.TryStart, handler.TryEnd);
+            if (!byRange.TryGetValue(key, out List<ExceptionHandler>? group)) {
                 group = new List<ExceptionHandler>();
-                byTryStart[handler.TryStart] = group;
-                groups.Add(group);
+                byRange[key] = group;
+                order.Add(key);
             }
 
             group.Add(handler);
         }
 
-        return groups;
+        List<ExceptionEnvelope> envelopes = new List<ExceptionEnvelope>();
+        foreach ((Instruction TryStart, Instruction TryEnd) key in order) {
+            List<ExceptionHandler> group = byRange[key];
+            group.Sort((a, b) => HandlerOpenIndex(a, indexOf).CompareTo(HandlerOpenIndex(b, indexOf)));
+
+            Instruction endInstruction = key.TryStart;
+            int endIndex = -1;
+            foreach (ExceptionHandler handler in group) {
+                Instruction handlerEnd = handler.HandlerEnd ?? lastInstruction;
+                int handlerEndIndex = indexOf[handlerEnd];
+                if (handlerEndIndex > endIndex) {
+                    endIndex = handlerEndIndex;
+                    endInstruction = handlerEnd;
+                }
+            }
+
+            envelopes.Add(new ExceptionEnvelope(group, key.TryStart, indexOf[key.TryStart], endInstruction, endIndex));
+        }
+
+        return envelopes;
+    }
+
+    private static int HandlerOpenIndex(ExceptionHandler handler, Dictionary<Instruction, int> indexOf) {
+        Instruction openPosition = handler.HandlerType == ExceptionHandlerType.Filter ? handler.FilterStart : handler.HandlerStart;
+        return indexOf[openPosition];
+    }
+
+    private static List<ExceptionEnvelope> LinkEnvelopes(List<ExceptionEnvelope> envelopes) {
+        List<ExceptionEnvelope> roots = new List<ExceptionEnvelope>();
+
+        foreach (ExceptionEnvelope envelope in envelopes) {
+            ExceptionEnvelope? parent = null;
+            foreach (ExceptionEnvelope candidate in envelopes) {
+                if (ReferenceEquals(candidate, envelope)) {
+                    continue;
+                }
+
+                bool contains = candidate.TryStartIndex <= envelope.TryStartIndex && envelope.EndIndex <= candidate.EndIndex
+                    && (candidate.TryStartIndex != envelope.TryStartIndex || candidate.EndIndex != envelope.EndIndex);
+                if (!contains) {
+                    continue;
+                }
+
+                int candidateSpan = candidate.EndIndex - candidate.TryStartIndex;
+                int parentSpan = parent is null ? int.MaxValue : parent.EndIndex - parent.TryStartIndex;
+                if (parent is null || candidateSpan < parentSpan) {
+                    parent = candidate;
+                }
+            }
+
+            if (parent is null) {
+                roots.Add(envelope);
+            } else {
+                parent.Children.Add(envelope);
+            }
+        }
+
+        foreach (ExceptionEnvelope envelope in envelopes) {
+            envelope.Children.Sort((a, b) => a.TryStartIndex.CompareTo(b.TryStartIndex));
+        }
+
+        return roots;
+    }
+
+    // Interleaves this envelope's own boundary markers with its children's, in the order a
+    // transpiler author calling BeginExceptionBlock/BeginCatchBlock/.../EndExceptionBlock by hand
+    // would have to call them: a child whose TryStart ties with one of this envelope's own boundary
+    // positions opens strictly after that boundary is emitted (nothing can precede this envelope's
+    // own open), and closes entirely - including its own EndExceptionBlock - before this envelope's
+    // NEXT boundary is emitted, even when that next boundary lands on the exact same instruction
+    // (a finally's handler always encloses its guarded catch, and the catch's close commonly lands
+    // on the same instruction the finally's handler begins).
+    private static void EmitEnvelope(ExceptionEnvelope envelope, Dictionary<Instruction, CodeInstruction> byInstruction, Dictionary<Instruction, int> indexOf, Instruction lastInstruction) {
+        List<(int Index, Instruction Position, ExceptionBlock Block)> ownPoints = BuildOwnPoints(envelope, indexOf, lastInstruction);
+        int childCursor = 0;
+
+        for (int i = 0; i < ownPoints.Count; i++) {
+            (int pointIndex, Instruction position, ExceptionBlock block) = ownPoints[i];
+
+            while (childCursor < envelope.Children.Count && envelope.Children[childCursor].TryStartIndex < pointIndex) {
+                EmitEnvelope(envelope.Children[childCursor], byInstruction, indexOf, lastInstruction);
+                childCursor++;
+            }
+
+            byInstruction[position].blocks.Add(block);
+
+            while (childCursor < envelope.Children.Count && envelope.Children[childCursor].TryStartIndex == pointIndex) {
+                EmitEnvelope(envelope.Children[childCursor], byInstruction, indexOf, lastInstruction);
+                childCursor++;
+            }
+        }
+
+        if (childCursor < envelope.Children.Count) {
+            throw new ConcordEmitException("CONC118", "An exception region's child region was not contained within its parent's own boundaries.");
+        }
+    }
+
+    private static List<(int Index, Instruction Position, ExceptionBlock Block)> BuildOwnPoints(ExceptionEnvelope envelope, Dictionary<Instruction, int> indexOf, Instruction lastInstruction) {
+        List<(int Index, Instruction Position, ExceptionBlock Block)> points = new List<(int, Instruction, ExceptionBlock)> {
+            (envelope.TryStartIndex, envelope.TryStart, new ExceptionBlock(ExceptionBlockType.BeginExceptionBlock)),
+        };
+
+        foreach (ExceptionHandler handler in envelope.Handlers) {
+            if (handler.HandlerType == ExceptionHandlerType.Filter) {
+                points.Add((indexOf[handler.FilterStart], handler.FilterStart, new ExceptionBlock(ExceptionBlockType.BeginExceptFilterBlock)));
+                points.Add((indexOf[handler.HandlerStart], handler.HandlerStart, new ExceptionBlock(ExceptionBlockType.BeginCatchBlock)));
+            } else if (handler.HandlerType == ExceptionHandlerType.Fault) {
+                points.Add((indexOf[handler.HandlerStart], handler.HandlerStart, new ExceptionBlock(ExceptionBlockType.BeginFaultBlock)));
+            } else if (handler.HandlerType == ExceptionHandlerType.Finally) {
+                points.Add((indexOf[handler.HandlerStart], handler.HandlerStart, new ExceptionBlock(ExceptionBlockType.BeginFinallyBlock)));
+            } else {
+                Type? catchType = handler.CatchType is null ? null : ResolveType(handler.CatchType);
+                points.Add((indexOf[handler.HandlerStart], handler.HandlerStart, new ExceptionBlock(ExceptionBlockType.BeginCatchBlock, catchType)));
+            }
+        }
+
+        points.Add((envelope.EndIndex, envelope.EndInstruction, new ExceptionBlock(ExceptionBlockType.EndExceptionBlock)));
+        return points;
     }
 
     private static Dictionary<Label, Instruction> BuildLabelMap(IReadOnlyList<CodeInstruction> instructions, List<Instruction> emitted) {
@@ -298,6 +407,10 @@ internal static class CecilCodeConverter {
     }
 
     private static ParameterDefinition ResolveParameter(MethodDefinition definition, int rawSlot) {
+        if (rawSlot < 0 || rawSlot >= definition.Parameters.Count) {
+            throw new ConcordEmitException("CONC118", $"Argument slot {rawSlot} is out of range for a method with {definition.Parameters.Count} parameter(s).");
+        }
+
         return definition.Parameters[rawSlot];
     }
 
@@ -436,5 +549,27 @@ internal static class CecilCodeConverter {
         internal ExceptionHandler? Current { get; set; }
 
         internal bool CurrentAwaitsHandlerStart { get; set; }
+    }
+
+    private sealed class ExceptionEnvelope {
+        internal ExceptionEnvelope(List<ExceptionHandler> handlers, Instruction tryStart, int tryStartIndex, Instruction endInstruction, int endIndex) {
+            Handlers = handlers;
+            TryStart = tryStart;
+            TryStartIndex = tryStartIndex;
+            EndInstruction = endInstruction;
+            EndIndex = endIndex;
+        }
+
+        internal List<ExceptionHandler> Handlers { get; }
+
+        internal Instruction TryStart { get; }
+
+        internal int TryStartIndex { get; }
+
+        internal Instruction EndInstruction { get; }
+
+        internal int EndIndex { get; }
+
+        internal List<ExceptionEnvelope> Children { get; } = new List<ExceptionEnvelope>();
     }
 }
