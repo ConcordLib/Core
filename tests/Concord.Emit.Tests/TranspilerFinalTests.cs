@@ -7,15 +7,21 @@ namespace Concord.Emit.Tests;
 
 public static class FinalTranspilers {
     public static int Calls;
-    public static bool ObservedProtocolLocal;
+    public static bool ObservedHasReturnStore;
 
     public static IEnumerable<CodeInstruction> CountAndPassThrough(IEnumerable<CodeInstruction> instructions) {
         Calls++;
+        CodeInstruction? previous = null;
         foreach (CodeInstruction instruction in instructions) {
-            if (instruction.operand is LocalRef local && local.Type == typeof(bool)) {
-                ObservedProtocolLocal = true;
+            if (previous is not null
+                && previous.opcode == OpCodes.Ldc_I4_1
+                && instruction.opcode == OpCodes.Stloc
+                && instruction.operand is LocalRef local
+                && local.Type == typeof(bool)) {
+                ObservedHasReturnStore = true;
             }
 
+            previous = instruction;
             yield return instruction;
         }
     }
@@ -54,7 +60,7 @@ public sealed class TranspilerFinalTests {
         MethodBase post = typeof(FinalTranspilers).GetMethod(nameof(FinalTranspilers.CountAndPassThrough))!;
 
         FinalTranspilers.Calls = 0;
-        FinalTranspilers.ObservedProtocolLocal = false;
+        FinalTranspilers.ObservedHasReturnStore = false;
         ComposeResult result = WrapperComposer.Compose(target, [
             new Injection(bump, new InjectAt.Return(0), "test-return", 0),
             new Injection(post, new InjectAt.Transpiler(true), "test-post", 0),
@@ -63,9 +69,11 @@ public sealed class TranspilerFinalTests {
 
         Assert.Equal(1, FinalTranspilers.Calls);
         Assert.True(
-            FinalTranspilers.ObservedProtocolLocal,
-            "final transpiler should see the composed body's Cancel local (always bool), which the raw two-instruction " +
-            "'return 5;' target body never declares - proving it observed the assembled wrapper, not the original method.");
+            FinalTranspilers.ObservedHasReturnStore,
+            "final transpiler should see the composed body's 'HasReturn := true' store (Ldc_I4_1 then Stloc on a bool " +
+            "local), emitted only because the Return injection above sets ch.ReturnValue - proving it observed the " +
+            "assembled wrapper, not the raw two-instruction 'return 5;' target body. This assertion depends on the " +
+            "Return injection staying in this scenario; removing it removes the signal.");
         Assert.Equal(6, run());
     }
 
