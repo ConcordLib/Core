@@ -44,4 +44,25 @@ public sealed class AtTests {
         Assert.Equal(At.Return, attr.At);
         Assert.Equal(new InjectAt.Return(2), attr.ResolvedAt);
     }
+
+    [Fact]
+    public void InjectAttribute_Transpiler_ResolvedAt_ReturnsTranspiler() {
+        InjectAttribute attr = new InjectAttribute(At.Transpiler, "M");
+        Assert.Equal(At.Transpiler, attr.At);
+        Assert.Equal(new InjectAt.Transpiler(false), attr.ResolvedAt);
+    }
+
+    [Fact]
+    public void InjectAttribute_TranspilerFinal_ResolvedAt_ReturnsTranspilerFinal() {
+        InjectAttribute attr = new InjectAttribute(At.TranspilerFinal, "M");
+        Assert.Equal(At.TranspilerFinal, attr.At);
+        Assert.Equal(new InjectAt.Transpiler(true), attr.ResolvedAt);
+    }
+
+    [Fact]
+    public void InjectAttribute_UnmappedAt_Throws() {
+        InjectAttribute attr = new InjectAttribute((At)999, "M");
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() => attr.ResolvedAt);
+        Assert.Equal("CONC116", ex.Code);
+    }
 }

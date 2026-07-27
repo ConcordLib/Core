@@ -260,10 +260,13 @@ public static class Patcher {
 
     private static InjectAt ToInjectAt(At at) {
         return at switch {
+            At.Head => new InjectAt.Head(),
             At.Return => new InjectAt.Return(0),
             At.Tail => new InjectAt.Tail(),
             At.Around => new InjectAt.Around(),
-            _ => new InjectAt.Head(),
+            At.Transpiler => new InjectAt.Transpiler(false),
+            At.TranspilerFinal => new InjectAt.Transpiler(true),
+            _ => throw new ConcordEmitException("CONC116", $"Unsupported injection position '{at}'."),
         };
     }
 
