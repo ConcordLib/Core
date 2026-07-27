@@ -67,4 +67,54 @@ public sealed class CodeInstructionTests {
         Assert.True(new CodeInstruction(OpCodes.Ldarg_2).IsLdarg());
         Assert.False(new CodeInstruction(OpCodes.Ldloc_0).IsLdarg());
     }
+
+    [Fact]
+    public void Is_WithByteOperand_MatchesIntOperandValue() {
+        CodeInstruction instruction = new CodeInstruction(OpCodes.Ldarg_S, (byte)4);
+
+        Assert.True(instruction.Is(OpCodes.Ldarg_S, 4));
+    }
+
+    [Fact]
+    public void Is_NormalizesAcrossIntegralTypes() {
+        CodeInstruction instruction = new CodeInstruction(OpCodes.Ldc_I4, (int)5);
+
+        Assert.True(instruction.Is(OpCodes.Ldc_I4, (byte)5));
+        Assert.True(instruction.Is(OpCodes.Ldc_I4, (short)5));
+        Assert.True(instruction.Is(OpCodes.Ldc_I4, 5L));
+        Assert.True(instruction.Is(OpCodes.Ldc_I4, 5));
+    }
+
+    [Fact]
+    public void Is_DoesNotCrossIntegralAndFloatingPoint() {
+        CodeInstruction instructionI4 = new CodeInstruction(OpCodes.Ldc_I4, 5);
+        CodeInstruction instructionR4 = new CodeInstruction(OpCodes.Ldc_R4, 5f);
+
+        Assert.False(instructionI4.Is(OpCodes.Ldc_I4, 5f));
+        Assert.False(instructionR4.Is(OpCodes.Ldc_R4, (int)5));
+    }
+
+    [Fact]
+    public void Is_NormalizesFloatingPointTypes() {
+        CodeInstruction instruction = new CodeInstruction(OpCodes.Ldc_R4, 5f);
+
+        Assert.True(instruction.Is(OpCodes.Ldc_R4, 5.0));
+        Assert.True(instruction.Is(OpCodes.Ldc_R4, 5.0d));
+    }
+
+    [Fact]
+    public void Is_StringOperandStillMatchesByValue() {
+        CodeInstruction instruction = new CodeInstruction(OpCodes.Ldstr, "hello");
+
+        Assert.True(instruction.Is(OpCodes.Ldstr, "hello"));
+        Assert.False(instruction.Is(OpCodes.Ldstr, "world"));
+    }
+
+    [Fact]
+    public void Is_UlongMaxValueDoesNotThrow() {
+        CodeInstruction instruction = new CodeInstruction(OpCodes.Ldc_I8, ulong.MaxValue);
+
+        Assert.False(instruction.Is(OpCodes.Ldc_I8, -1L));
+        Assert.False(instruction.Is(OpCodes.Ldc_I8, ulong.MaxValue));
+    }
 }

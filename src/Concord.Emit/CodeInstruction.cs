@@ -50,6 +50,12 @@ public sealed class CodeInstruction {
     /// <param name="match">The opcode to match.</param>
     /// <param name="matchOperand">The operand to match, or <see langword="null" /> to match any operand.</param>
     /// <returns><see langword="true" /> when the instruction matches.</returns>
+    /// <remarks>
+    ///     Numeric operands compare by value across box types, so matching <c>4</c> finds an operand
+    ///     boxed as <see cref="byte" />, <see cref="int" />, or <see cref="long" /> alike. Short-form
+    ///     opcodes carry a <see cref="byte" /> operand, and requiring authors to know that is a silent
+    ///     -false trap. Integral and floating-point operands never cross-match.
+    /// </remarks>
     public bool Is(OpCode match, object? matchOperand) {
         if (opcode != match) {
             return false;
@@ -59,7 +65,7 @@ public sealed class CodeInstruction {
             return true;
         }
 
-        return matchOperand.Equals(operand);
+        return OperandsEqual(matchOperand, operand);
     }
 
     /// <summary>Tests whether this instruction loads an argument, optionally a specific slot.</summary>
@@ -91,5 +97,63 @@ public sealed class CodeInstruction {
     /// <inheritdoc />
     public override string ToString() {
         return operand is null ? opcode.Name ?? string.Empty : opcode.Name + " " + operand;
+    }
+
+    private static bool OperandsEqual(object matchOperand, object? operand) {
+        if (operand is null) {
+            return false;
+        }
+
+        Type matchType = matchOperand.GetType();
+        Type operandType = operand.GetType();
+
+        if (IsIntegralType(matchType) && IsIntegralType(operandType)) {
+            if (matchType == typeof(ulong) && (ulong)matchOperand > (ulong)long.MaxValue) {
+                return false;
+            }
+
+            if (operandType == typeof(ulong) && (ulong)operand > (ulong)long.MaxValue) {
+                return false;
+            }
+
+            if (matchOperand.Equals(operand)) {
+                return true;
+            }
+
+            try {
+                long matchValue = Convert.ToInt64(matchOperand);
+                long operandValue = Convert.ToInt64(operand);
+                return matchValue == operandValue;
+            } catch (OverflowException) {
+                return false;
+            }
+        }
+
+        if (matchOperand.Equals(operand)) {
+            return true;
+        }
+
+        if (IsFloatingPointType(matchType) && IsFloatingPointType(operandType)) {
+            double matchValue = Convert.ToDouble(matchOperand);
+            double operandValue = Convert.ToDouble(operand);
+            return matchValue == operandValue;
+        }
+
+        return false;
+    }
+
+    private static bool IsIntegralType(Type type) {
+        return type == typeof(byte)
+            || type == typeof(sbyte)
+            || type == typeof(short)
+            || type == typeof(ushort)
+            || type == typeof(int)
+            || type == typeof(uint)
+            || type == typeof(long)
+            || type == typeof(ulong);
+    }
+
+    private static bool IsFloatingPointType(Type type) {
+        return type == typeof(float) || type == typeof(double);
     }
 }
