@@ -1,8 +1,8 @@
 namespace Concord;
 
 // This enum is APPEND-ONLY. The analyzer compares raw At ordinals in InjectedMemberAnalyzer
-// (lines 847, 851, 860, 880, 883, 969, 987, 1263, 1290, 1897, 2100). Reordering or inserting
-// silently breaks static analysis. Only ever add new values at the end.
+// (lines 894, 898, 907, 922, 932, 935, 1135, 1153, 1429, 1456, 2060, 2266). Reordering or
+// inserting silently breaks static analysis. Only ever add new values at the end.
 
 /// <summary>
 ///     Public injection-position values for <see cref="InjectAttribute" /> and the fluent <c>PatchBuilder</c>.

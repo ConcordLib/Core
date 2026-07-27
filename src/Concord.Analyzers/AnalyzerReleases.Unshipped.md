@@ -25,3 +25,6 @@ CONCORD018 | Concord.Patches | Error | Constant [Inject] constructors require At
 CONCORD019 | Concord.Patches | Error | At.Argument with arg: 0 must infer a unique argument by type on the resolved call site.
 CONCORD020 | Concord.Patches | Error | Target and call-site names resolving to a two-accessor property must be disambiguated.
 CONCORD021 | Concord.Patches | Error | Patch ordering attributes must appear on patch declarations and name valid, non-conflicting patch owners.
+CONCORD022 | Concord.Patches | Error | At.Transpiler and At.TranspilerFinal injection methods must be static.
+CONCORD023 | Concord.Patches | Error | At.Transpiler and At.TranspilerFinal injection methods must be shaped IEnumerable<CodeInstruction> in and out, with an optional ITranspilerContext second parameter.
+CONCORD024 | Concord.Patches | Error | Transpiler injection methods must not reference [Shadow]/[InjectField]/[InjectProperty]/[InjectMethod] members of the declaring [Patch] type.
