@@ -164,6 +164,29 @@ public sealed class PatchBuilder {
         return Inject(new InjectAt.Around(), ResolveInjectionMethod(injectionMethodType, injectionMethodName, parameterTypes));
     }
 
+    /// <summary>Records a raw IL transpiler injection using the supplied injection method.</summary>
+    /// <param name="injectionMethod">The static method that rewrites the instruction stream.</param>
+    /// <param name="final">
+    ///     <see langword="false" /> rewrites the original body before declarative injections compose onto
+    ///     it. <see langword="true" /> rewrites the fully composed wrapper, which has no stability guarantee.
+    /// </param>
+    /// <returns>This builder, for chaining.</returns>
+    public PatchBuilder Transpiler(MethodInfo injectionMethod, bool final = false) {
+        return Inject(new InjectAt.Transpiler(final), injectionMethod);
+    }
+
+    /// <summary>
+    ///     Records a raw IL transpiler injection, resolving the injection method by name on
+    ///     <paramref name="injectionMethodType" />.
+    /// </summary>
+    /// <param name="injectionMethodType">The type that declares the injection method.</param>
+    /// <param name="injectionMethodName">The name of the injection method.</param>
+    /// <param name="final">Whether to rewrite the composed wrapper rather than the original body.</param>
+    /// <returns>This builder, for chaining.</returns>
+    public PatchBuilder Transpiler(Type injectionMethodType, string injectionMethodName, bool final = false) {
+        return Inject(new InjectAt.Transpiler(final), injectionMethodType, injectionMethodName);
+    }
+
     /// <summary>
     ///     Records an invoke-splice injection on a named member access inside the target, using the supplied
     ///     injection method. Head and Tail also support field reads.
