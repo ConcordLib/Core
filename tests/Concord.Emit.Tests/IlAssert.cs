@@ -50,7 +50,7 @@ internal static class IlAssert {
 
     private static string FormatOperand(object? operand, Dictionary<Instruction, int> offsets) {
         if (operand is null) {
-            return "-";
+            return "<null>";
         }
 
         if (operand is Instruction target) {
@@ -78,6 +78,23 @@ internal static class IlAssert {
             return "A_" + parameter.Index;
         }
 
+        if (operand is string stringLiteral) {
+            return "\"" + stringLiteral.Replace("\"", "\\\"") + "\"";
+        }
+
+        if (operand is CallSite callSite) {
+            StringBuilder builder = new StringBuilder("calli(");
+            builder.Append("cc=").Append(callSite.CallingConvention);
+            builder.Append(",hasThis=").Append(callSite.HasThis);
+            builder.Append(",explicitThis=").Append(callSite.ExplicitThis);
+            builder.Append(",ret=").Append(callSite.ReturnType.FullName);
+            for (int i = 0; i < callSite.Parameters.Count; i++) {
+                builder.Append(",p").Append(i).Append("=").Append(callSite.Parameters[i].ParameterType.FullName);
+            }
+
+            return builder.Append(')').ToString();
+        }
+
         return operand.ToString() ?? "-";
     }
 
@@ -86,6 +103,10 @@ internal static class IlAssert {
             return "end";
         }
 
-        return offsets.TryGetValue(instruction, out int index) ? index.ToString("D4") : "?";
+        if (!offsets.TryGetValue(instruction, out int index)) {
+            throw new InvalidOperationException($"Dangling instruction reference: {instruction.OpCode.Name}");
+        }
+
+        return index.ToString("D4");
     }
 }
