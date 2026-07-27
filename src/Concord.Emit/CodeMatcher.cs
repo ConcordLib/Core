@@ -13,7 +13,10 @@ namespace Concord;
 ///     <c>Set*AndAdvance</c> methods, <see cref="SetInstruction" />, <see cref="Insert" />,
 ///     <see cref="InsertAndAdvance" />, <see cref="RemoveInstruction" />, and
 ///     <see cref="RemoveInstructions" />) is a no-op while <see cref="IsInvalid" />, so a fluent
-///     chain never throws before it reaches <see cref="ThrowIfInvalid" />.
+///     chain never throws before it reaches <see cref="ThrowIfInvalid" />. <see cref="Insert" /> and
+///     <see cref="InsertAndAdvance" /> both need a valid <see cref="Pos" /> to insert before, so
+///     there is no way to append after the working list's last instruction through the cursor;
+///     append directly to <see cref="InstructionEnumeration" />'s returned list instead.
 /// </remarks>
 public sealed class CodeMatcher {
     private readonly List<CodeInstruction> codes;
@@ -40,25 +43,42 @@ public sealed class CodeMatcher {
     public bool IsInvalid => !IsValid;
 
     /// <summary>The instruction at <see cref="Pos" />.</summary>
-    public CodeInstruction Instruction => codes[Pos];
+    /// <exception cref="ConcordEmitException">Thrown with code <c>CONC120</c> when <see cref="IsInvalid" />.</exception>
+    public CodeInstruction Instruction {
+        get {
+            if (IsInvalid) {
+                throw new ConcordEmitException("CONC120", "Instruction was read while the matcher is invalid. Call ThrowIfInvalid (or check IsValid) before reading Instruction.");
+            }
+
+            return codes[Pos];
+        }
+    }
 
     /// <summary>
     ///     Searches forward for the first run of instructions matching <paramref name="matches" /> in order,
     ///     starting just after <see cref="Pos" /> (or at the start of the list when invalid).
     /// </summary>
-    /// <param name="matches">The consecutive sequence to find. <see cref="Pos" /> lands on its first instruction.</param>
+    /// <param name="matches">
+    ///     The consecutive sequence to find. <see cref="Pos" /> lands on its first instruction. An empty
+    ///     array is treated as an immediate non-match rather than a match at the current search origin.
+    /// </param>
     /// <returns>This matcher, positioned on the match, or invalid when none was found.</returns>
     public CodeMatcher MatchStartForward(params CodeMatch[] matches) {
+        if (matches.Length == 0) {
+            Reposition(-1);
+            return this;
+        }
+
         int start = IsValid ? Pos + 1 : 0;
         int lastStart = codes.Count - matches.Length;
         for (int i = start; i <= lastStart; i++) {
             if (MatchesAt(i, matches)) {
-                Pos = i;
+                Reposition(i);
                 return this;
             }
         }
 
-        Pos = -1;
+        Reposition(-1);
         return this;
     }
 
@@ -66,19 +86,27 @@ public sealed class CodeMatcher {
     ///     Searches backward for the first run of instructions matching <paramref name="matches" /> in order,
     ///     starting just before <see cref="Pos" /> (or at the end of the list when invalid).
     /// </summary>
-    /// <param name="matches">The consecutive sequence to find. <see cref="Pos" /> lands on its first instruction.</param>
+    /// <param name="matches">
+    ///     The consecutive sequence to find. <see cref="Pos" /> lands on its first instruction. An empty
+    ///     array is treated as an immediate non-match rather than a match at the current search origin.
+    /// </param>
     /// <returns>This matcher, positioned on the match, or invalid when none was found.</returns>
     public CodeMatcher MatchStartBackwards(params CodeMatch[] matches) {
+        if (matches.Length == 0) {
+            Reposition(-1);
+            return this;
+        }
+
         int lastStart = codes.Count - matches.Length;
         int start = IsValid ? Math.Min(Pos - 1, lastStart) : lastStart;
         for (int i = start; i >= 0; i--) {
             if (MatchesAt(i, matches)) {
-                Pos = i;
+                Reposition(i);
                 return this;
             }
         }
 
-        Pos = -1;
+        Reposition(-1);
         return this;
     }
 
@@ -191,9 +219,12 @@ public sealed class CodeMatcher {
     }
 
     /// <summary>
-    ///     Removes the current instruction. Any labels or exception blocks it carried are moved onto the
-    ///     following instruction (or the preceding one, if the removal reached the end of the list) so
-    ///     branch targets and exception regions stay resolvable. A no-op while invalid.
+    ///     Removes the current instruction. Any labels it carried are moved onto the following instruction
+    ///     (or the preceding one, if the removal reached the end of the list) so branch targets stay
+    ///     resolvable. Exception-block boundaries only move onto a following instruction; removing the
+    ///     boundary at the very end of the list with nothing left to carry it forward drops it, which
+    ///     surfaces as <c>CONC118</c> (unbalanced exception blocks) when the rewritten body is composed,
+    ///     rather than silently producing a malformed region. A no-op while invalid.
     /// </summary>
     /// <returns>This matcher, at the same numeric position, or invalid when the removed instruction was last.</returns>
     public CodeMatcher RemoveInstruction() {
@@ -209,9 +240,11 @@ public sealed class CodeMatcher {
 
     /// <summary>
     ///     Removes up to <paramref name="count" /> instructions starting at the cursor, clamped to the
-    ///     instructions actually remaining. Labels and exception blocks carried by the removed range are
-    ///     moved onto the following instruction (or the preceding one, if the removal reached the end of
-    ///     the list). A no-op while invalid.
+    ///     instructions actually remaining. Labels carried by the removed range are moved onto the following
+    ///     instruction (or the preceding one, if the removal reached the end of the list). Exception-block
+    ///     boundaries only move onto a following instruction; a boundary stranded at the very end of the
+    ///     list is dropped, which surfaces as <c>CONC118</c> when the rewritten body is composed rather than
+    ///     silently producing a malformed region. A no-op while invalid.
     /// </summary>
     /// <param name="count">The number of instructions to remove.</param>
     /// <returns>This matcher, at the same numeric position, or invalid when the removal reached the end.</returns>
@@ -250,6 +283,17 @@ public sealed class CodeMatcher {
         Pos = candidate >= 0 && candidate < codes.Count ? candidate : -1;
     }
 
+    // Labels are safe to move in either direction - a label is just a name for an instruction, and
+    // any surviving instruction can serve as a jump target regardless of order. Exception-block
+    // boundaries are not: they encode an ordered open/close pair, and Begin*/End* markers moved
+    // backward onto an instruction that is still part of the frame being closed (e.g. the last real
+    // instruction of a finally handler) would exclude that instruction from its own region -
+    // WriteBack's ApplyBlocks would not catch this (it only checks that every frame it opens is
+    // eventually closed, not that the closing position still makes sense), so the resulting method
+    // can pass WriteBack cleanly and then fail confusingly at code generation instead. So blocks only
+    // transfer onto a forward survivor; a boundary stranded at the end of the list is dropped, and
+    // the frame it belonged to either balances out (its other marker was removed too) or surfaces as
+    // a clean CONC118 "opened and never closed" from WriteBack - never a corrupted region.
     private void TransferBoundaries(int start, int count) {
         List<Label> labels = new List<Label>();
         List<ExceptionBlock> blocks = new List<ExceptionBlock>();
@@ -262,7 +306,8 @@ public sealed class CodeMatcher {
             return;
         }
 
-        int survivorIndex = start + count < codes.Count ? start + count : start - 1;
+        bool hasForwardSurvivor = start + count < codes.Count;
+        int survivorIndex = hasForwardSurvivor ? start + count : start - 1;
         if (survivorIndex < 0) {
             return;
         }
@@ -272,6 +317,10 @@ public sealed class CodeMatcher {
             if (!survivor.labels.Contains(label)) {
                 survivor.labels.Add(label);
             }
+        }
+
+        if (!hasForwardSurvivor) {
+            return;
         }
 
         foreach (ExceptionBlock block in blocks) {

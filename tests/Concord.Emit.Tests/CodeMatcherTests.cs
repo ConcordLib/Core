@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Reflection.Emit;
+using MonoMod.Utils;
 using Xunit;
 
 namespace Concord.Emit.Tests;
@@ -237,5 +238,160 @@ public sealed class CodeMatcherTests {
 
         Assert.True(matcher.IsInvalid);
         Assert.Equal(4, matcher.InstructionEnumeration().Count);
+    }
+
+    [Fact]
+    public void MatchStartForward_ZeroLengthMatches_OnFreshMatcher_DoesNotClaimFalseMatch() {
+        CodeMatcher matcher = new CodeMatcher(Sample()).MatchStartForward();
+
+        Assert.True(matcher.IsInvalid);
+        Assert.Equal(-1, matcher.Pos);
+    }
+
+    [Fact]
+    public void MatchStartForward_ZeroLengthMatches_FromLastIndex_NormalizesToNegativeOne() {
+        CodeMatcher matcher = new CodeMatcher(Sample()).End().MatchStartForward();
+
+        Assert.True(matcher.IsInvalid);
+        Assert.Equal(-1, matcher.Pos);
+    }
+
+    [Fact]
+    public void MatchStartBackwards_ZeroLengthMatches_OnFreshMatcher_NormalizesToNegativeOne() {
+        CodeMatcher matcher = new CodeMatcher(Sample()).MatchStartBackwards();
+
+        Assert.True(matcher.IsInvalid);
+        Assert.Equal(-1, matcher.Pos);
+    }
+
+    [Fact]
+    public void MatchStartBackwards_ZeroLengthMatches_FromEnd_DoesNotClaimFalseMatch() {
+        CodeMatcher matcher = new CodeMatcher(Sample()).End().MatchStartBackwards();
+
+        Assert.True(matcher.IsInvalid);
+        Assert.Equal(-1, matcher.Pos);
+    }
+
+    [Fact]
+    public void Instruction_WhileInvalid_ThrowsConcordEmitExceptionNotBclException() {
+        CodeMatcher matcher = new CodeMatcher(Sample()).MatchStartForward(new CodeMatch(OpCodes.Ldc_I8, 99L));
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() => matcher.Instruction);
+        Assert.Equal("CONC120", ex.Code);
+    }
+
+    // A hand-built try/finally probe: total = mode; try { leave to `after` } finally { endfinally };
+    // after: return total. Every exception-block marker sits on a dedicated Nop so tests can remove
+    // exactly one marker without touching the instructions that do real work.
+    //   0: Ldarg_0
+    //   1: Stloc_0                                   // total = mode
+    //   2: Nop    [BeginExceptionBlock]               // try start
+    //   3: Leave -> label
+    //   4: Nop    [BeginFinallyBlock]                 // handler start / try end
+    //   5: Endfinally
+    //   6: Nop    [EndExceptionBlock] [label]          // handler end / leave target
+    //   7: Ldloc_0
+    //   8: Ret
+    private static List<CodeInstruction> BuildFinallyProbe(out Label after) {
+        after = LabelFactory.Create(1);
+
+        CodeInstruction beginTry = new CodeInstruction(OpCodes.Nop);
+        beginTry.blocks.Add(new ExceptionBlock(ExceptionBlockType.BeginExceptionBlock));
+
+        CodeInstruction beginFinally = new CodeInstruction(OpCodes.Nop);
+        beginFinally.blocks.Add(new ExceptionBlock(ExceptionBlockType.BeginFinallyBlock));
+
+        CodeInstruction endMarker = new CodeInstruction(OpCodes.Nop);
+        endMarker.blocks.Add(new ExceptionBlock(ExceptionBlockType.EndExceptionBlock));
+        endMarker.labels.Add(after);
+
+        return [
+            new CodeInstruction(OpCodes.Ldarg_0),
+            new CodeInstruction(OpCodes.Stloc_0),
+            beginTry,
+            new CodeInstruction(OpCodes.Leave, after),
+            beginFinally,
+            new CodeInstruction(OpCodes.Endfinally),
+            endMarker,
+            new CodeInstruction(OpCodes.Ldloc_0),
+            new CodeInstruction(OpCodes.Ret),
+        ];
+    }
+
+    private static DynamicMethodDefinition NewFinallyShapedMethod() {
+        MethodBase shape = typeof(TranspilerTargets).GetMethod(nameof(TranspilerTargets.Finally))!;
+        DynamicMethodDefinition method = new DynamicMethodDefinition(shape);
+        method.Definition.Body.Variables.Clear();
+        return method;
+    }
+
+    private static TranspilerContext NewFinallyShapedContext() {
+        MethodBase shape = typeof(TranspilerTargets).GetMethod(nameof(TranspilerTargets.Finally))!;
+        TranspilerContext context = new TranspilerContext(shape);
+        context.DeclareLocal(typeof(int));
+        return context;
+    }
+
+    [Fact]
+    public void RemoveInstruction_TransfersExceptionBlockForward_ComposesAndRuns() {
+        List<CodeInstruction> instructions = BuildFinallyProbe(out _);
+
+        List<CodeInstruction> output = new CodeMatcher(instructions)
+            .MatchStartForward(new CodeMatch(i => i.blocks.Exists(b => b.blockType == ExceptionBlockType.BeginExceptionBlock)))
+            .RemoveInstruction()
+            .InstructionEnumeration();
+
+        Assert.Contains(output, i => i.blocks.Exists(b => b.blockType == ExceptionBlockType.BeginExceptionBlock));
+
+        using DynamicMethodDefinition method = NewFinallyShapedMethod();
+        TranspilerContext context = NewFinallyShapedContext();
+        CecilCodeConverter.WriteBack(method.Definition, output, context);
+
+        MethodInfo generated = method.Generate();
+        Assert.Equal(7, generated.Invoke(null, [7]));
+    }
+
+    [Fact]
+    public void RemoveInstructions_WholeFrameAtEndOfList_ComposesWithoutCONC118() {
+        List<CodeInstruction> instructions = BuildFinallyProbe(out _);
+
+        CodeMatcher matcher = new CodeMatcher(instructions)
+            .MatchStartForward(new CodeMatch(i => i.blocks.Exists(b => b.blockType == ExceptionBlockType.BeginExceptionBlock)))
+            .RemoveInstructions(100);
+
+        List<CodeInstruction> output = matcher.InstructionEnumeration();
+        Assert.True(matcher.IsInvalid);
+        Assert.DoesNotContain(output, i => i.blocks.Count > 0);
+
+        // No valid Pos remains to Insert at (fix 4's documented gap), so the replacement tail is
+        // appended directly to the working list - the escape hatch the class docs point to.
+        output.Add(new CodeInstruction(OpCodes.Ldloc_0));
+        output.Add(new CodeInstruction(OpCodes.Ret));
+
+        using DynamicMethodDefinition method = NewFinallyShapedMethod();
+        TranspilerContext context = NewFinallyShapedContext();
+        CecilCodeConverter.WriteBack(method.Definition, output, context);
+
+        MethodInfo generated = method.Generate();
+        Assert.Equal(9, generated.Invoke(null, [9]));
+    }
+
+    [Fact]
+    public void RemoveInstructions_HandlerCloseAtEndOfList_ThrowsCONC118InsteadOfCorruptingRegion() {
+        List<CodeInstruction> instructions = BuildFinallyProbe(out _);
+
+        List<CodeInstruction> output = new CodeMatcher(instructions)
+            .MatchStartForward(new CodeMatch(i => i.blocks.Exists(b => b.blockType == ExceptionBlockType.BeginFinallyBlock)))
+            .RemoveInstructions(100)
+            .InstructionEnumeration();
+
+        Assert.Equal(4, output.Count);
+        Assert.Contains(output, i => i.blocks.Exists(b => b.blockType == ExceptionBlockType.BeginExceptionBlock));
+
+        using DynamicMethodDefinition method = NewFinallyShapedMethod();
+        TranspilerContext context = NewFinallyShapedContext();
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() => CecilCodeConverter.WriteBack(method.Definition, output, context));
+        Assert.Equal("CONC118", ex.Code);
     }
 }
