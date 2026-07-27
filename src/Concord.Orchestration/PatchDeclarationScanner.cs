@@ -108,7 +108,11 @@ public static class PatchDeclarationScanner {
             ResolveInjections(declaration, baseType, debug, beforeOwners, afterOwners);
 
         foreach ((MethodBase target, Injection injection) in resolved) {
-            patches.ApplyPatch(target, injection);
+            try {
+                patches.ApplyPatch(target, injection);
+            } catch (ConcordEmitException ex) when (IsTranspilerFailureCode(ex.Code)) {
+                throw new ConcordDeclarationException(InjectOnPrefix + declaration.FullName + ": " + ex.Message);
+            }
         }
 
         RegisterAttachedProperties(declaration, baseType, props);
@@ -361,5 +365,9 @@ public static class PatchDeclarationScanner {
         }
 
         return ns == "System" || ns.StartsWith("System.", StringComparison.Ordinal);
+    }
+
+    private static bool IsTranspilerFailureCode(string code) {
+        return code is "CONC116" or "CONC117" or "CONC118" or "CONC119" or "CONC120";
     }
 }
