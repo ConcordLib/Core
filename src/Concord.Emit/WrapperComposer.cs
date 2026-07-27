@@ -41,6 +41,7 @@ public static class WrapperComposer {
         RunTranspilers(wrapper.Definition, resolved, preTranspilers);
 
         AssembleInto(wrapper.Definition, resolved, declarative, returnType);
+        RunTranspilers(wrapper.Definition, resolved, finalTranspilers);
         MethodInfo wrapperMethod = wrapper.Generate();
         return new ComposeResult(wrapperMethod, originalBody);
     }
@@ -68,6 +69,7 @@ public static class WrapperComposer {
         RunTranspilers(wrapper.Definition, resolved, preTranspilers);
 
         Assemble(wrapper.Definition, resolved, declarative, returnType);
+        RunTranspilers(wrapper.Definition, resolved, finalTranspilers);
 
         return IlDump.Format(wrapper.Definition);
     }
