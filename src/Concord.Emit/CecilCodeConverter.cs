@@ -63,10 +63,16 @@ internal static class CecilCodeConverter {
 
         ApplyBlocks(definition, emitted, instructions, context);
 
-        body.Instructions.Clear();
-        ILProcessor il = body.GetILProcessor();
-        foreach (Instruction instruction in emitted) {
-            il.Append(instruction);
+        try {
+            body.Instructions.Clear();
+            ILProcessor il = body.GetILProcessor();
+            foreach (Instruction instruction in emitted) {
+                il.Append(instruction);
+            }
+        } catch (ConcordEmitException) {
+            throw;
+        } catch (Exception ex) {
+            throw new ConcordEmitException("CONC119", $"Write-back produced a method body Cecil rejected: {ex.Message}");
         }
     }
 

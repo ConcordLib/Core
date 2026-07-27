@@ -72,7 +72,7 @@ public sealed class InjectionOrdererTests {
         ConcordEmitException error = Assert.Throws<ConcordEmitException>(() => InjectionOrderer.OrderForComposition(live));
 
         Assert.Equal("CONC052", error.Code);
-        Assert.Equal("Patch ordering cycle: A -> B -> A.", error.Message);
+        Assert.Equal("CONC052: Patch ordering cycle: A -> B -> A.", error.Message);
     }
 
     [Fact]
@@ -84,7 +84,7 @@ public sealed class InjectionOrdererTests {
         ConcordEmitException error = Assert.Throws<ConcordEmitException>(() => InjectionOrderer.OrderForComposition(live));
 
         Assert.Equal("CONC052", error.Code);
-        Assert.Equal("Patch ordering cycle: self -> self.", error.Message);
+        Assert.Equal("CONC052: Patch ordering cycle: self -> self.", error.Message);
     }
 
     [Fact]
