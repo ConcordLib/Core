@@ -53,10 +53,26 @@ internal sealed class TargetDetourRegistry {
             }
 
             Injection[] ordered = InjectionOrderer.OrderForComposition(tentative);
+            List<(long Seq, Injection Injection)> previous = new List<(long Seq, Injection Injection)>(live);
+            long previousSequence = sequence;
             live.Clear();
             live.AddRange(tentative);
             sequence = nextSequence;
-            Recompose(ordered, debug);
+            try {
+                Recompose(ordered, debug);
+            } catch (Exception addFailure) {
+                live.Clear();
+                live.AddRange(previous);
+                sequence = previousSequence;
+                try {
+                    Recompose(InjectionOrderer.OrderForComposition(live), false);
+                } catch (Exception rollbackFailure) {
+                    throw new AggregateException(addFailure, rollbackFailure);
+                }
+
+                throw;
+            }
+
             return new RegistryHandle(this, owned);
         }
     }
@@ -77,6 +93,15 @@ internal sealed class TargetDetourRegistry {
     }
 
     private void Recompose(IReadOnlyList<Injection> ordered, bool debug) {
+        ComposeResult? composed = null;
+        if (ordered.Count > 0) {
+            if (debug) {
+                PatchDebugLog.Append(target, WrapperComposer.ComposeDump(target, ordered));
+            }
+
+            composed = WrapperComposer.Compose(target, ordered);
+        }
+
         ICoreDetour? old = detour;
         detour = null;
         if (old is { IsApplied: true }) {
@@ -85,16 +110,9 @@ internal sealed class TargetDetourRegistry {
 
         old?.Dispose();
 
-        if (ordered.Count == 0) {
-            return;
+        if (composed is not null) {
+            detour = DetourFactory.Current.CreateDetour(target, composed.Wrapper);
         }
-
-        if (debug) {
-            PatchDebugLog.Append(target, WrapperComposer.ComposeDump(target, ordered));
-        }
-
-        ComposeResult result = WrapperComposer.Compose(target, ordered);
-        detour = DetourFactory.Current.CreateDetour(target, result.Wrapper);
     }
 
     private sealed class RegistryHandle : IDetourHandle {
