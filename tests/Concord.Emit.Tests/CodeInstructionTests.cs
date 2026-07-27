@@ -111,10 +111,38 @@ public sealed class CodeInstructionTests {
     }
 
     [Fact]
-    public void Is_UlongMaxValueDoesNotThrow() {
+    public void Is_UlongMaxValue_MatchesItself() {
         CodeInstruction instruction = new CodeInstruction(OpCodes.Ldc_I8, ulong.MaxValue);
 
+        Assert.True(instruction.Is(OpCodes.Ldc_I8, ulong.MaxValue));
         Assert.False(instruction.Is(OpCodes.Ldc_I8, -1L));
-        Assert.False(instruction.Is(OpCodes.Ldc_I8, ulong.MaxValue));
+    }
+
+    [Fact]
+    public void Is_NegativeIntDoesNotMatchUlongMaxValue() {
+        CodeInstruction instruction = new CodeInstruction(OpCodes.Ldc_I8, ulong.MaxValue);
+
+        Assert.False(instruction.Is(OpCodes.Ldc_I8, -1));
+    }
+
+    [Fact]
+    public void Is_NegativeLongMatchesItself() {
+        CodeInstruction instruction = new CodeInstruction(OpCodes.Ldc_I8, -1L);
+
+        Assert.True(instruction.Is(OpCodes.Ldc_I8, -1L));
+    }
+
+    [Fact]
+    public void Is_LargeUintNormalizesToLong() {
+        CodeInstruction instruction = new CodeInstruction(OpCodes.Ldc_I4, 4294967295U);
+
+        Assert.True(instruction.Is(OpCodes.Ldc_I4, 4294967295L));
+    }
+
+    [Fact]
+    public void Is_LongMinValueMatchesItself() {
+        CodeInstruction instruction = new CodeInstruction(OpCodes.Ldc_I8, long.MinValue);
+
+        Assert.True(instruction.Is(OpCodes.Ldc_I8, long.MinValue));
     }
 }

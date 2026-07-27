@@ -108,25 +108,7 @@ public sealed class CodeInstruction {
         Type operandType = operand.GetType();
 
         if (IsIntegralType(matchType) && IsIntegralType(operandType)) {
-            if (matchType == typeof(ulong) && (ulong)matchOperand > (ulong)long.MaxValue) {
-                return false;
-            }
-
-            if (operandType == typeof(ulong) && (ulong)operand > (ulong)long.MaxValue) {
-                return false;
-            }
-
-            if (matchOperand.Equals(operand)) {
-                return true;
-            }
-
-            try {
-                long matchValue = Convert.ToInt64(matchOperand);
-                long operandValue = Convert.ToInt64(operand);
-                return matchValue == operandValue;
-            } catch (OverflowException) {
-                return false;
-            }
+            return IntegralEquals(matchOperand, operand);
         }
 
         if (matchOperand.Equals(operand)) {
@@ -139,6 +121,28 @@ public sealed class CodeInstruction {
             return matchValue == operandValue;
         }
 
+        return false;
+    }
+
+    private static bool IntegralEquals(object left, object right) {
+        bool leftNegative = IsNegative(left);
+        bool rightNegative = IsNegative(right);
+        if (leftNegative != rightNegative) {
+            return false;
+        }
+
+        if (leftNegative) {
+            return Convert.ToInt64(left) == Convert.ToInt64(right);
+        }
+
+        return Convert.ToUInt64(left) == Convert.ToUInt64(right);
+    }
+
+    private static bool IsNegative(object value) {
+        if (value is sbyte sb) { return sb < 0; }
+        if (value is short s) { return s < 0; }
+        if (value is int i) { return i < 0; }
+        if (value is long l) { return l < 0; }
         return false;
     }
 
