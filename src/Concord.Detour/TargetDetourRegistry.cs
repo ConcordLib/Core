@@ -58,27 +58,14 @@ internal sealed class TargetDetourRegistry {
             live.Clear();
             live.AddRange(tentative);
             sequence = nextSequence;
-            try {
-                Recompose(ordered, debug);
-            } catch (Exception addFailure) {
-                live.Clear();
-                live.AddRange(previous);
-                sequence = previousSequence;
-                try {
-                    Recompose(InjectionOrderer.OrderForComposition(live), false);
-                } catch (Exception rollbackFailure) {
-                    throw new AggregateException(addFailure, rollbackFailure);
-                }
-
-                throw;
-            }
-
+            RecomposeOrRestore(ordered, debug, previous, previousSequence);
             return new RegistryHandle(this, owned);
         }
     }
 
     private void Remove(List<long> owned) {
         lock (gate) {
+            List<(long Seq, Injection Injection)> previous = new List<(long Seq, Injection Injection)>(live);
             foreach (long seq in owned) {
                 for (int i = live.Count - 1; i >= 0; i--) {
                     if (live[i].Seq == seq) {
@@ -88,7 +75,36 @@ internal sealed class TargetDetourRegistry {
                 }
             }
 
-            Recompose(InjectionOrderer.OrderForComposition(live), false);
+            RecomposeOrRestore(InjectionOrderer.OrderForComposition(live), false, previous, null);
+        }
+    }
+
+    private void RecomposeOrRestore(
+        IReadOnlyList<Injection> ordered,
+        bool debug,
+        List<(long Seq, Injection Injection)> previous,
+        long? previousSequence) {
+        try {
+            Recompose(ordered, debug);
+        } catch (Exception primaryFailure) {
+            live.Clear();
+            live.AddRange(previous);
+            if (previousSequence.HasValue) {
+                sequence = previousSequence.Value;
+            }
+
+            bool restoredDebug = false;
+            foreach ((long Seq, Injection Injection) entry in live) {
+                restoredDebug |= entry.Injection.Debug;
+            }
+
+            try {
+                Recompose(InjectionOrderer.OrderForComposition(live), restoredDebug);
+            } catch (Exception rollbackFailure) {
+                throw new AggregateException(primaryFailure, rollbackFailure);
+            }
+
+            throw;
         }
     }
 
