@@ -136,6 +136,36 @@ public sealed class TranspilerAnalyzerTests {
     }
 
     [Fact]
+    public async Task Transpiler_ReferencingFieldFromAncestorOfTarget_ReportsNoAccessDiagnostic() {
+        ImmutableArray<Diagnostic> diagnostics = await InjectedMemberAnalyzerTests.GetAnalyzerDiagnosticsAsync(
+            InjectedMemberAnalyzerTests.AttributeSource +
+            """
+
+            public class ShopBase {
+                protected static int stock = 3;
+            }
+
+            public class Shop : ShopBase {
+                public int Total(int listed) { return listed + stock; }
+            }
+
+            [Concord.Patch]
+            public abstract class ShopPatch : Shop {
+                private static int stock;
+
+                [Concord.Inject(Concord.At.Transpiler, nameof(Total))]
+                private static System.Collections.Generic.IEnumerable<Concord.CodeInstruction> Rewrite(
+                    System.Collections.Generic.IEnumerable<Concord.CodeInstruction> instructions) {
+                    _ = stock;
+                    return instructions;
+                }
+            }
+            """);
+
+        Assert.DoesNotContain(diagnostics, candidate => candidate.Id == InjectedMemberAnalyzer.TranspilerInjectedMemberAccessDiagnosticId);
+    }
+
+    [Fact]
     public async Task NonTranspiler_ReferencingShadowField_ReportsNoAccessDiagnostic() {
         ImmutableArray<Diagnostic> diagnostics = await InjectedMemberAnalyzerTests.GetAnalyzerDiagnosticsAsync(
             InjectedMemberAnalyzerTests.AttributeSource +

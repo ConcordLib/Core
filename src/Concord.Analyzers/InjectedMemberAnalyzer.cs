@@ -1062,7 +1062,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
                 continue;
             }
 
-            IFieldSymbol? targetField = FindMember(targetType, type => type.GetMembers(field.Name).OfType<IFieldSymbol>());
+            IFieldSymbol? targetField = targetType.GetMembers(field.Name).OfType<IFieldSymbol>().FirstOrDefault();
             if (targetField is null) {
                 continue;
             }
