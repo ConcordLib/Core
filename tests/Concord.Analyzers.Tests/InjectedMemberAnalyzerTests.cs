@@ -1559,15 +1559,6 @@ public sealed class InjectedMemberAnalyzerTests {
             }
         }
 
-        [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Method, AllowMultiple = true)]
-        public sealed class ShadowAttribute : Attribute {
-            public ShadowAttribute() {
-            }
-
-            public ShadowAttribute(string member) {
-            }
-        }
-
         public sealed class CodeInstruction {
         }
 

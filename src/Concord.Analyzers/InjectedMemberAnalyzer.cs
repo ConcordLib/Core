@@ -920,7 +920,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         InjectionTarget target,
         INamedTypeSymbol targetType) {
         if (injection.AtValue is 6 or 7) {
-            ValidateTranspilerInjection(context, injection);
+            ValidateTranspilerInjection(context, injection, targetType);
             return;
         }
 
@@ -949,7 +949,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         ValidateInjectionReturnPosition(context, injection, target, targetType);
     }
 
-    private static void ValidateTranspilerInjection(SymbolAnalysisContext context, InjectionInfo injection) {
+    private static void ValidateTranspilerInjection(SymbolAnalysisContext context, InjectionInfo injection, INamedTypeSymbol targetType) {
         IMethodSymbol method = injection.Method;
 
         if (!method.IsStatic) {
@@ -966,7 +966,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
                 method.Name));
         }
 
-        ValidateTranspilerInjectedMemberAccess(context, injection);
+        ValidateTranspilerInjectedMemberAccess(context, injection, targetType);
     }
 
     private static bool IsValidTranspilerSignature(IMethodSymbol method) {
@@ -1010,7 +1010,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
                named.ContainingNamespace.ToDisplayString() == ConcordNamespace;
     }
 
-    private static void ValidateTranspilerInjectedMemberAccess(SymbolAnalysisContext context, InjectionInfo injection) {
+    private static void ValidateTranspilerInjectedMemberAccess(SymbolAnalysisContext context, InjectionInfo injection, INamedTypeSymbol targetType) {
         IMethodSymbol method = injection.Method;
         if (method.ContainingType is not INamedTypeSymbol patchType) {
             return;
@@ -1022,6 +1022,8 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
                 injectedMemberNames.Add(member.Name);
             }
         }
+
+        AddShadowFieldNames(patchType, targetType, injectedMemberNames);
 
         if (injectedMemberNames.Count == 0) {
             return;
@@ -1037,7 +1039,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
                 continue;
             }
 
-            foreach (SyntaxNode descendant in body.DescendantNodesAndSelf(descendIntoChildren: DescendIntoMethodBody)) {
+            foreach (SyntaxNode descendant in body.DescendantNodesAndSelf()) {
                 if (descendant is not IdentifierNameSyntax identifier || !injectedMemberNames.Contains(identifier.Identifier.Text)) {
                     continue;
                 }
@@ -1048,6 +1050,25 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
                     method.Name,
                     identifier.Identifier.Text));
                 return;
+            }
+        }
+    }
+
+    private static void AddShadowFieldNames(INamedTypeSymbol patchType, INamedTypeSymbol targetType, HashSet<string> injectedMemberNames) {
+        foreach (IFieldSymbol field in patchType.GetMembers().OfType<IFieldSymbol>()) {
+            if (field.IsImplicitlyDeclared ||
+                field.IsConst ||
+                field.GetAttributes().Any(IsInjectFieldAttribute)) {
+                continue;
+            }
+
+            IFieldSymbol? targetField = FindMember(targetType, type => type.GetMembers(field.Name).OfType<IFieldSymbol>());
+            if (targetField is null) {
+                continue;
+            }
+
+            if (targetField.IsStatic == field.IsStatic && SymbolEqualityComparer.Default.Equals(targetField.Type, field.Type)) {
+                injectedMemberNames.Add(field.Name);
             }
         }
     }
