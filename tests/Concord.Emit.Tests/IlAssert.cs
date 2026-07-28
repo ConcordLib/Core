@@ -89,7 +89,7 @@ internal static class IlAssert {
             builder.Append(",explicitThis=").Append(callSite.ExplicitThis);
             builder.Append(",ret=").Append(callSite.ReturnType.FullName);
             for (int i = 0; i < callSite.Parameters.Count; i++) {
-                builder.Append(",p").Append(i).Append("=").Append(callSite.Parameters[i].ParameterType.FullName);
+                builder.Append(",p").Append(i).Append('=').Append(callSite.Parameters[i].ParameterType.FullName);
             }
 
             return builder.Append(')').ToString();

@@ -115,7 +115,7 @@ namespace Concord.Harmony.Tests
             MethodBase target = typeof(SupportMatrixTestTargets).GetMethod(nameof(SupportMatrixTestTargets.SimpleTarget));
             Patches patchInfo = PatchProcessor.GetPatchInfo(target);
 
-            string reason = SupportMatrix.Validate(target, new Injection[0], patchInfo);
+            string reason = SupportMatrix.Validate(target, Array.Empty<Injection>(), patchInfo);
             Assert.Null(reason);
 
             bool hasInner = SupportMatrix.HasInnerPatches(patchInfo);
@@ -353,7 +353,7 @@ namespace Concord.Harmony.Tests
             Assert.True(hasInner);
 
             MethodBase target = typeof(SupportMatrixTestTargets).GetMethod(nameof(SupportMatrixTestTargets.SimpleTarget));
-            string reason = SupportMatrix.Validate(target, new Injection[0], patchInfo);
+            string reason = SupportMatrix.Validate(target, Array.Empty<Injection>(), patchInfo);
             Assert.NotNull(reason);
             Assert.Contains("inner", reason.ToLower());
         }

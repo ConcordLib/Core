@@ -231,6 +231,9 @@ dotnet_diagnostic.SA1649.severity = none
 dotnet_diagnostic.CA1822.severity = none # can be marked static — a patch target must stay an instance method
 dotnet_diagnostic.CA2211.severity = none # non-constant static field — observation counters are asserted on, so public + mutable is the point
 dotnet_diagnostic.CA1859.severity = none # use the concrete type — a perf hint with nothing to gain in a fixture
+dotnet_diagnostic.CA2208.severity = none # argument exception needs paramName — fixtures throw bare exceptions purely to shape an IL exception region
+dotnet_diagnostic.CA2219.severity = none # do not throw from finally — a throw inside finally is itself an IL shape under test
+dotnet_diagnostic.CA1861.severity = none # hoist constant array args — one-off assertion and setup arrays read better inline
 
 [bench/**/*.cs]
 dotnet_diagnostic.SA0001.severity = none
@@ -253,6 +256,9 @@ dotnet_diagnostic.SA1649.severity = none
 dotnet_diagnostic.CA1822.severity = none # can be marked static — a patch target must stay an instance method
 dotnet_diagnostic.CA2211.severity = none # non-constant static field — observation counters are asserted on, so public + mutable is the point
 dotnet_diagnostic.CA1859.severity = none # use the concrete type — a perf hint with nothing to gain in a fixture
+dotnet_diagnostic.CA2208.severity = none # argument exception needs paramName — fixtures throw bare exceptions purely to shape an IL exception region
+dotnet_diagnostic.CA2219.severity = none # do not throw from finally — a throw inside finally is itself an IL shape under test
+dotnet_diagnostic.CA1861.severity = none # hoist constant array args — one-off assertion and setup arrays read better inline
 
 [**/*.Tests/**/*.cs]
 dotnet_diagnostic.SA0001.severity = none
@@ -275,6 +281,9 @@ dotnet_diagnostic.SA1649.severity = none
 dotnet_diagnostic.CA1822.severity = none # can be marked static — a patch target must stay an instance method
 dotnet_diagnostic.CA2211.severity = none # non-constant static field — observation counters are asserted on, so public + mutable is the point
 dotnet_diagnostic.CA1859.severity = none # use the concrete type — a perf hint with nothing to gain in a fixture
+dotnet_diagnostic.CA2208.severity = none # argument exception needs paramName — fixtures throw bare exceptions purely to shape an IL exception region
+dotnet_diagnostic.CA2219.severity = none # do not throw from finally — a throw inside finally is itself an IL shape under test
+dotnet_diagnostic.CA1861.severity = none # hoist constant array args — one-off assertion and setup arrays read better inline
 
 [**/*.Test/**/*.cs]
 dotnet_diagnostic.SA0001.severity = none
@@ -297,6 +306,9 @@ dotnet_diagnostic.SA1649.severity = none
 dotnet_diagnostic.CA1822.severity = none # can be marked static — a patch target must stay an instance method
 dotnet_diagnostic.CA2211.severity = none # non-constant static field — observation counters are asserted on, so public + mutable is the point
 dotnet_diagnostic.CA1859.severity = none # use the concrete type — a perf hint with nothing to gain in a fixture
+dotnet_diagnostic.CA2208.severity = none # argument exception needs paramName — fixtures throw bare exceptions purely to shape an IL exception region
+dotnet_diagnostic.CA2219.severity = none # do not throw from finally — a throw inside finally is itself an IL shape under test
+dotnet_diagnostic.CA1861.severity = none # hoist constant array args — one-off assertion and setup arrays read better inline
 
 [**/Tests/**/*.cs]
 dotnet_diagnostic.SA0001.severity = none
@@ -319,6 +331,9 @@ dotnet_diagnostic.SA1649.severity = none
 dotnet_diagnostic.CA1822.severity = none # can be marked static — a patch target must stay an instance method
 dotnet_diagnostic.CA2211.severity = none # non-constant static field — observation counters are asserted on, so public + mutable is the point
 dotnet_diagnostic.CA1859.severity = none # use the concrete type — a perf hint with nothing to gain in a fixture
+dotnet_diagnostic.CA2208.severity = none # argument exception needs paramName — fixtures throw bare exceptions purely to shape an IL exception region
+dotnet_diagnostic.CA2219.severity = none # do not throw from finally — a throw inside finally is itself an IL shape under test
+dotnet_diagnostic.CA1861.severity = none # hoist constant array args — one-off assertion and setup arrays read better inline
 
 [**/*.TestMod/**/*.cs]
 dotnet_diagnostic.SA0001.severity = none
@@ -341,6 +356,9 @@ dotnet_diagnostic.SA1649.severity = none
 dotnet_diagnostic.CA1822.severity = none # can be marked static — a patch target must stay an instance method
 dotnet_diagnostic.CA2211.severity = none # non-constant static field — observation counters are asserted on, so public + mutable is the point
 dotnet_diagnostic.CA1859.severity = none # use the concrete type — a perf hint with nothing to gain in a fixture
+dotnet_diagnostic.CA2208.severity = none # argument exception needs paramName — fixtures throw bare exceptions purely to shape an IL exception region
+dotnet_diagnostic.CA2219.severity = none # do not throw from finally — a throw inside finally is itself an IL shape under test
+dotnet_diagnostic.CA1861.severity = none # hoist constant array args — one-off assertion and setup arrays read better inline
 
 # DefOf classes: the engine's DefOfHelper.RebindAllDefOfs reflects over PUBLIC STATIC fields and
 # matches each field's NAME to a def's TYD `name` (which carries underscores, e.g. Mod_Thing).

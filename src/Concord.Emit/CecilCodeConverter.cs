@@ -11,6 +11,10 @@ using OperandType = Mono.Cecil.Cil.OperandType;
 namespace Concord.Emit;
 
 internal static class CecilCodeConverter {
+    // Every failure to map a Cecil body onto the Concord model reports the same code; the
+    // message carries the specific reason.
+    private const string CodeConversionFailed = "CONC118";
+
     private static readonly Dictionary<string, OpCode> OpCodesByName = BuildOpCodeTable();
     private static readonly Dictionary<string, Mono.Cecil.Cil.OpCode> CecilOpCodesByName = BuildCecilOpCodeTable();
 
@@ -139,7 +143,7 @@ internal static class CecilCodeConverter {
             return mapped;
         }
 
-        throw new ConcordEmitException("CONC118", $"Unknown opcode '{source.Name}'.");
+        throw new ConcordEmitException(CodeConversionFailed, $"Unknown opcode '{source.Name}'.");
     }
 
     private static Dictionary<string, Mono.Cecil.Cil.OpCode> BuildCecilOpCodeTable() {
@@ -167,7 +171,7 @@ internal static class CecilCodeConverter {
             return mapped;
         }
 
-        throw new ConcordEmitException("CONC118", $"Unknown opcode '{source.Name}'.");
+        throw new ConcordEmitException(CodeConversionFailed, $"Unknown opcode '{source.Name}'.");
     }
 
     private static void AssignLabels(MethodBody body, TranspilerContext context, Dictionary<Instruction, List<int>>? preservedLabels) {
@@ -244,15 +248,15 @@ internal static class CecilCodeConverter {
     }
 
     private static Type ResolveType(TypeReference typeReference) {
-        return typeReference.ResolveReflection() ?? throw new ConcordEmitException("CONC118", $"Could not resolve CLR type for '{typeReference.FullName}'.");
+        return typeReference.ResolveReflection() ?? throw new ConcordEmitException(CodeConversionFailed, $"Could not resolve CLR type for '{typeReference.FullName}'.");
     }
 
     private static FieldInfo ResolveField(FieldReference fieldReference) {
-        return fieldReference.ResolveReflection() ?? throw new ConcordEmitException("CONC118", $"Could not resolve CLR field for '{fieldReference.FullName}'.");
+        return fieldReference.ResolveReflection() ?? throw new ConcordEmitException(CodeConversionFailed, $"Could not resolve CLR field for '{fieldReference.FullName}'.");
     }
 
     private static MethodBase ResolveMethod(MethodReference methodReference) {
-        return methodReference.ResolveReflection() ?? throw new ConcordEmitException("CONC118", $"Could not resolve CLR method for '{methodReference.FullName}'.");
+        return methodReference.ResolveReflection() ?? throw new ConcordEmitException(CodeConversionFailed, $"Could not resolve CLR method for '{methodReference.FullName}'.");
     }
 
     private static void AttachExceptionBlocks(MethodBody body, Dictionary<Instruction, CodeInstruction> byInstruction, TranspilerContext context) {
@@ -408,7 +412,7 @@ internal static class CecilCodeConverter {
         }
 
         if (childCursor < envelope.Children.Count) {
-            throw new ConcordEmitException("CONC118", "An exception region's child region was not contained within its parent's own boundaries.");
+            throw new ConcordEmitException(CodeConversionFailed, "An exception region's child region was not contained within its parent's own boundaries.");
         }
     }
 
@@ -471,7 +475,7 @@ internal static class CecilCodeConverter {
             long i64 => Instruction.Create(opcode, i64),
             float f32 => Instruction.Create(opcode, f32),
             double f64 => Instruction.Create(opcode, f64),
-            _ => throw new ConcordEmitException("CONC118", $"Unsupported operand '{source.operand}' of type '{source.operand.GetType()}' for opcode '{source.opcode.Name}'."),
+            _ => throw new ConcordEmitException(CodeConversionFailed, $"Unsupported operand '{source.operand}' of type '{source.operand.GetType()}' for opcode '{source.opcode.Name}'."),
         };
     }
 
@@ -507,12 +511,12 @@ internal static class CecilCodeConverter {
             return variable;
         }
 
-        throw new ConcordEmitException("CONC118", $"Local slot {rawSlot} referenced by opcode '{source.opcode.Name}' is out of range for a body with {localsByIndex.Count} local(s).");
+        throw new ConcordEmitException(CodeConversionFailed, $"Local slot {rawSlot} referenced by opcode '{source.opcode.Name}' is out of range for a body with {localsByIndex.Count} local(s).");
     }
 
     private static ParameterDefinition ResolveParameter(MethodDefinition definition, int rawSlot) {
         if (rawSlot < 0 || rawSlot >= definition.Parameters.Count) {
-            throw new ConcordEmitException("CONC118", $"Argument slot {rawSlot} is out of range for a method with {definition.Parameters.Count} parameter(s).");
+            throw new ConcordEmitException(CodeConversionFailed, $"Argument slot {rawSlot} is out of range for a method with {definition.Parameters.Count} parameter(s).");
         }
 
         return definition.Parameters[rawSlot];
@@ -523,7 +527,7 @@ internal static class CecilCodeConverter {
             return variable;
         }
 
-        throw new ConcordEmitException("CONC118", $"Local '{local}' referenced by opcode '{source.opcode.Name}' has no matching variable.");
+        throw new ConcordEmitException(CodeConversionFailed, $"Local '{local}' referenced by opcode '{source.opcode.Name}' has no matching variable.");
     }
 
     private static void FixupOperand(Instruction emitted, CodeInstruction source, Dictionary<Label, Instruction> instructionByLabel) {
@@ -544,7 +548,7 @@ internal static class CecilCodeConverter {
             return target;
         }
 
-        throw new ConcordEmitException("CONC118", $"Label '{label}' referenced by opcode '{source.opcode.Name}' is not attached to any instruction.");
+        throw new ConcordEmitException(CodeConversionFailed, $"Label '{label}' referenced by opcode '{source.opcode.Name}' is not attached to any instruction.");
     }
 
     private static void ApplyBlocks(MethodDefinition definition, List<Instruction> emitted, IReadOnlyList<CodeInstruction> instructions, TranspilerContext context) {
@@ -558,7 +562,7 @@ internal static class CecilCodeConverter {
         }
 
         if (open.Count > 0) {
-            throw new ConcordEmitException("CONC118", $"{open.Count} exception block(s) were opened and never closed.");
+            throw new ConcordEmitException(CodeConversionFailed, $"{open.Count} exception block(s) were opened and never closed.");
         }
     }
 
@@ -569,14 +573,14 @@ internal static class CecilCodeConverter {
         }
 
         if (open.Count == 0) {
-            throw new ConcordEmitException("CONC118", $"Exception block '{block.blockType}' at instruction {index} closes a region that was never opened.");
+            throw new ConcordEmitException(CodeConversionFailed, $"Exception block '{block.blockType}' at instruction {index} closes a region that was never opened.");
         }
 
         ExceptionFrame frame = open[open.Count - 1];
 
         if (block.blockType == ExceptionBlockType.EndExceptionBlock) {
             if (frame.TryEndPosition is null) {
-                throw new ConcordEmitException("CONC118", $"Exception block at instruction {index} closes a try region that opened no handlers.");
+                throw new ConcordEmitException(CodeConversionFailed, $"Exception block at instruction {index} closes a try region that opened no handlers.");
             }
 
             // HandlerEnd is exclusive in Cecil - there is no instruction one past the end of the
@@ -616,7 +620,7 @@ internal static class CecilCodeConverter {
             ExceptionBlockType.BeginCatchBlock => ExceptionHandlerType.Catch,
             ExceptionBlockType.BeginFaultBlock => ExceptionHandlerType.Fault,
             ExceptionBlockType.BeginFinallyBlock => ExceptionHandlerType.Finally,
-            _ => throw new ConcordEmitException("CONC118", $"Unexpected exception block '{block.blockType}' at instruction {index}."),
+            _ => throw new ConcordEmitException(CodeConversionFailed, $"Unexpected exception block '{block.blockType}' at instruction {index}."),
         };
 
         ExceptionHandler newHandler = new ExceptionHandler(handlerType) {
@@ -640,7 +644,7 @@ internal static class CecilCodeConverter {
         }
 
         if (frame.CurrentAwaitsHandlerStart) {
-            throw new ConcordEmitException("CONC118", $"Filter block at instruction {index} was never followed by its BeginCatchBlock.");
+            throw new ConcordEmitException(CodeConversionFailed, $"Filter block at instruction {index} was never followed by its BeginCatchBlock.");
         }
 
         frame.Current.HandlerEnd = endPosition;
