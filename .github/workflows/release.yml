@@ -8,8 +8,9 @@ name: CI & Release
 # The file is named release.yml because nuget.org Trusted Publishing pins the OIDC policy
 # to a workflow filename; the publish job must live in release.yml for the token to validate.
 #
-# The release job depends on the full test matrix (test) and the mono leg (test-mono),
-# so a release cannot cut or publish unless every required test leg passes. It only runs
+# The release job depends on the full test matrix (test), the mono leg (test-mono), and the
+# SonarCloud scan (sonar), so a release cannot cut or publish unless every required test leg
+# passes and the quality gate is green (the scan blocks on sonar.qualitygate.wait). It only runs
 # on pushes to main (not PRs): semantic-release cuts the v* tag + GitHub Release, then the
 # job packs Concord.Ref, Concord.Analyzers, Concord.Generators, and Concord.Runtime (versions
 # stamped from the tag by MinVer) and publishes to nuget.org via Trusted Publishing (OIDC ->
@@ -86,6 +87,71 @@ jobs:
           name: concord-ref-nupkg
           path: artifacts/Concord.Ref.*.nupkg
           if-no-files-found: error
+
+  # SonarCloud must analyse through the .NET scanner, not Automatic Analysis. Automatic
+  # Analysis never runs MSBuild, so it cannot see <Nullable>enable</Nullable> from
+  # Directory.Build.props and reported ~110 phantom S8970 "null-forgiving operator is
+  # pointless" issues. The begin/build/end sandwich runs SonarAnalyzer as a Roslyn analyzer
+  # inside the real compilation, so it reads the same properties the compiler does.
+  # Automatic Analysis must stay off in project settings; with both enabled SonarCloud
+  # rejects the CI report.
+  sonar:
+    name: SonarCloud
+    runs-on: ubuntu-latest
+    # Secrets are withheld from fork PRs, so the scanner could never authenticate there;
+    # skip rather than leave a permanently red required check on outside contributions.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0     # blame data for new-code detection; a shallow clone dates every line to the checkout
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # The scanner is a Java application regardless of the language being analysed.
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache NuGet
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', 'global.json') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      - name: Cache SonarCloud packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+
+      - name: Install scanner
+        run: dotnet tool install --global dotnet-sonarscanner
+
+      # No --no-incremental/--no-restore on the build below: the scanner only sees files that
+      # actually compile in this step, so a build skipped as up-to-date yields an empty report.
+      - name: Analyse
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          dotnet sonarscanner begin \
+            /k:"ConcordLib_Core" \
+            /o:"concordlib" \
+            /d:sonar.token="$SONAR_TOKEN" \
+            /d:sonar.host.url="https://sonarcloud.io" \
+            /d:sonar.scanner.scanAll=false \
+            /d:sonar.qualitygate.wait=true
+          dotnet build Concord.ci.slnx -c Release
+          dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
 
   test:
     name: Test · ${{ matrix.label }}
@@ -187,7 +253,7 @@ jobs:
 
   release:
     name: Release & Publish
-    needs: [test, test-mono]
+    needs: [test, test-mono, sonar]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     env:
