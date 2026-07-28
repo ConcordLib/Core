@@ -40,16 +40,15 @@ public sealed class IlAssertTests {
 
     [Fact]
     public void BodiesMatch_LocalVariableTypeDiffers_Fails() {
-        MethodBase target = typeof(EmitTargets).GetMethod(nameof(EmitTargets.Add))!;
+        MethodBase target = typeof(Counterish).GetMethod(nameof(Counterish.Step))!;
         using DynamicMethodDefinition a = new DynamicMethodDefinition(target);
         using DynamicMethodDefinition b = new DynamicMethodDefinition(target);
 
-        if (b.Definition.Body.Variables.Count > 0) {
-            VariableDefinition var0 = b.Definition.Body.Variables[0];
-            var0.VariableType = b.Definition.Module.ImportReference(typeof(long));
+        Assert.NotEmpty(b.Definition.Body.Variables);
+        VariableDefinition var0 = b.Definition.Body.Variables[0];
+        var0.VariableType = b.Definition.Module.ImportReference(typeof(long));
 
-            Assert.ThrowsAny<Xunit.Sdk.XunitException>(() => IlAssert.BodiesMatch(a.Definition, b.Definition));
-        }
+        Assert.ThrowsAny<Xunit.Sdk.XunitException>(() => IlAssert.BodiesMatch(a.Definition, b.Definition));
     }
 
     [Fact]
@@ -58,14 +57,13 @@ public sealed class IlAssertTests {
         using DynamicMethodDefinition a = new DynamicMethodDefinition(target);
         using DynamicMethodDefinition b = new DynamicMethodDefinition(target);
 
-        if (b.Definition.Body.ExceptionHandlers.Count >= 2) {
-            ExceptionHandler first = b.Definition.Body.ExceptionHandlers[0];
-            ExceptionHandler second = b.Definition.Body.ExceptionHandlers[1];
-            b.Definition.Body.ExceptionHandlers[0] = second;
-            b.Definition.Body.ExceptionHandlers[1] = first;
+        Assert.True(b.Definition.Body.ExceptionHandlers.Count >= 2, "Target must declare at least two exception handlers to exercise ordering.");
+        ExceptionHandler first = b.Definition.Body.ExceptionHandlers[0];
+        ExceptionHandler second = b.Definition.Body.ExceptionHandlers[1];
+        b.Definition.Body.ExceptionHandlers[0] = second;
+        b.Definition.Body.ExceptionHandlers[1] = first;
 
-            Assert.ThrowsAny<Xunit.Sdk.XunitException>(() => IlAssert.BodiesMatch(a.Definition, b.Definition));
-        }
+        Assert.ThrowsAny<Xunit.Sdk.XunitException>(() => IlAssert.BodiesMatch(a.Definition, b.Definition));
     }
 
     [Fact]
@@ -74,14 +72,12 @@ public sealed class IlAssertTests {
         using DynamicMethodDefinition a = new DynamicMethodDefinition(target);
         using DynamicMethodDefinition b = new DynamicMethodDefinition(target);
 
-        if (b.Definition.Body.ExceptionHandlers.Count > 0) {
-            ExceptionHandler handler = b.Definition.Body.ExceptionHandlers[0];
-            if (handler.CatchType != null) {
-                handler.CatchType = b.Definition.Module.ImportReference(typeof(InvalidOperationException));
+        Assert.NotEmpty(b.Definition.Body.ExceptionHandlers);
+        ExceptionHandler handler = b.Definition.Body.ExceptionHandlers[0];
+        Assert.NotNull(handler.CatchType);
+        handler.CatchType = b.Definition.Module.ImportReference(typeof(InvalidOperationException));
 
-                Assert.ThrowsAny<Xunit.Sdk.XunitException>(() => IlAssert.BodiesMatch(a.Definition, b.Definition));
-            }
-        }
+        Assert.ThrowsAny<Xunit.Sdk.XunitException>(() => IlAssert.BodiesMatch(a.Definition, b.Definition));
     }
 
     [Fact]
@@ -100,9 +96,8 @@ public sealed class IlAssertTests {
             }
         }
 
-        if (found) {
-            Assert.ThrowsAny<Xunit.Sdk.XunitException>(() => IlAssert.BodiesMatch(a.Definition, b.Definition));
-        }
+        Assert.True(found, "Target must contain an Ldarg_0 instruction to exercise short-vs-long opcode divergence.");
+        Assert.ThrowsAny<Xunit.Sdk.XunitException>(() => IlAssert.BodiesMatch(a.Definition, b.Definition));
     }
 
     [Fact]
