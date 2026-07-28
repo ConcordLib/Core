@@ -170,15 +170,24 @@ jobs:
       matrix:
         include:
           # Canonical trio — required (experimental: false).
-          - { label: linux-x64,    runner: ubuntu-24.04,   experimental: false }
-          - { label: windows-x64,  runner: windows-latest, experimental: false }
-          - { label: macos-arm64,  runner: macos-latest,   experimental: false }
+          - { label: linux-x64,    runner: ubuntu-24.04,   experimental: false, testFilter: '' }
+          - { label: windows-x64,  runner: windows-latest, experimental: false, testFilter: '' }
+          - { label: macos-arm64,  runner: macos-latest,   experimental: false, testFilter: '' }
           # Extended coverage — informational until green, then flip experimental to false.
           # macos-x64 (macos-13, Intel) is dropped: GitHub is retiring Intel mac runners, so
           # it is slow/scarce to allocate and stalled every release without ever completing.
           # Apple Silicon macOS is still covered by the required macos-arm64 cell.
-          - { label: linux-arm64,  runner: ubuntu-24.04-arm, experimental: true }
-          - { label: windows-arm64,runner: windows-11-arm,   experimental: true }
+          - { label: linux-arm64,  runner: ubuntu-24.04-arm, experimental: true,  testFilter: '' }
+          # Concord.Harmony.Tests is filtered out here because MonoMod has no win-arm64 support:
+          # every test that installs a detour throws "The runtime's Abi field is not set, and is
+          # unusable (MonoMod.Core.Platforms.Runtimes.Core100Runtime)". MonoMod#279 is still open,
+          # and the "Add Windows-ARM64 support" commit (e8e742c) sits on a branch that has diverged
+          # from master, so no released MonoMod.Core carries the fix and a version bump cannot help.
+          # Everything else passes on this runner, so the cell is filtered rather than dropped:
+          # it still guards the other ~700 tests on arm64. Remove the filter when MonoMod ships it.
+          # Still experimental for one run: the net472 leg below has only ever been skipped here
+          # (the net10.0 Test step failed first), so it is unproven on arm64. Promote once green.
+          - { label: windows-arm64,runner: windows-11-arm,   experimental: true,  testFilter: 'FullyQualifiedName!~Concord.Harmony.Tests' }
     steps:
       - uses: actions/checkout@v4
 
@@ -198,7 +207,7 @@ jobs:
         run: dotnet restore Concord.ci.slnx
 
       - name: Test
-        run: dotnet test Concord.ci.slnx -c Release --no-restore -f net10.0 --logger trx --results-directory test-results
+        run: dotnet test Concord.ci.slnx -c Release --no-restore -f net10.0 --logger trx --results-directory test-results ${{ matrix.testFilter != '' && format('--filter "{0}"', matrix.testFilter) || '' }}
 
       - name: Test (net472)
         if: startsWith(matrix.runner, 'windows')
