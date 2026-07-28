@@ -3,7 +3,7 @@ namespace Concord.Emit;
 /// <summary>
 /// An IL method body in language-neutral form.
 /// </summary>
-internal sealed class NeutralBody {
+public sealed class NeutralBody {
     /// <summary>
     /// A sentinel label id marking the end of the method body.
     /// </summary>

@@ -2,8 +2,6 @@ using System.Collections.Generic;
 using Mono.Cecil.Cil;
 
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Concord.Emit.Tests")]
-[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Concord.Harmony")]
-[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Concord.Harmony.Tests")]
 
 namespace Concord.Emit;
 

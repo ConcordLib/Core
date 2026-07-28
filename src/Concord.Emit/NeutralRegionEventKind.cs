@@ -3,7 +3,7 @@ namespace Concord.Emit;
 /// <summary>
 /// Distinguishes the kind of region event in exception handling.
 /// </summary>
-internal enum NeutralRegionEventKind {
+public enum NeutralRegionEventKind {
     /// <summary>Marks the beginning of a try block.</summary>
     BeginTry,
 

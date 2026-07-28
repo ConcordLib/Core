@@ -9,7 +9,7 @@ namespace Concord.Emit;
 ///     method's own IL. This lets a caller compose against a body it got from somewhere else,
 ///     such as an instruction stream handed in by another patching library.
 /// </summary>
-internal static class BodyTransformer {
+public static class BodyTransformer {
     /// <summary>Extracts the canonical target's current IL as a neutral body.</summary>
     /// <param name="target">The method to read the current IL from.</param>
     /// <returns>A neutral body representing <paramref name="target" />'s current IL.</returns>

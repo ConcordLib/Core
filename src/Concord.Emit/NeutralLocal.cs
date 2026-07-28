@@ -3,7 +3,7 @@ namespace Concord.Emit;
 /// <summary>
 /// A local variable in language-neutral form.
 /// </summary>
-internal sealed class NeutralLocal {
+public sealed class NeutralLocal {
     /// <summary>
     /// Creates a local variable.
     /// </summary>
