@@ -132,6 +132,12 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     /// </summary>
     public const string TranspilerInjectedMemberAccessDiagnosticId = "CONCORD024";
 
+    /// <summary>
+    ///     Diagnostic id for a plain method on a [Patch] type that references a [Shadow]/[InjectField]/
+    ///     [InjectProperty]/[InjectMethod] member.
+    /// </summary>
+    public const string InjectedMemberOutsideInjectionDiagnosticId = "CONCORD025";
+
     private const string ConcordPatchesNamespace = "Concord.Patches";
     private const string ConcordNamespace = "Concord";
     private const string OperationTypeName = "Operation";
@@ -345,6 +351,15 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         true,
         "Shadow and injected members exist only as IL-copy sources for declarative injections. A transpiler is invoked directly rather than copied, so touching one fails at runtime instead of compile time.");
 
+    private static readonly DiagnosticDescriptor InjectedMemberOutsideInjectionRule = new(
+        InjectedMemberOutsideInjectionDiagnosticId,
+        "Injected member referenced outside an injection method",
+        "'{0}' references '{1}', a [Shadow]/[InjectField]/[InjectProperty]/[InjectMethod] member, but is not itself an [Inject] method; only an injection body is copied into the wrapper, so this reads the declaration's own field and gets null or default",
+        ConcordPatchesNamespace,
+        DiagnosticSeverity.Error,
+        true,
+        "Concord rewrites injected member accesses only inside the bodies it copies into the generated wrapper. A helper, constructor or ordinary property on the patch type is called normally, so it sees the declaration's own member - whatever its initializer left there - with no error at build or patch time. Pass the value in as a parameter from the injection method, or read the target member by reflection.");
+
     private enum MetadataMemberKind {
         Field,
         Property,
@@ -376,7 +391,8 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             InvalidPatchOrderingRule,
             TranspilerMustBeStaticRule,
             InvalidTranspilerSignatureRule,
-            TranspilerInjectedMemberAccessRule);
+            TranspilerInjectedMemberAccessRule,
+            InjectedMemberOutsideInjectionRule);
 
     /// <inheritdoc />
     public override void Initialize(AnalysisContext context) {
@@ -423,6 +439,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         AnalyzeInjectionMethods(context, patchType, targetType);
         AnalyzeAttachedFields(context, patchType, targetType);
         AnalyzeUnsupportedInjectionMembers(context, patchType, targetType);
+        AnalyzeInjectedMemberScope(context, patchType, targetType);
     }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Minor Code Smell", "S4158", Justification = "False positive: beforeOwners/afterOwners accumulate across loop iterations via owners.Add, so oppositeOwners is not empty on later iterations; the Contains check detects owners declared in both [PatchBefore] and [PatchAfter].")]
@@ -1103,6 +1120,79 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         return type is INamedTypeSymbol named &&
                named.Name == "ITranspilerContext" &&
                named.ContainingNamespace.ToDisplayString() == ConcordNamespace;
+    }
+
+    // Concord rewrites injected member accesses only in the bodies it copies into the wrapper. Every
+    // other method on the patch type is invoked normally and sees the declaration's own member, which
+    // is whatever its initializer left there - so it silently reads null or default instead of the
+    // target's value, with nothing to show for it at build or patch time.
+    private static void AnalyzeInjectedMemberScope(SymbolAnalysisContext context, INamedTypeSymbol patchType, INamedTypeSymbol targetType) {
+        HashSet<string> injectedMembers = new HashSet<string>(StringComparer.Ordinal);
+        foreach (ISymbol member in patchType.GetMembers()) {
+            if (member.GetAttributes().Any(IsShadowOrInjectedMemberAttribute)) {
+                injectedMembers.Add(member.Name);
+            }
+        }
+
+        AddShadowFieldNames(patchType, targetType, injectedMembers);
+
+        if (injectedMembers.Count == 0) {
+            return;
+        }
+
+        foreach (ISymbol member in patchType.GetMembers()) {
+            if (member is not IMethodSymbol method || method.IsImplicitlyDeclared) {
+                continue;
+            }
+
+            // An injection body is copied, so it is the one place these members work. Transpilers are
+            // [Inject] too but are invoked rather than copied; CONCORD024 already covers those.
+            if (method.GetAttributes().Any(IsInjectAttribute)) {
+                continue;
+            }
+
+            // Abstract members are the declarations themselves, not code that reads them.
+            if (method.IsAbstract) {
+                continue;
+            }
+
+            ReportInjectedMemberUses(context, method, injectedMembers);
+        }
+    }
+
+    private static void ReportInjectedMemberUses(SymbolAnalysisContext context, IMethodSymbol method, HashSet<string> injectedMembers) {
+        foreach (SyntaxReference syntaxReference in method.DeclaringSyntaxReferences) {
+            SyntaxNode declaration = syntaxReference.GetSyntax(context.CancellationToken);
+            SyntaxNode? body = declaration switch {
+                MethodDeclarationSyntax m => (SyntaxNode?)m.Body ?? m.ExpressionBody,
+                ConstructorDeclarationSyntax c => (SyntaxNode?)c.Body ?? c.ExpressionBody,
+                AccessorDeclarationSyntax a => (SyntaxNode?)a.Body ?? a.ExpressionBody,
+                ArrowExpressionClauseSyntax e => e,
+                _ => null,
+            };
+
+            if (body is null) {
+                continue;
+            }
+
+            foreach (SyntaxNode descendant in body.DescendantNodesAndSelf()) {
+                if (descendant is not IdentifierNameSyntax identifier || !injectedMembers.Contains(identifier.Identifier.Text)) {
+                    continue;
+                }
+
+                // nameof(member) is a compile-time string, not an access.
+                if (identifier.Parent is ArgumentSyntax { Parent.Parent: InvocationExpressionSyntax { Expression: IdentifierNameSyntax { Identifier.Text: "nameof" } } }) {
+                    continue;
+                }
+
+                context.ReportDiagnostic(Diagnostic.Create(
+                    InjectedMemberOutsideInjectionRule,
+                    identifier.GetLocation(),
+                    method.Name,
+                    identifier.Identifier.Text));
+                return;
+            }
+        }
     }
 
     private static void ValidateTranspilerInjectedMemberAccess(SymbolAnalysisContext context, InjectionInfo injection, INamedTypeSymbol targetType) {

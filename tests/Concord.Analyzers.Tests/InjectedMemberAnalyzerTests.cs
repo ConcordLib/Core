@@ -447,6 +447,158 @@ public sealed class InjectedMemberAnalyzerTests {
         Assert.Equal(InjectedMemberAnalyzer.MismatchedMemberDiagnosticId, diagnostic.Id);
     }
 
+    // The shape that broke SkillVisibilityPatch: a plain helper reading an injected field. Only an
+    // injection body is copied into the wrapper, so the helper read the declaration's own null and
+    // NRE'd at runtime with nothing to show for it at build time.
+    [Fact]
+    public async Task InjectedField_ReadFromPlainHelper_ReportsDiagnostic() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public class Target {
+                private int fuel;
+                public virtual int Tick(int delta) => delta;
+            }
+
+            [Concord.Patch]
+            public abstract class Patch : Target {
+                [Concord.InjectField("fuel")]
+                private int fuel;
+
+                [Concord.Inject(Concord.At.Head, nameof(Tick))]
+                private void BeforeTick(int delta) {
+                    Bump();
+                }
+
+                private void Bump() {
+                    fuel += 1;
+                }
+            }
+            """);
+
+        Diagnostic diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(InjectedMemberAnalyzer.InjectedMemberOutsideInjectionDiagnosticId, diagnostic.Id);
+        Assert.Contains("Bump", diagnostic.GetMessage());
+        Assert.Contains("fuel", diagnostic.GetMessage());
+    }
+
+    [Fact]
+    public async Task InjectedField_ReadFromInjectionMethod_IsClean() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public class Target {
+                private int fuel;
+                public virtual int Tick(int delta) => delta;
+            }
+
+            [Concord.Patch]
+            public abstract class Patch : Target {
+                [Concord.InjectField("fuel")]
+                private int fuel;
+
+                [Concord.Inject(Concord.At.Head, nameof(Tick))]
+                private void BeforeTick(int delta) {
+                    fuel += delta;
+                }
+            }
+            """);
+
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
+    public async Task InjectedField_ReadFromConstructor_ReportsDiagnostic() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public class Target {
+                private int fuel;
+                public virtual int Tick(int delta) => delta;
+            }
+
+            [Concord.Patch]
+            public abstract class Patch : Target {
+                [Concord.InjectField("fuel")]
+                private int fuel;
+
+                protected Patch() {
+                    fuel = 3;
+                }
+
+                [Concord.Inject(Concord.At.Head, nameof(Tick))]
+                private void BeforeTick(int delta) {
+                }
+            }
+            """);
+
+        Diagnostic diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(InjectedMemberAnalyzer.InjectedMemberOutsideInjectionDiagnosticId, diagnostic.Id);
+    }
+
+    // A helper handed the value as a parameter is the correct shape and must stay clean.
+    [Fact]
+    public async Task InjectedField_PassedToHelperAsParameter_IsClean() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public class Target {
+                private int fuel;
+                public virtual int Tick(int delta) => delta;
+            }
+
+            [Concord.Patch]
+            public abstract class Patch : Target {
+                [Concord.InjectField("fuel")]
+                private int fuel;
+
+                [Concord.Inject(Concord.At.Head, nameof(Tick))]
+                private void BeforeTick(int delta) {
+                    Report(fuel);
+                }
+
+                private static void Report(int amount) {
+                }
+            }
+            """);
+
+        Assert.Empty(diagnostics);
+    }
+
+    // nameof is a compile-time string, not an access.
+    [Fact]
+    public async Task InjectedField_UsedInNameofFromHelper_IsClean() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public class Target {
+                private int fuel;
+                public virtual int Tick(int delta) => delta;
+            }
+
+            [Concord.Patch]
+            public abstract class Patch : Target {
+                [Concord.InjectField("fuel")]
+                private int fuel;
+
+                [Concord.Inject(Concord.At.Head, nameof(Tick))]
+                private void BeforeTick(int delta) {
+                }
+
+                private static string Describe() {
+                    return nameof(fuel);
+                }
+            }
+            """);
+
+        Assert.Empty(diagnostics);
+    }
+
     [Fact]
     public async Task StringTarget_UnresolvedTarget_ReportsDiagnostic() {
         ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
