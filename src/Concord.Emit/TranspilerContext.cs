@@ -32,7 +32,7 @@ internal sealed class TranspilerContext : ITranspilerContext {
 
     public LocalRef DeclareLocal(Type type) {
         if (type is null) {
-            throw new ArgumentNullException(nameof(type));
+            throw new ConcordEmitException("CONC116", "DeclareLocal was called with a null type; a transpiler-declared local must name a concrete type.");
         }
 
         declaredLocals.Add(type);

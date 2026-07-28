@@ -1,4 +1,5 @@
 using System.Reflection;
+using Concord.Emit;
 
 namespace Concord;
 
@@ -17,5 +18,6 @@ public interface ITranspilerContext {
     /// <summary>Declares a new local variable in the method body.</summary>
     /// <param name="type">The local's type.</param>
     /// <returns>A handle usable as the operand of a load or store instruction.</returns>
+    /// <exception cref="ConcordEmitException">Thrown with code <c>CONC116</c> when <paramref name="type" /> is <see langword="null" />.</exception>
     LocalRef DeclareLocal(Type type);
 }
