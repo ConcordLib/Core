@@ -185,9 +185,7 @@ jobs:
           # from master, so no released MonoMod.Core carries the fix and a version bump cannot help.
           # Everything else passes on this runner, so the cell is filtered rather than dropped:
           # it still guards the other ~700 tests on arm64. Remove the filter when MonoMod ships it.
-          # Still experimental for one run: the net472 leg below has only ever been skipped here
-          # (the net10.0 Test step failed first), so it is unproven on arm64. Promote once green.
-          - { label: windows-arm64,runner: windows-11-arm,   experimental: true,  testFilter: 'FullyQualifiedName!~Concord.Harmony.Tests' }
+          - { label: windows-arm64,runner: windows-11-arm,   experimental: false, testFilter: 'FullyQualifiedName!~Concord.Harmony.Tests' }
     steps:
       - uses: actions/checkout@v4
 
