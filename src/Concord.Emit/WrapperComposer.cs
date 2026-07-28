@@ -75,6 +75,69 @@ public static class WrapperComposer {
     }
 
     /// <summary>
+    ///     Creates a transpiler context for use with <see cref="TransformStream" />, in the virgin
+    ///     local-numbering state a supplied stream expects: no locals declared yet, so a caller's
+    ///     first <see cref="ITranspilerContext.DeclareLocal" /> call returns index 0, the second
+    ///     returns index 1, and so on.
+    /// </summary>
+    /// <param name="target">
+    ///     The method the supplied stream's shape describes. Async and iterator methods are resolved
+    ///     to their generated <c>MoveNext</c> method, matching <see cref="TransformStream" />.
+    /// </param>
+    /// <returns>A fresh transpiler context, not yet used to read or write any body.</returns>
+    public static ITranspilerContext CreateStreamContext(MethodBase target) {
+        MethodBase resolved = ResolveStateMachineTarget(target);
+        return new TranspilerContext(resolved);
+    }
+
+    /// <summary>
+    ///     Composes ordered injections onto a caller-supplied instruction stream instead of IL read from
+    ///     <paramref name="target" /> itself. This is the seam a coexistence bridge - one that hands
+    ///     Concord another patching library's own transpiler stream - uses to compose Concord's
+    ///     injections onto it and hand the composed stream back.
+    /// </summary>
+    /// <param name="target">
+    ///     The method that defines the composed body's shape (return type and parameters). Async and
+    ///     iterator methods are resolved to their generated <c>MoveNext</c> method.
+    /// </param>
+    /// <param name="source">The instruction stream to compose the injections onto.</param>
+    /// <param name="ordered">The injections to compose, ordered by their caller.</param>
+    /// <param name="context">
+    ///     The context <paramref name="source" /> was produced against, obtained from
+    ///     <see cref="CreateStreamContext" />. Locals a caller declared on it before this call land at
+    ///     the indices they were declared in.
+    /// </param>
+    /// <returns>The composed instruction stream.</returns>
+    /// <exception cref="ConcordEmitException">
+    ///     Thrown with code <c>CONC116</c> when <paramref name="context" /> was not obtained from
+    ///     <see cref="CreateStreamContext" />.
+    /// </exception>
+    public static List<CodeInstruction> TransformStream(
+        MethodBase target,
+        IReadOnlyList<CodeInstruction> source,
+        IReadOnlyList<Injection> ordered,
+        ITranspilerContext context) {
+        TranspilerContext writeContext = RequireConcreteContext(context);
+        MethodBase resolved = ResolveStateMachineTarget(target);
+        Type returnType = ResolveReturnType(resolved);
+        Type[] parameterTypes = ResolveParameterTypes(resolved);
+
+        using DynamicMethodDefinition wrapper = new DynamicMethodDefinition(WrapperName(resolved), returnType, parameterTypes);
+        wrapper.Definition.Body.InitLocals = ReadOriginalInitLocals(resolved);
+
+        CecilCodeConverter.WriteBack(wrapper.Definition, source, writeContext);
+
+        PartitionTranspilers(ordered, out List<Injection> preTranspilers, out List<Injection> finalTranspilers, out List<Injection> declarative);
+
+        RunTranspilers(wrapper.Definition, resolved, preTranspilers);
+        AssembleInto(wrapper.Definition, resolved, declarative, returnType);
+        RunTranspilers(wrapper.Definition, resolved, finalTranspilers);
+
+        TranspilerContext readContext = new TranspilerContext(resolved);
+        return CecilCodeConverter.ToInstructions(wrapper.Definition, readContext);
+    }
+
+    /// <summary>
     ///     Resolves async and iterator entry methods to their generated state-machine <c>MoveNext</c> method.
     /// </summary>
     /// <param name="target">The method to inspect.</param>
@@ -227,6 +290,21 @@ public static class WrapperComposer {
         }
 
         CecilCodeConverter.WriteBack(wrapperDefinition, instructions, context);
+    }
+
+    private static TranspilerContext RequireConcreteContext(ITranspilerContext context) {
+        if (context is TranspilerContext concrete) {
+            return concrete;
+        }
+
+        throw new ConcordEmitException(
+            "CONC116",
+            "The supplied ITranspilerContext was not obtained from WrapperComposer.CreateStreamContext.");
+    }
+
+    private static bool ReadOriginalInitLocals(MethodBase resolved) {
+        using DynamicMethodDefinition original = new DynamicMethodDefinition(resolved);
+        return original.Definition.Body.InitLocals;
     }
 
     private static bool HasWholeMethodAround(IReadOnlyList<Injection> ordered) {
