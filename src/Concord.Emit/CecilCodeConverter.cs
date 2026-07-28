@@ -182,25 +182,19 @@ internal static class CecilCodeConverter {
         }
 
         foreach (ExceptionHandler handler in body.ExceptionHandlers) {
-            if (handler.TryStart is not null) {
-                EnsureLabel(handler.TryStart, context, preservedLabels);
-            }
+            EnsureLabelIfPresent(handler.TryStart, context, preservedLabels);
+            EnsureLabelIfPresent(handler.TryEnd, context, preservedLabels);
+            EnsureLabelIfPresent(handler.HandlerStart, context, preservedLabels);
+            EnsureLabelIfPresent(handler.HandlerEnd, context, preservedLabels);
+            EnsureLabelIfPresent(handler.FilterStart, context, preservedLabels);
+        }
+    }
 
-            if (handler.TryEnd is not null) {
-                EnsureLabel(handler.TryEnd, context, preservedLabels);
-            }
-
-            if (handler.HandlerStart is not null) {
-                EnsureLabel(handler.HandlerStart, context, preservedLabels);
-            }
-
-            if (handler.HandlerEnd is not null) {
-                EnsureLabel(handler.HandlerEnd, context, preservedLabels);
-            }
-
-            if (handler.FilterStart is not null) {
-                EnsureLabel(handler.FilterStart, context, preservedLabels);
-            }
+    // Which boundaries an ExceptionHandler actually names depends on its kind: only a filter has
+    // FilterStart, only a guarded region has TryEnd, and so on. The unset ones are simply skipped.
+    private static void EnsureLabelIfPresent(Instruction? target, TranspilerContext context, Dictionary<Instruction, List<int>>? preservedLabels) {
+        if (target is not null) {
+            EnsureLabel(target, context, preservedLabels);
         }
     }
 
@@ -343,25 +337,7 @@ internal static class CecilCodeConverter {
         List<ExceptionEnvelope> roots = new List<ExceptionEnvelope>();
 
         foreach (ExceptionEnvelope envelope in envelopes) {
-            ExceptionEnvelope? parent = null;
-            foreach (ExceptionEnvelope candidate in envelopes) {
-                if (ReferenceEquals(candidate, envelope)) {
-                    continue;
-                }
-
-                bool contains = candidate.TryStartIndex <= envelope.TryStartIndex && envelope.EndIndex <= candidate.EndIndex
-                    && (candidate.TryStartIndex != envelope.TryStartIndex || candidate.EndIndex != envelope.EndIndex);
-                if (!contains) {
-                    continue;
-                }
-
-                int candidateSpan = candidate.EndIndex - candidate.TryStartIndex;
-                int parentSpan = parent is null ? int.MaxValue : parent.EndIndex - parent.TryStartIndex;
-                if (parent is null || candidateSpan < parentSpan) {
-                    parent = candidate;
-                }
-            }
-
+            ExceptionEnvelope? parent = TightestEnclosing(envelope, envelopes);
             if (parent is null) {
                 roots.Add(envelope);
             } else {
@@ -374,6 +350,33 @@ internal static class CecilCodeConverter {
         }
 
         return roots;
+    }
+
+    // The tightest enclosing envelope is the parent: with several candidates containing this one,
+    // the smallest span is the immediate parent and the rest are its own ancestors. Containment is
+    // deliberately strict - an envelope sharing both boundaries with another is a sibling, not a
+    // child, which is what a try/catch and its guarding try/finally look like when they coincide.
+    private static ExceptionEnvelope? TightestEnclosing(ExceptionEnvelope envelope, List<ExceptionEnvelope> envelopes) {
+        ExceptionEnvelope? parent = null;
+        foreach (ExceptionEnvelope candidate in envelopes) {
+            if (ReferenceEquals(candidate, envelope)) {
+                continue;
+            }
+
+            bool contains = candidate.TryStartIndex <= envelope.TryStartIndex && envelope.EndIndex <= candidate.EndIndex
+                && (candidate.TryStartIndex != envelope.TryStartIndex || candidate.EndIndex != envelope.EndIndex);
+            if (!contains) {
+                continue;
+            }
+
+            int candidateSpan = candidate.EndIndex - candidate.TryStartIndex;
+            int parentSpan = parent is null ? int.MaxValue : parent.EndIndex - parent.TryStartIndex;
+            if (parent is null || candidateSpan < parentSpan) {
+                parent = candidate;
+            }
+        }
+
+        return parent;
     }
 
     // Interleaves this envelope's own boundary markers with its children's, in the order a
