@@ -12,7 +12,7 @@ public sealed class InstanceRoundTripTests {
 
         InstanceInjectionMethods.Log.Clear();
         MethodInfo wrapper = RoundTrip.ComposeThroughStream(target, [head]);
-        Func<InstanceClassTarget, int, int> invoke = (Func<InstanceClassTarget, int, int>)wrapper.CreateDelegate(typeof(Func<InstanceClassTarget, int, int>));
+        Func<InstanceClassTarget, int, int> invoke = wrapper.CreateDelegate<Func<InstanceClassTarget, int, int>>();
 
         InstanceClassTarget instance = new InstanceClassTarget(10);
         int value = invoke(instance, 5);
@@ -30,7 +30,7 @@ public sealed class InstanceRoundTripTests {
 
         InstanceInjectionMethods.Log.Clear();
         MethodInfo wrapper = RoundTrip.ComposeThroughStream(target, [around]);
-        Func<InstanceClassTarget, int, int> invoke = (Func<InstanceClassTarget, int, int>)wrapper.CreateDelegate(typeof(Func<InstanceClassTarget, int, int>));
+        Func<InstanceClassTarget, int, int> invoke = wrapper.CreateDelegate<Func<InstanceClassTarget, int, int>>();
 
         InstanceClassTarget instance = new InstanceClassTarget(10);
         int value = invoke(instance, 5);

@@ -228,6 +228,9 @@ dotnet_diagnostic.SA1134.severity = none
 dotnet_diagnostic.SA1516.severity = none
 dotnet_diagnostic.SA1402.severity = none
 dotnet_diagnostic.SA1649.severity = none
+dotnet_diagnostic.CA1822.severity = none # can be marked static — a patch target must stay an instance method
+dotnet_diagnostic.CA2211.severity = none # non-constant static field — observation counters are asserted on, so public + mutable is the point
+dotnet_diagnostic.CA1859.severity = none # use the concrete type — a perf hint with nothing to gain in a fixture
 
 [bench/**/*.cs]
 dotnet_diagnostic.SA0001.severity = none
@@ -247,6 +250,9 @@ dotnet_diagnostic.SA1134.severity = none
 dotnet_diagnostic.SA1516.severity = none
 dotnet_diagnostic.SA1402.severity = none
 dotnet_diagnostic.SA1649.severity = none
+dotnet_diagnostic.CA1822.severity = none # can be marked static — a patch target must stay an instance method
+dotnet_diagnostic.CA2211.severity = none # non-constant static field — observation counters are asserted on, so public + mutable is the point
+dotnet_diagnostic.CA1859.severity = none # use the concrete type — a perf hint with nothing to gain in a fixture
 
 [**/*.Tests/**/*.cs]
 dotnet_diagnostic.SA0001.severity = none
@@ -266,6 +272,9 @@ dotnet_diagnostic.SA1134.severity = none
 dotnet_diagnostic.SA1516.severity = none
 dotnet_diagnostic.SA1402.severity = none
 dotnet_diagnostic.SA1649.severity = none
+dotnet_diagnostic.CA1822.severity = none # can be marked static — a patch target must stay an instance method
+dotnet_diagnostic.CA2211.severity = none # non-constant static field — observation counters are asserted on, so public + mutable is the point
+dotnet_diagnostic.CA1859.severity = none # use the concrete type — a perf hint with nothing to gain in a fixture
 
 [**/*.Test/**/*.cs]
 dotnet_diagnostic.SA0001.severity = none
@@ -285,6 +294,9 @@ dotnet_diagnostic.SA1134.severity = none
 dotnet_diagnostic.SA1516.severity = none
 dotnet_diagnostic.SA1402.severity = none
 dotnet_diagnostic.SA1649.severity = none
+dotnet_diagnostic.CA1822.severity = none # can be marked static — a patch target must stay an instance method
+dotnet_diagnostic.CA2211.severity = none # non-constant static field — observation counters are asserted on, so public + mutable is the point
+dotnet_diagnostic.CA1859.severity = none # use the concrete type — a perf hint with nothing to gain in a fixture
 
 [**/Tests/**/*.cs]
 dotnet_diagnostic.SA0001.severity = none
@@ -304,6 +316,9 @@ dotnet_diagnostic.SA1134.severity = none
 dotnet_diagnostic.SA1516.severity = none
 dotnet_diagnostic.SA1402.severity = none
 dotnet_diagnostic.SA1649.severity = none
+dotnet_diagnostic.CA1822.severity = none # can be marked static — a patch target must stay an instance method
+dotnet_diagnostic.CA2211.severity = none # non-constant static field — observation counters are asserted on, so public + mutable is the point
+dotnet_diagnostic.CA1859.severity = none # use the concrete type — a perf hint with nothing to gain in a fixture
 
 [**/*.TestMod/**/*.cs]
 dotnet_diagnostic.SA0001.severity = none
@@ -323,6 +338,9 @@ dotnet_diagnostic.SA1134.severity = none
 dotnet_diagnostic.SA1516.severity = none
 dotnet_diagnostic.SA1402.severity = none
 dotnet_diagnostic.SA1649.severity = none
+dotnet_diagnostic.CA1822.severity = none # can be marked static — a patch target must stay an instance method
+dotnet_diagnostic.CA2211.severity = none # non-constant static field — observation counters are asserted on, so public + mutable is the point
+dotnet_diagnostic.CA1859.severity = none # use the concrete type — a perf hint with nothing to gain in a fixture
 
 # DefOf classes: the engine's DefOfHelper.RebindAllDefOfs reflects over PUBLIC STATIC fields and
 # matches each field's NAME to a def's TYD `name` (which carries underscores, e.g. Mod_Thing).

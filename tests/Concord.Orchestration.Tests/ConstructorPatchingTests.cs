@@ -133,7 +133,7 @@ public sealed class ConstructorPatchingTests {
         Assert.Equal(10, before.Value);
 
         MethodInfo injectionMethod = typeof(FluentCtorInjectionMethod).GetMethod(nameof(FluentCtorInjectionMethod.OnConstruct))!;
-        IPatchHandle handle = Patcher.ForConstructor(typeof(FluentCtorTarget), [typeof(int)])
+        IPatchHandle handle = Patcher.ForConstructor<FluentCtorTarget>([typeof(int)])
             .Head(injectionMethod)
             .Apply();
         try {
@@ -215,7 +215,7 @@ public sealed class ConstructorPatchingTests {
         OverloadedCtorLog.Reset();
 
         MethodInfo injectionMethod = typeof(OverloadedCtorIntInjectionMethod).GetMethod(nameof(OverloadedCtorIntInjectionMethod.OnIntCtor))!;
-        IPatchHandle handle = Patcher.ForConstructor(typeof(OverloadedCtorTarget), [typeof(int)])
+        IPatchHandle handle = Patcher.ForConstructor<OverloadedCtorTarget>([typeof(int)])
             .Head(injectionMethod)
             .Apply();
         try {
@@ -252,14 +252,14 @@ public sealed class ConstructorPatchingTests {
             null);
         Assert.NotNull(parameterless);
 
-        PatchBuilder builder = Patcher.ForConstructor(typeof(OverloadedCtorTarget), []);
+        PatchBuilder builder = Patcher.ForConstructor<OverloadedCtorTarget>([]);
         Assert.NotNull(builder);
     }
 
     [Fact]
     public void ForConstructor_NoMatchingCtor_ThrowsConcordDeclarationException() {
         ConcordDeclarationException ex = Assert.Throws<ConcordDeclarationException>(
-            () => Patcher.ForConstructor(typeof(FluentCtorTarget), [typeof(double)]));
+            () => Patcher.ForConstructor<FluentCtorTarget>([typeof(double)]));
         Assert.Contains("instance constructor", ex.Message);
         Assert.Contains(typeof(FluentCtorTarget).FullName!, ex.Message);
     }

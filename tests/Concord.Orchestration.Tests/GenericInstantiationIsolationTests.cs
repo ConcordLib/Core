@@ -44,7 +44,7 @@ public class GenericInstantiationIsolationTests {
         MethodInfo injectionMethod = typeof(IsolationStringTailInjection).GetMethod(nameof(IsolationStringTailInjection.AfterGet))!;
 
         ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() =>
-            Patcher.For(typeof(IsolationBox<string>), nameof(IsolationBox<string>.Get))
+            Patcher.For<IsolationBox<string>>(nameof(IsolationBox<string>.Get))
                 .Tail(injectionMethod)
                 .Apply());
 
@@ -73,7 +73,7 @@ public class GenericInstantiationIsolationTests {
 
         MethodInfo injectionMethod = typeof(IsolationIntTailInjection).GetMethod(nameof(IsolationIntTailInjection.AfterGet))!;
 
-        IPatchHandle handle = Patcher.For(typeof(IsolationBox<int>), nameof(IsolationBox<int>.Get))
+        IPatchHandle handle = Patcher.For<IsolationBox<int>>(nameof(IsolationBox<int>.Get))
             .Tail(injectionMethod)
             .Apply();
         try {

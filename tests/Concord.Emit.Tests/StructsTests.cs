@@ -14,7 +14,7 @@ public sealed class StructsTests {
         MethodBase target = typeof(Vec).GetMethod(nameof(Vec.Bump))!;
 
         ComposeResult result = WrapperComposer.Compose(target, []);
-        BumpDel del = (BumpDel)result.Wrapper.CreateDelegate(typeof(BumpDel));
+        BumpDel del = result.Wrapper.CreateDelegate<BumpDel>();
 
         Vec instance = new Vec { X = 0 };
         del(ref instance);
@@ -27,7 +27,7 @@ public sealed class StructsTests {
         MethodBase target = typeof(Vec).GetMethod(nameof(Vec.Bump))!;
 
         ComposeResult result = WrapperComposer.Compose(target, []);
-        BumpDel del = (BumpDel)result.Wrapper.CreateDelegate(typeof(BumpDel));
+        BumpDel del = result.Wrapper.CreateDelegate<BumpDel>();
 
         Vec instance = new Vec { X = 0 };
         del(ref instance);
