@@ -3,7 +3,7 @@ namespace Concord.Emit;
 /// <summary>
 /// An exception handling region event in language-neutral form.
 /// </summary>
-public sealed class NeutralRegionEvent {
+internal sealed class NeutralRegionEvent {
     /// <summary>
     /// Creates a region event.
     /// </summary>

@@ -5,7 +5,7 @@ namespace Concord.Emit;
 /// <summary>
 /// A union type representing the operand of an IL instruction in a language-neutral form.
 /// </summary>
-public sealed class NeutralOperand {
+internal sealed class NeutralOperand {
     /// <summary>
     /// A singleton operand representing no value.
     /// </summary>

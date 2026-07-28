@@ -5,7 +5,7 @@ using MonoMod.Utils;
 
 namespace Concord.Emit.Tests.NeutralRoundTrip;
 
-public static class RoundTrip {
+internal static class RoundTrip {
     public static MethodInfo ComposeThroughNeutralBody(MethodBase target, IReadOnlyList<Injection> ordered) {
         NeutralBody supplied = BodyTransformer.FromMethod(target);
         NeutralBody composed = BodyTransformer.Transform(target, supplied, ordered);
