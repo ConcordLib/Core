@@ -183,6 +183,190 @@ public sealed class InjectedMemberAnalyzerTests {
         Assert.Contains("Game.Target", diagnostic.GetMessage());
     }
 
+    // Roslyn's default MetadataImportOptions.Public hides private members of referenced
+    // assemblies, which is exactly what [InjectField] exists to reach. Before this was fixed the
+    // analyzer confirmed the field existed and then skipped the type check entirely, so a wrong
+    // declared type only surfaced as a CONC072 at patch-apply time.
+    [Fact]
+    public async Task ExplicitTypeTarget_PrivateReferencedField_WithWrongDeclaredType_ReportsMismatch() {
+        MetadataReference targetReference = CreateReference(
+            "GameAssembly",
+            """
+            namespace Game {
+                public sealed class Target {
+                    private FlightState flightState;
+
+                    private enum FlightState {
+                        Grounded,
+                        Flying,
+                    }
+                }
+            }
+            """);
+
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            [Concord.Patch(typeof(Game.Target))]
+            public abstract class Patch {
+                [Concord.InjectField("flightState")]
+                private int flightState;
+            }
+            """,
+            targetReference);
+
+        Diagnostic diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(InjectedMemberAnalyzer.MismatchedMemberDiagnosticId, diagnostic.Id);
+        Assert.Contains("flightState", diagnostic.GetMessage());
+    }
+
+    [Fact]
+    public async Task ExplicitTypeTarget_PrivateReferencedField_WithWrongStaticness_ReportsMismatch() {
+        MetadataReference targetReference = CreateReference(
+            "GameAssembly",
+            """
+            namespace Game {
+                public sealed class Target {
+                    private static int configCopy;
+                }
+            }
+            """);
+
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            [Concord.Patch(typeof(Game.Target))]
+            public abstract class Patch {
+                [Concord.InjectField("configCopy")]
+                private int configCopy;
+            }
+            """,
+            targetReference);
+
+        Diagnostic diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(InjectedMemberAnalyzer.MismatchedMemberDiagnosticId, diagnostic.Id);
+        Assert.Contains("configCopy", diagnostic.GetMessage());
+    }
+
+    [Fact]
+    public async Task ExplicitTypeTarget_PrivateReferencedField_WithMatchingShape_IsClean() {
+        MetadataReference targetReference = CreateReference(
+            "GameAssembly",
+            """
+            namespace Game {
+                public sealed class Target {
+                    private int fuel;
+                    private int[] history;
+                    private System.Collections.Generic.List<string> names;
+                    private static Nested marker;
+
+                    public sealed class Nested {
+                    }
+                }
+            }
+            """);
+
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            [Concord.Patch(typeof(Game.Target))]
+            public abstract class Patch {
+                [Concord.InjectField("fuel")]
+                private int fuel;
+
+                [Concord.InjectField("history")]
+                private int[] history;
+
+                [Concord.InjectField("names")]
+                private System.Collections.Generic.List<string> names;
+
+                [Concord.InjectField("marker")]
+                private static Game.Target.Nested marker;
+            }
+            """,
+            targetReference);
+
+        Assert.Empty(diagnostics);
+    }
+
+    // IParameterSymbol.Type strips the ref, so a by-value declaration used to sail past the
+    // name-and-type check and then emit starg against a managed pointer, which only failed at JIT.
+    [Fact]
+    public async Task ByRefTargetParameter_DeclaredByValue_ReportsInvalidSignature() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public class Target {
+                public virtual void Hit(ref int damage, out bool absorbed) {
+                    absorbed = false;
+                }
+            }
+
+            [Concord.Patch]
+            public abstract class Patch : Target {
+                [Concord.Inject(Concord.At.Head, nameof(Hit))]
+                private void BeforeHit(int damage, bool absorbed) {
+                }
+            }
+            """);
+
+        Assert.Equal(2, diagnostics.Length);
+        Assert.All(diagnostics, d => Assert.Equal(InjectedMemberAnalyzer.InvalidInjectionSignatureDiagnosticId, d.Id));
+        Assert.Contains(diagnostics, d => d.GetMessage().Contains("damage") && d.GetMessage().Contains("by reference"));
+        Assert.Contains(diagnostics, d => d.GetMessage().Contains("absorbed") && d.GetMessage().Contains("by reference"));
+    }
+
+    [Fact]
+    public async Task ByRefTargetParameter_DeclaredByRef_IsClean() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public class Target {
+                public virtual void Hit(ref int damage, out bool absorbed) {
+                    absorbed = false;
+                }
+            }
+
+            [Concord.Patch]
+            public abstract class Patch : Target {
+                [Concord.Inject(Concord.At.Head, nameof(Hit))]
+                private void BeforeHit(ref int damage, ref bool absorbed) {
+                }
+            }
+            """);
+
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
+    public async Task ByValueTargetParameter_DeclaredByRef_ReportsInvalidSignature() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public class Target {
+                public virtual void Hit(int damage) {
+                }
+            }
+
+            [Concord.Patch]
+            public abstract class Patch : Target {
+                [Concord.Inject(Concord.At.Head, nameof(Hit))]
+                private void BeforeHit(ref int damage) {
+                }
+            }
+            """);
+
+        Diagnostic diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(InjectedMemberAnalyzer.InvalidInjectionSignatureDiagnosticId, diagnostic.Id);
+        Assert.Contains("by value", diagnostic.GetMessage());
+    }
+
     [Fact]
     public async Task StringTarget_UnresolvedTarget_ReportsDiagnostic() {
         ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
