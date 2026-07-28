@@ -1,14 +1,14 @@
 using System.Reflection;
 using Xunit;
 
-namespace Concord.Emit.Tests.NeutralRoundTrip;
+namespace Concord.Emit.Tests.SuppliedStreamRoundTrip;
 
 [Collection("ExceptionRegionTargets")]
 public class PureRoundTripTests {
     private static MethodInfo RoundTripOf(Type declaring, string name) {
         MethodBase target = declaring.GetMethod(name)!;
-        NeutralBody neutral = RoundTrip.Extract(target);
-        return RoundTrip.Generate(neutral, target);
+        List<CodeInstruction> extracted = RoundTrip.Extract(target);
+        return StreamRoundTrip.Generate(extracted, target);
     }
 
     [Fact]
@@ -78,8 +78,8 @@ public class PureRoundTripTests {
     [Fact]
     public void ClassInstance_RoundTripsUnchanged() {
         MethodBase target = typeof(InstanceClassTarget).GetMethod(nameof(InstanceClassTarget.AddToBase))!;
-        NeutralBody neutral = RoundTrip.Extract(target);
-        MethodInfo generated = RoundTrip.Generate(neutral, target);
+        List<CodeInstruction> extracted = RoundTrip.Extract(target);
+        MethodInfo generated = StreamRoundTrip.Generate(extracted, target);
         InstanceClassTarget receiver = new InstanceClassTarget(10);
         Assert.Equal(13, generated.Invoke(null, [receiver, 3]));
     }
@@ -87,8 +87,8 @@ public class PureRoundTripTests {
     [Fact]
     public void StructInstance_RoundTripsUnchanged() {
         MethodBase target = typeof(InstanceStructTarget).GetMethod(nameof(InstanceStructTarget.AddToBase))!;
-        NeutralBody neutral = RoundTrip.Extract(target);
-        MethodInfo generated = RoundTrip.Generate(neutral, target);
+        List<CodeInstruction> extracted = RoundTrip.Extract(target);
+        MethodInfo generated = StreamRoundTrip.Generate(extracted, target);
         object[] arguments = [new InstanceStructTarget(10), 3];
         Assert.Equal(13, generated.Invoke(null, arguments));
     }

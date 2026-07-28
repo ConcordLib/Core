@@ -16,10 +16,12 @@ public static class StreamRoundTrip {
     }
 
     // A composed stream references its locals purely by index/type on each LocalRef operand; it
-    // carries no separate locals table the way a NeutralBody does. Reconstructing a real body to
-    // execute means re-declaring every referenced index densely from 0, exactly as a caller is
-    // expected to do before feeding TransformStream's output onward.
-    private static void DeclareReferencedLocals(IReadOnlyList<CodeInstruction> instructions, TranspilerContext context) {
+    // carries no separate locals table the way the old neutral body model did. Reconstructing a
+    // real body to execute means re-declaring every referenced index densely from 0, exactly as a
+    // caller is expected to do before feeding TransformStream's output onward. Internal (not
+    // private) because SuppliedStreamRoundTrip.RoundTrip reuses it to densely pre-declare a
+    // caller-supplied source stream's locals before composing, the same way on the input side.
+    internal static void DeclareReferencedLocals(IReadOnlyList<CodeInstruction> instructions, TranspilerContext context) {
         Dictionary<int, Type> typesByIndex = new Dictionary<int, Type>();
         int maxIndex = -1;
         foreach (CodeInstruction instruction in instructions) {

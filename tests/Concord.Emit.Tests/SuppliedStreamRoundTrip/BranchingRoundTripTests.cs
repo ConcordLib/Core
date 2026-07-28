@@ -1,7 +1,7 @@
 using System.Reflection;
 using Xunit;
 
-namespace Concord.Emit.Tests.NeutralRoundTrip;
+namespace Concord.Emit.Tests.SuppliedStreamRoundTrip;
 
 public sealed class BranchingRoundTripTests {
     [Theory]
@@ -14,7 +14,7 @@ public sealed class BranchingRoundTripTests {
         Injection head = new Injection(headMethod, new InjectAt.Head(), "spike", 0);
 
         BranchingInjectionMethods.Log.Clear();
-        MethodInfo wrapper = RoundTrip.ComposeThroughNeutralBody(target, [head]);
+        MethodInfo wrapper = RoundTrip.ComposeThroughStream(target, [head]);
         object? value = wrapper.Invoke(null, [input]);
 
         Assert.Equal(expected, value);
@@ -31,7 +31,7 @@ public sealed class BranchingRoundTripTests {
         Injection around = new Injection(aroundMethod, new InjectAt.Around(), "spike", 0);
 
         BranchingInjectionMethods.Log.Clear();
-        MethodInfo wrapper = RoundTrip.ComposeThroughNeutralBody(target, [around]);
+        MethodInfo wrapper = RoundTrip.ComposeThroughStream(target, [around]);
         object? value = wrapper.Invoke(null, [input]);
 
         Assert.Equal(expected, value);
@@ -50,7 +50,7 @@ public sealed class BranchingRoundTripTests {
         Injection returnInjection = new Injection(returnMethod, new InjectAt.Return(), "spike", 0);
 
         BranchingInjectionMethods.Log.Clear();
-        MethodInfo wrapper = RoundTrip.ComposeThroughNeutralBody(target, [returnInjection]);
+        MethodInfo wrapper = RoundTrip.ComposeThroughStream(target, [returnInjection]);
         object? value = wrapper.Invoke(null, [which]);
 
         Assert.Equal(expected, value);
@@ -69,7 +69,7 @@ public sealed class BranchingRoundTripTests {
         Injection around = new Injection(aroundMethod, new InjectAt.Around(), "spike", 0);
 
         BranchingInjectionMethods.Log.Clear();
-        MethodInfo wrapper = RoundTrip.ComposeThroughNeutralBody(target, [around]);
+        MethodInfo wrapper = RoundTrip.ComposeThroughStream(target, [around]);
         object? value = wrapper.Invoke(null, [which]);
 
         Assert.Equal(expected, value);

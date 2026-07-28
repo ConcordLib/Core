@@ -1,7 +1,7 @@
 using System.Reflection;
 using Xunit;
 
-namespace Concord.Emit.Tests.NeutralRoundTrip;
+namespace Concord.Emit.Tests.SuppliedStreamRoundTrip;
 
 public sealed class StraightLineRoundTripTests {
     [Fact]
@@ -11,7 +11,7 @@ public sealed class StraightLineRoundTripTests {
         Injection head = new Injection(headMethod, new InjectAt.Head(), "spike", 0);
 
         StraightLineInjectionMethods.Log.Clear();
-        MethodInfo wrapper = RoundTrip.ComposeThroughNeutralBody(target, [head]);
+        MethodInfo wrapper = RoundTrip.ComposeThroughStream(target, [head]);
         object? value = wrapper.Invoke(null, [3, 4]);
 
         Assert.Equal(14, value);
@@ -25,7 +25,7 @@ public sealed class StraightLineRoundTripTests {
         Injection returnInjection = new Injection(returnMethod, new InjectAt.Return(), "spike", 0);
 
         StraightLineInjectionMethods.Log.Clear();
-        MethodInfo wrapper = RoundTrip.ComposeThroughNeutralBody(target, [returnInjection]);
+        MethodInfo wrapper = RoundTrip.ComposeThroughStream(target, [returnInjection]);
         object? value = wrapper.Invoke(null, [3, 4]);
 
         Assert.Equal(15, value);
@@ -39,7 +39,7 @@ public sealed class StraightLineRoundTripTests {
         Injection around = new Injection(aroundMethod, new InjectAt.Around(), "spike", 0);
 
         StraightLineInjectionMethods.Log.Clear();
-        MethodInfo wrapper = RoundTrip.ComposeThroughNeutralBody(target, [around]);
+        MethodInfo wrapper = RoundTrip.ComposeThroughStream(target, [around]);
         object? value = wrapper.Invoke(null, [3, 4]);
 
         Assert.Equal(14, value);

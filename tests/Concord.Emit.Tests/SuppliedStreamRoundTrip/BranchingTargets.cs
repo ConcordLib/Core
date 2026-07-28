@@ -1,6 +1,6 @@
 using Concord;
 
-namespace Concord.Emit.Tests.NeutralRoundTrip;
+namespace Concord.Emit.Tests.SuppliedStreamRoundTrip;
 
 public static class BranchingTargets {
     public static int ClassifyAndDouble(int x) {

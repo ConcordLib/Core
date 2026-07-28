@@ -1,6 +1,6 @@
 using Concord;
 
-namespace Concord.Emit.Tests.NeutralRoundTrip;
+namespace Concord.Emit.Tests.SuppliedStreamRoundTrip;
 
 public sealed class InstanceClassTarget {
     public int Base;

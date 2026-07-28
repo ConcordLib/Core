@@ -1,7 +1,7 @@
 using System.Reflection;
 using Xunit;
 
-namespace Concord.Emit.Tests.NeutralRoundTrip;
+namespace Concord.Emit.Tests.SuppliedStreamRoundTrip;
 
 public sealed class InstanceRoundTripTests {
     [Fact]
@@ -11,7 +11,7 @@ public sealed class InstanceRoundTripTests {
         Injection head = new Injection(headMethod, new InjectAt.Head(), "spike", 0);
 
         InstanceInjectionMethods.Log.Clear();
-        MethodInfo wrapper = RoundTrip.ComposeThroughNeutralBody(target, [head]);
+        MethodInfo wrapper = RoundTrip.ComposeThroughStream(target, [head]);
         Func<InstanceClassTarget, int, int> invoke = (Func<InstanceClassTarget, int, int>)wrapper.CreateDelegate(typeof(Func<InstanceClassTarget, int, int>));
 
         InstanceClassTarget instance = new InstanceClassTarget(10);
@@ -29,7 +29,7 @@ public sealed class InstanceRoundTripTests {
         Injection around = new Injection(aroundMethod, new InjectAt.Around(), "spike", 0);
 
         InstanceInjectionMethods.Log.Clear();
-        MethodInfo wrapper = RoundTrip.ComposeThroughNeutralBody(target, [around]);
+        MethodInfo wrapper = RoundTrip.ComposeThroughStream(target, [around]);
         Func<InstanceClassTarget, int, int> invoke = (Func<InstanceClassTarget, int, int>)wrapper.CreateDelegate(typeof(Func<InstanceClassTarget, int, int>));
 
         InstanceClassTarget instance = new InstanceClassTarget(10);
@@ -47,7 +47,7 @@ public sealed class InstanceRoundTripTests {
         Injection returnInjection = new Injection(returnMethod, new InjectAt.Return(), "spike", 0);
 
         InstanceInjectionMethods.Log.Clear();
-        MethodInfo wrapper = RoundTrip.ComposeThroughNeutralBody(target, [returnInjection]);
+        MethodInfo wrapper = RoundTrip.ComposeThroughStream(target, [returnInjection]);
 
         InstanceStructTarget instance = new InstanceStructTarget(10);
         object? value = wrapper.Invoke(null, [instance, 5]);
@@ -63,7 +63,7 @@ public sealed class InstanceRoundTripTests {
         Injection around = new Injection(aroundMethod, new InjectAt.Around(), "spike", 0);
 
         InstanceInjectionMethods.Log.Clear();
-        MethodInfo wrapper = RoundTrip.ComposeThroughNeutralBody(target, [around]);
+        MethodInfo wrapper = RoundTrip.ComposeThroughStream(target, [around]);
 
         InstanceStructTarget instance = new InstanceStructTarget(10);
         object? value = wrapper.Invoke(null, [instance, 5]);

@@ -1,7 +1,7 @@
 using System.Reflection;
 using Xunit;
 
-namespace Concord.Emit.Tests.NeutralRoundTrip;
+namespace Concord.Emit.Tests.SuppliedStreamRoundTrip;
 
 public sealed class EarlyReturnRoundTripTests {
     [Theory]
@@ -15,7 +15,7 @@ public sealed class EarlyReturnRoundTripTests {
         Injection head = new Injection(headMethod, new InjectAt.Head(), "spike", 0);
 
         EarlyReturnInjectionMethods.Log.Clear();
-        MethodInfo wrapper = RoundTrip.ComposeThroughNeutralBody(target, [head]);
+        MethodInfo wrapper = RoundTrip.ComposeThroughStream(target, [head]);
         object? value = wrapper.Invoke(null, [input]);
 
         Assert.Equal(expected, value);
@@ -33,7 +33,7 @@ public sealed class EarlyReturnRoundTripTests {
         Injection returnInjection = new Injection(returnMethod, new InjectAt.Return(), "spike", 0);
 
         EarlyReturnInjectionMethods.Log.Clear();
-        MethodInfo wrapper = RoundTrip.ComposeThroughNeutralBody(target, [returnInjection]);
+        MethodInfo wrapper = RoundTrip.ComposeThroughStream(target, [returnInjection]);
         object? value = wrapper.Invoke(null, [input]);
 
         Assert.Equal(expected, value);
@@ -51,7 +51,7 @@ public sealed class EarlyReturnRoundTripTests {
         Injection tail = new Injection(tailMethod, new InjectAt.Tail(), "spike", 0);
 
         EarlyReturnInjectionMethods.Log.Clear();
-        MethodInfo wrapper = RoundTrip.ComposeThroughNeutralBody(target, [tail]);
+        MethodInfo wrapper = RoundTrip.ComposeThroughStream(target, [tail]);
         object? value = wrapper.Invoke(null, [input]);
 
         Assert.Equal(expected, value);
@@ -73,7 +73,7 @@ public sealed class EarlyReturnRoundTripTests {
         Injection around = new Injection(aroundMethod, new InjectAt.Around(), "spike", 0);
 
         EarlyReturnInjectionMethods.Log.Clear();
-        MethodInfo wrapper = RoundTrip.ComposeThroughNeutralBody(target, [around]);
+        MethodInfo wrapper = RoundTrip.ComposeThroughStream(target, [around]);
         object? value = wrapper.Invoke(null, [input]);
 
         Assert.Equal(expected, value);

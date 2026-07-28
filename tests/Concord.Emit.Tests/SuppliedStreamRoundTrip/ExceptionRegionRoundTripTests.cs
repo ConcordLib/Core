@@ -1,7 +1,7 @@
 using System.Reflection;
 using Xunit;
 
-namespace Concord.Emit.Tests.NeutralRoundTrip;
+namespace Concord.Emit.Tests.SuppliedStreamRoundTrip;
 
 [Collection("ExceptionRegionTargets")]
 public sealed class ExceptionRegionRoundTripTests {
@@ -15,7 +15,7 @@ public sealed class ExceptionRegionRoundTripTests {
 
         ExceptionRegionTargets.Trace.Clear();
         ExceptionRegionInjectionMethods.Log.Clear();
-        MethodInfo wrapper = RoundTrip.ComposeThroughNeutralBody(target, [head]);
+        MethodInfo wrapper = RoundTrip.ComposeThroughStream(target, [head]);
         object? value = wrapper.Invoke(null, [input]);
 
         Assert.Equal(expected, value);
@@ -32,7 +32,7 @@ public sealed class ExceptionRegionRoundTripTests {
 
         ExceptionRegionTargets.Trace.Clear();
         ExceptionRegionInjectionMethods.Log.Clear();
-        MethodInfo wrapper = RoundTrip.ComposeThroughNeutralBody(target, [around]);
+        MethodInfo wrapper = RoundTrip.ComposeThroughStream(target, [around]);
         object? value = wrapper.Invoke(null, [input]);
 
         Assert.Equal(expected, value);
@@ -47,7 +47,7 @@ public sealed class ExceptionRegionRoundTripTests {
 
         ExceptionRegionTargets.Trace.Clear();
         ExceptionRegionInjectionMethods.Log.Clear();
-        MethodInfo wrapper = RoundTrip.ComposeThroughNeutralBody(target, [returnInjection]);
+        MethodInfo wrapper = RoundTrip.ComposeThroughStream(target, [returnInjection]);
         object? value = wrapper.Invoke(null, [5]);
 
         Assert.Equal(10, value);
@@ -63,7 +63,7 @@ public sealed class ExceptionRegionRoundTripTests {
 
         ExceptionRegionTargets.Trace.Clear();
         ExceptionRegionInjectionMethods.Log.Clear();
-        MethodInfo wrapper = RoundTrip.ComposeThroughNeutralBody(target, [tail]);
+        MethodInfo wrapper = RoundTrip.ComposeThroughStream(target, [tail]);
         object? value = wrapper.Invoke(null, [5]);
 
         Assert.Equal(10, value);
@@ -79,7 +79,7 @@ public sealed class ExceptionRegionRoundTripTests {
 
         ExceptionRegionTargets.Trace.Clear();
         ExceptionRegionInjectionMethods.Log.Clear();
-        MethodInfo wrapper = RoundTrip.ComposeThroughNeutralBody(target, [around]);
+        MethodInfo wrapper = RoundTrip.ComposeThroughStream(target, [around]);
         object? value = wrapper.Invoke(null, [5]);
 
         Assert.Equal(10, value);
@@ -97,7 +97,7 @@ public sealed class ExceptionRegionRoundTripTests {
 
         ExceptionRegionTargets.Trace.Clear();
         ExceptionRegionInjectionMethods.Log.Clear();
-        MethodInfo wrapper = RoundTrip.ComposeThroughNeutralBody(target, [head]);
+        MethodInfo wrapper = RoundTrip.ComposeThroughStream(target, [head]);
         object? value = wrapper.Invoke(null, [input]);
 
         Assert.Equal(expected, value);
@@ -114,7 +114,7 @@ public sealed class ExceptionRegionRoundTripTests {
 
         ExceptionRegionTargets.Trace.Clear();
         ExceptionRegionInjectionMethods.Log.Clear();
-        MethodInfo wrapper = RoundTrip.ComposeThroughNeutralBody(target, [around]);
+        MethodInfo wrapper = RoundTrip.ComposeThroughStream(target, [around]);
         object? value = wrapper.Invoke(null, [input]);
 
         Assert.Equal(expected, value);
