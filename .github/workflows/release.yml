@@ -149,8 +149,13 @@ jobs:
             /d:sonar.token="$SONAR_TOKEN" \
             /d:sonar.host.url="https://sonarcloud.io" \
             /d:sonar.scanner.scanAll=false \
+            /d:sonar.cs.opencover.reportsPaths="coverage/**/coverage.opencover.xml" \
+            /d:sonar.coverage.exclusions="tests/**" \
             /d:sonar.qualitygate.wait=true
           dotnet build Concord.ci.slnx -c Release
+          dotnet test Concord.ci.slnx -c Release --no-build -f net10.0 \
+            --collect:"XPlat Code Coverage;Format=opencover" \
+            --results-directory coverage
           dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
 
   test:

@@ -21,5 +21,12 @@
     <PackageReference Include="MinVer" Version="7.0.0" PrivateAssets="all"/>
   </ItemGroup>
 
+  <!-- Coverage for SonarCloud. Matched on the .Tests suffix so it lands on the real test
+       projects and skips the fixture assemblies (ForeignTargets, RegistryAssembly,
+       RollbackAssembly, Consumer), which are compiled targets rather than test hosts. -->
+  <ItemGroup Condition="$(MSBuildProjectName.EndsWith('.Tests'))">
+    <PackageReference Include="coverlet.collector" Version="10.0.1" PrivateAssets="all"/>
+  </ItemGroup>
+
   <Import Project="StyleCop.props"/>
 </Project>

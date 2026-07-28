@@ -11,3 +11,6 @@ BenchmarkDotNet.Artifacts/
 
 # Build artifact (merged dll copied into mods by CopyConcord.targets)
 Assemblies/
+
+# Coverage reports produced by `dotnet test --collect`
+coverage/
