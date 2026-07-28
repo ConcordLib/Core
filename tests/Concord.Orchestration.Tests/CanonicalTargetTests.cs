@@ -57,17 +57,34 @@ public class CanonicalTargetTests {
     }
 
     [Fact]
-    public void AsyncTargetReachesBackendAsMoveNext() {
+    public void AsyncTargetWithStateMachineBodyReachesBackendAsMoveNext() {
+        Assert.Equal("MoveNext", ApplyAndCaptureTarget(PatchBody.StateMachine).Name);
+    }
+
+    // The default. Patching the declared method is what an author who wrote [Inject(At.Return, ...)]
+    // and a handle over the Task or IEnumerable means, and it is what Harmony does.
+    [Fact]
+    public void AsyncTargetWithDeclaredBodyReachesBackendAsTheDeclaredMethod() {
+        Assert.Equal(nameof(AsyncTarget), ApplyAndCaptureTarget(PatchBody.Declared).Name);
+    }
+
+    private static MethodBase ApplyAndCaptureTarget(PatchBody body) {
         RecordingBackend backend = new RecordingBackend();
         IDetourBackend previous = DetourBackend.Current;
         DetourBackend.Current = backend;
         try {
             CollectingPatchApplier applier = new CollectingPatchApplier();
             MethodBase entry = typeof(CanonicalTargetTests).GetMethod(nameof(AsyncTarget), BindingFlags.Static | BindingFlags.NonPublic)!;
-            Injection head = new Injection(typeof(CanonicalTargetTests).GetMethod(nameof(Head), BindingFlags.Static | BindingFlags.NonPublic)!, new InjectAt.Head(), "test", 0);
+            Injection head = new Injection(
+                typeof(CanonicalTargetTests).GetMethod(nameof(Head), BindingFlags.Static | BindingFlags.NonPublic)!,
+                new InjectAt.Head(),
+                "test",
+                0) {
+                Body = body,
+            };
             applier.ApplyPatch(entry, head);
             Assert.NotNull(backend.LastTarget);
-            Assert.Equal("MoveNext", backend.LastTarget!.Name);
+            return backend.LastTarget!;
         } finally {
             DetourBackend.Current = previous;
         }

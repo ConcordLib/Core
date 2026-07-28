@@ -14,8 +14,7 @@ public static class BodyTransformer {
     /// <param name="target">The method to read the current IL from.</param>
     /// <returns>A neutral body representing <paramref name="target" />'s current IL.</returns>
     public static NeutralBody FromMethod(MethodBase target) {
-        MethodBase resolved = WrapperComposer.ResolveStateMachineTarget(target);
-        using DynamicMethodDefinition source = new DynamicMethodDefinition(resolved);
+        using DynamicMethodDefinition source = new DynamicMethodDefinition(target);
         return CecilToNeutralConverter.Convert(source.Definition);
     }
 
@@ -25,7 +24,7 @@ public static class BodyTransformer {
     /// <param name="ordered">The injections to compose, in application order.</param>
     /// <returns>A new neutral body containing <paramref name="source" /> with <paramref name="ordered" /> composed in.</returns>
     public static NeutralBody Transform(MethodBase canonicalTarget, NeutralBody source, IReadOnlyList<Injection> ordered) {
-        MethodBase resolved = WrapperComposer.ResolveStateMachineTarget(canonicalTarget);
+        MethodBase resolved = canonicalTarget;
         Type returnType = WrapperComposer.ResolveReturnType(resolved);
         Type[] parameterTypes = WrapperComposer.ResolveParameterTypes(resolved);
         using DynamicMethodDefinition wrapper = new DynamicMethodDefinition(WrapperComposer.WrapperName(resolved), returnType, parameterTypes);

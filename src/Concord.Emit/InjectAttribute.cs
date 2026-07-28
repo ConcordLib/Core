@@ -159,6 +159,15 @@ public sealed class InjectAttribute : Attribute {
     public int Priority { get; set; }
 
     /// <summary>
+    ///     Gets or sets which body this injection attaches to when the target is an async or iterator
+    ///     method. Defaults to <see cref="PatchBody.Declared" />, which patches the method as written -
+    ///     the compiler-generated stub that returns the <c>Task</c> or <c>IEnumerable</c>. Set
+    ///     <see cref="PatchBody.StateMachine" /> to reach the generated <c>MoveNext</c> instead.
+    ///     Ignored for targets that are neither async nor iterators.
+    /// </summary>
+    public PatchBody Body { get; set; } = PatchBody.Declared;
+
+    /// <summary>
     ///     Gets a value indicating whether this declaration was created through one of the constant-targeting
     ///     constructors.
     /// </summary>

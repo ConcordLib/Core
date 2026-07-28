@@ -17,15 +17,15 @@ public static class WrapperComposer {
     ///     Creates a wrapper method for a target and a copy of the original body.
     /// </summary>
     /// <param name="target">
-    ///     The method to patch. Async and iterator methods are resolved to their generated
-    ///     <c>MoveNext</c> method before composition.
+    ///     The exact method to compose onto. Callers that mean to patch an async or iterator target's
+    ///     generated <c>MoveNext</c> resolve it with <see cref="ResolveBodyTarget" /> first.
     /// </param>
     /// <param name="ordered">The injections to compose, ordered by their caller.</param>
     /// <returns>The generated wrapper method and original body copy.</returns>
     public static ComposeResult Compose(MethodBase target, IReadOnlyList<Injection> ordered) {
         ValidateComposition(target, ordered);
 
-        MethodBase resolved = ResolveStateMachineTarget(target);
+        MethodBase resolved = target;
 
         MethodInfo originalBody = OriginalBody.Clone(resolved);
 
@@ -55,7 +55,7 @@ public static class WrapperComposer {
     /// <param name="ordered">The injections to compose.</param>
     /// <returns>A human-readable IL dump of the composed wrapper.</returns>
     public static string ComposeDump(MethodBase target, IReadOnlyList<Injection> ordered) {
-        MethodBase resolved = ResolveStateMachineTarget(target);
+        MethodBase resolved = target;
 
         using DynamicMethodDefinition source = new DynamicMethodDefinition(resolved);
         Type returnType = ResolveReturnType(resolved);
@@ -81,13 +81,12 @@ public static class WrapperComposer {
     ///     returns index 1, and so on.
     /// </summary>
     /// <param name="target">
-    ///     The method the supplied stream's shape describes. Async and iterator methods are resolved
-    ///     to their generated <c>MoveNext</c> method, matching <see cref="TransformStream" />.
+    ///     The method the supplied stream's shape describes, already resolved by the caller through
+    ///     <see cref="ResolveBodyTarget" /> when the stream is a state machine's <c>MoveNext</c>.
     /// </param>
     /// <returns>A fresh transpiler context, not yet used to read or write any body.</returns>
     public static ITranspilerContext CreateStreamContext(MethodBase target) {
-        MethodBase resolved = ResolveStateMachineTarget(target);
-        return new TranspilerContext(resolved);
+        return new TranspilerContext(target);
     }
 
     /// <summary>
@@ -97,8 +96,8 @@ public static class WrapperComposer {
     ///     injections onto it and hand the composed stream back.
     /// </summary>
     /// <param name="target">
-    ///     The method that defines the composed body's shape (return type and parameters). Async and
-    ///     iterator methods are resolved to their generated <c>MoveNext</c> method.
+    ///     The method that defines the composed body's shape (return type and parameters), already
+    ///     resolved by the caller through <see cref="ResolveBodyTarget" /> where that applies.
     /// </param>
     /// <param name="source">The instruction stream to compose the injections onto.</param>
     /// <param name="ordered">The injections to compose, ordered by their caller.</param>
@@ -118,7 +117,7 @@ public static class WrapperComposer {
         IReadOnlyList<Injection> ordered,
         ITranspilerContext context) {
         TranspilerContext writeContext = RequireConcreteContext(context);
-        MethodBase resolved = ResolveStateMachineTarget(target);
+        MethodBase resolved = target;
         Type returnType = ResolveReturnType(resolved);
         Type[] parameterTypes = ResolveParameterTypes(resolved);
 
@@ -157,6 +156,71 @@ public static class WrapperComposer {
         }
 
         return moveNext;
+    }
+
+    /// <summary>
+    ///     Picks the method an injection actually composes onto, given the body it asked for.
+    /// </summary>
+    /// <param name="target">The method named by the declaration.</param>
+    /// <param name="body">The body the injection selected.</param>
+    /// <returns>
+    ///     The state-machine <c>MoveNext</c> when <paramref name="body" /> is
+    ///     <see cref="PatchBody.StateMachine" /> and <paramref name="target" /> is an async or iterator
+    ///     method; otherwise <paramref name="target" /> unchanged.
+    /// </returns>
+    public static MethodBase ResolveBodyTarget(MethodBase target, PatchBody body) {
+        return body == PatchBody.StateMachine ? ResolveStateMachineTarget(target) : target;
+    }
+
+    /// <summary>
+    ///     Rejects an injection whose declared shape cannot work against the body it selected.
+    /// </summary>
+    /// <param name="declared">The method named by the declaration.</param>
+    /// <param name="resolved">The method composition will actually run against.</param>
+    /// <param name="injection">The injection to check.</param>
+    /// <exception cref="ConcordEmitException">
+    ///     Thrown with <c>CONC122</c> when a <c>ControlHandle&lt;T&gt;</c> is shaped against the declared
+    ///     return type but the injection selected <see cref="PatchBody.StateMachine" />, and with
+    ///     <c>CONC123</c> when a position that needs the body as written selected
+    ///     <see cref="PatchBody.Declared" /> on an async or iterator target, where only the
+    ///     compiler-generated stub exists.
+    /// </exception>
+    public static void ValidateBodySelection(MethodBase declared, MethodBase resolved, Injection injection) {
+        if (ReadStateMachineType(declared) is null) {
+            return;
+        }
+
+        if (injection.Body == PatchBody.Declared) {
+            RejectStubOnlyPosition(declared, injection);
+            return;
+        }
+
+        if (injection.At is not (InjectAt.Head or InjectAt.Return or InjectAt.Tail)) {
+            return;
+        }
+
+        int handleIndex = ControlHandleLowering.FindControlHandleArgIndex(injection.InjectionMethod);
+        if (handleIndex < 0) {
+            return;
+        }
+
+        ParameterInfo[] parameters = injection.InjectionMethod.GetParameters();
+        int offset = injection.InjectionMethod.IsStatic ? 0 : 1;
+        Type handleType = parameters[handleIndex - offset].ParameterType;
+        Type handled = handleType.IsGenericType ? handleType.GetGenericArguments()[0] : typeof(void);
+
+        Type resolvedReturn = ResolveReturnType(resolved);
+        if (handled == resolvedReturn) {
+            return;
+        }
+
+        throw new ConcordEmitException(
+            "CONC122",
+            $"Injection '{injection.InjectionMethod.Name}' selected PatchBody.StateMachine on async or iterator method " +
+            $"'{declared.DeclaringType?.Name}.{declared.Name}', so it composes onto " +
+            $"'{resolved.DeclaringType?.Name}.{resolved.Name}' which returns '{resolvedReturn.Name}'. The injection declares a " +
+            $"handle over '{handled.Name}', which cannot be spliced into that body. Shape the handle against '{resolvedReturn.Name}', " +
+            $"or drop to PatchBody.Declared to read the '{ResolveReturnType(declared).Name}' the target hands back.");
     }
 
     /// <summary>
@@ -335,6 +399,34 @@ public static class WrapperComposer {
                     "which does not compose with the per-copy splicing a whole-method Around performs.");
             }
         }
+    }
+
+    // The stub the compiler leaves behind for an async or iterator method builds the state machine
+    // and returns it. Head, Return and Tail still mean something there - they run once per call, and
+    // Return hands over the Task or IEnumerable. Every other position needs statements, branches or
+    // call sites that only exist in MoveNext, so selecting the stub for one of those silently
+    // matches nothing.
+    private static void RejectStubOnlyPosition(MethodBase declared, Injection injection) {
+        if (injection.At is InjectAt.Head or InjectAt.Return or InjectAt.Tail) {
+            return;
+        }
+
+        throw new ConcordEmitException(
+            "CONC123",
+            $"Injection '{injection.InjectionMethod.Name}' targets '{declared.DeclaringType?.Name}.{declared.Name}' at {PositionName(injection.At)}, " +
+            "but that method is async or an iterator, so the body it declares is compiled into a generated MoveNext. The method itself only " +
+            "builds and returns the state machine. Set Body = PatchBody.StateMachine on the injection to reach the body as written.");
+    }
+
+    private static string PositionName(InjectAt at) {
+        return at switch {
+            InjectAt.Around => "At.Around",
+            InjectAt.Constant => "At.Constant",
+            InjectAt.Invoke invoke => $"At.{invoke.Shift}",
+            InjectAt.Transpiler { Final: true } => "At.TranspilerFinal",
+            InjectAt.Transpiler => "At.Transpiler",
+            _ => at.GetType().Name,
+        };
     }
 
     private static void ValidateWholeMethodAroundEligible(MethodBase originalTarget) {

@@ -12,9 +12,22 @@ namespace Concord;
 public sealed class PatchBuilder {
     private readonly List<Injection> injections = [];
     private readonly MethodBase target;
+    private PatchBody body = PatchBody.Declared;
 
     internal PatchBuilder(MethodBase target) {
         this.target = target;
+    }
+
+    /// <summary>
+    ///     Selects which body the injections recorded after this call attach to when the target is an
+    ///     async or iterator method. Injections already recorded keep the value in effect when they were
+    ///     recorded, so one builder can mix both.
+    /// </summary>
+    /// <param name="selected">The body to select.</param>
+    /// <returns>This builder, for chaining.</returns>
+    public PatchBuilder Body(PatchBody selected) {
+        body = selected;
+        return this;
     }
 
     /// <summary>
@@ -306,7 +319,7 @@ public sealed class PatchBuilder {
             throw new ConcordDeclarationException("Injection method '" + injectionMethod.Name + "' has no declaring type; only methods declared on a type can be used as injections.");
         }
 
-        injections.Add(new Injection(injectionMethod, at, injectionMethod.DeclaringType.FullName!, 0));
+        injections.Add(new Injection(injectionMethod, at, injectionMethod.DeclaringType.FullName!, 0) { Body = body });
         return this;
     }
 
