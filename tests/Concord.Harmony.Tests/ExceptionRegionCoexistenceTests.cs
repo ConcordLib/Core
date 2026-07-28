@@ -476,7 +476,7 @@ namespace Concord.Harmony.Tests
             }
         }
 
-        [Fact(Skip = "CodeInstructionConverter.cs:163-165 hard-rejects ExceptionBlockType.BeginExceptFilterBlock ('when' clauses compile to a filter region), so TryRoute rejects instead of composing. Expected to pass once the bridge moves off the neutral IL model (see harmony-port P6/P9).")]
+        [Fact(Skip = "Confirmed a Harmony 2.4.2 bug, not a Concord bridge limitation: HarmonyLib.MethodBodyReader.ParseExceptions never emits a BeginCatchBlock marker at a filter clause's own HandlerOffset (only BeginExceptFilterBlock at FilterOffset), so no transpiler - including a completely pass-through one - can round-trip a 'when' filter through Harmony's own CodeInstruction model. Reproduced standalone: Harmony.Patch(target, transpiler: <identity transpiler returning instructions unchanged>) on a method with a when-clause throws the identical 'Incorrect code generation for exception block' from RuntimeILGenerator.EndExceptionBlock, with zero Concord code involved. Concord's own model (CecilCodeConverter) correctly requires and represents the missing HandlerStart marker when reading a filter clause from a real Cecil body; the gap is entirely upstream, in what Harmony hands transpilers. Revisit only if a future Harmony version fixes ParseExceptions's Filter case, or if the bridge independently re-parses original.GetMethodBody().ExceptionHandlingClauses to recover HandlerOffset (out of scope here).")]
         public void ExceptionFilter_ConcordHeadInjection_FilterMatchNonMatchAndNonThrowingPathsAllPreserved()
         {
             MethodInfo target = typeof(ExceptionFilterTarget).GetMethod(nameof(ExceptionFilterTarget.Run));
@@ -509,7 +509,7 @@ namespace Concord.Harmony.Tests
             }
         }
 
-        [Fact(Skip = "CodeInstructionConverter.cs:163-165 hard-rejects ExceptionBlockType.BeginFaultBlock, so TryRoute rejects instead of composing. Confirmed via reflection that the iterator state machine's MoveNext genuinely compiles the try/finally around its yield points to a Fault clause (ExceptionHandlingClauseOptions.Fault), not a Finally clause - this is a real fault region, not a stand-in. Expected to pass once the bridge moves off the neutral IL model (see harmony-port P6/P9).")]
+        [Fact]
         public void IteratorFault_ConcordHeadInjection_FullEnumerationAndEarlyDisposeBothRunFinally()
         {
             MethodInfo target = IteratorFaultTarget.ResolveMoveNext();

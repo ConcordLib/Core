@@ -14,12 +14,22 @@ using ExceptionBlock = HarmonyLib.ExceptionBlock;
 using ExceptionBlockType = HarmonyLib.ExceptionBlockType;
 using Label = System.Reflection.Emit.Label;
 
+// Kept minimally compiling against the new Concord.CodeInstruction-based converter introduced by
+// the harmony-port rewrite (P6). A full rewrite that exercises the new model properly - including
+// positive-path coverage for filter/fault blocks and the removed short-form argument ceiling - is
+// tracked separately (harmony-port P8); several tests below are placeholders until then.
 public class CodeInstructionConverterTests
 {
     private static ILGenerator NewGenerator()
     {
         DynamicMethod method = new DynamicMethod("m", typeof(void), Type.EmptyTypes);
         return method.GetILGenerator();
+    }
+
+    private static Concord.ITranspilerContext NewStreamContext()
+    {
+        MethodBase target = typeof(CodeInstructionConverterTests).GetMethod(nameof(NewGenerator), BindingFlags.NonPublic | BindingFlags.Static)!;
+        return WrapperComposer.CreateStreamContext(target);
     }
 
     [Fact]
@@ -39,16 +49,17 @@ public class CodeInstructionConverterTests
             new CodeInstruction(OpCodes.Ret),
         };
 
-        NeutralBody neutral = CodeInstructionConverter.ToNeutral(stream, out HarmonyStreamContext context);
-        List<CodeInstruction> outgoing = CodeInstructionConverter.FromNeutral(neutral, context, generator);
+        Concord.ITranspilerContext context = NewStreamContext();
+        List<Concord.CodeInstruction> concord = CodeInstructionConverter.ToConcord(stream, context, out HarmonyStreamContext harmonyContext);
+        List<CodeInstruction> outgoing = CodeInstructionConverter.FromConcord(concord, harmonyContext, generator);
 
         Assert.Equal(stream.Count, outgoing.Count);
-        Assert.Equal(OpCodes.Ldc_I4, outgoing[0].opcode);
-        Assert.Equal(5, outgoing[0].operand);
+        Assert.Equal(OpCodes.Ldc_I4_S, outgoing[0].opcode);
+        Assert.Equal((sbyte)5, outgoing[0].operand);
         Assert.Equal(OpCodes.Stloc_S, outgoing[1].opcode);
         Assert.Same(local, outgoing[1].operand);
-        Assert.Equal(OpCodes.Ldloc_S, outgoing[2].opcode);
-        Assert.Same(local, outgoing[2].operand);
+        Assert.Equal(OpCodes.Ldloc_0, outgoing[2].opcode);
+        Assert.Null(outgoing[2].operand);
         Assert.Equal(OpCodes.Br, outgoing[3].opcode);
         Assert.Equal(label, outgoing[3].operand);
         Assert.Single(outgoing[4].labels);
@@ -70,8 +81,9 @@ public class CodeInstructionConverterTests
             new CodeInstruction(OpCodes.Ret),
         };
 
-        NeutralBody neutral = CodeInstructionConverter.ToNeutral(stream, out HarmonyStreamContext context);
-        List<CodeInstruction> outgoing = CodeInstructionConverter.FromNeutral(neutral, context, generator);
+        Concord.ITranspilerContext context = NewStreamContext();
+        List<Concord.CodeInstruction> concord = CodeInstructionConverter.ToConcord(stream, context, out HarmonyStreamContext harmonyContext);
+        List<CodeInstruction> outgoing = CodeInstructionConverter.FromConcord(concord, harmonyContext, generator);
 
         Assert.Equal(2, outgoing[2].labels.Count);
         Assert.Contains(first, outgoing[2].labels);
@@ -91,8 +103,9 @@ public class CodeInstructionConverterTests
             new CodeInstruction(OpCodes.Ret),
         };
 
-        NeutralBody neutral = CodeInstructionConverter.ToNeutral(stream, out HarmonyStreamContext context);
-        List<CodeInstruction> outgoing = CodeInstructionConverter.FromNeutral(neutral, context, generator);
+        Concord.ITranspilerContext context = NewStreamContext();
+        List<Concord.CodeInstruction> concord = CodeInstructionConverter.ToConcord(stream, context, out HarmonyStreamContext harmonyContext);
+        List<CodeInstruction> outgoing = CodeInstructionConverter.FromConcord(concord, harmonyContext, generator);
 
         Assert.Single(outgoing[0].blocks);
         Assert.Equal(ExceptionBlockType.BeginExceptionBlock, outgoing[0].blocks[0].blockType);
@@ -119,15 +132,16 @@ public class CodeInstructionConverterTests
             new CodeInstruction(OpCodes.Ret),
         };
 
-        NeutralBody neutral = CodeInstructionConverter.ToNeutral(stream, out HarmonyStreamContext context);
-        List<CodeInstruction> outgoing = CodeInstructionConverter.FromNeutral(neutral, context, generator);
+        Concord.ITranspilerContext context = NewStreamContext();
+        List<Concord.CodeInstruction> concord = CodeInstructionConverter.ToConcord(stream, context, out HarmonyStreamContext harmonyContext);
+        List<CodeInstruction> outgoing = CodeInstructionConverter.FromConcord(concord, harmonyContext, generator);
 
         Assert.Equal(2, outgoing[0].blocks.Count);
         Assert.All(outgoing[0].blocks, block => Assert.Equal(ExceptionBlockType.BeginExceptionBlock, block.blockType));
     }
 
     [Fact]
-    public void FilterBlock_ToNeutralThrows()
+    public void FilterBlock_ToConcordSucceeds()
     {
         List<CodeInstruction> stream = new List<CodeInstruction>
         {
@@ -135,11 +149,15 @@ public class CodeInstructionConverterTests
             new CodeInstruction(OpCodes.Ret),
         };
 
-        Assert.Throws<NeutralConversionException>(() => CodeInstructionConverter.ToNeutral(stream, out _));
+        Concord.ITranspilerContext context = NewStreamContext();
+        List<Concord.CodeInstruction> concord = CodeInstructionConverter.ToConcord(stream, context, out _);
+
+        Assert.Single(concord[0].blocks);
+        Assert.Equal(Concord.ExceptionBlockType.BeginExceptFilterBlock, concord[0].blocks[0].blockType);
     }
 
     [Fact]
-    public void FaultBlock_ToNeutralThrows()
+    public void FaultBlock_ToConcordSucceeds()
     {
         List<CodeInstruction> stream = new List<CodeInstruction>
         {
@@ -147,45 +165,21 @@ public class CodeInstructionConverterTests
             new CodeInstruction(OpCodes.Ret),
         };
 
-        Assert.Throws<NeutralConversionException>(() => CodeInstructionConverter.ToNeutral(stream, out _));
+        Concord.ITranspilerContext context = NewStreamContext();
+        List<Concord.CodeInstruction> concord = CodeInstructionConverter.ToConcord(stream, context, out _);
+
+        Assert.Single(concord[0].blocks);
+        Assert.Equal(Concord.ExceptionBlockType.BeginFaultBlock, concord[0].blocks[0].blockType);
     }
 
-    [Fact]
-    public void ArgumentSlotOver255_ToNeutralSucceeds_FromNeutralThrowsShortFormRange()
+    [Fact(Skip = "The new model removes the old short-form-only argument ceiling (CecilCodeConverter.CreateInstruction resolves ldarg/starg against the target's real parameter count, not a forced byte-sized Ldarg_S). A positive-path replacement belongs in harmony-port P8.")]
+    public void ArgumentSlotOver255_ToConcordSucceeds_FromConcordThrowsShortFormRange()
     {
-        List<CodeInstruction> stream = new List<CodeInstruction>
-        {
-            new CodeInstruction(OpCodes.Ldarg, 300),
-            new CodeInstruction(OpCodes.Ret),
-        };
-
-        NeutralBody neutral = CodeInstructionConverter.ToNeutral(stream, out HarmonyStreamContext context);
-
-        Assert.Equal(NeutralOperandKind.Argument, neutral.Instructions[0].Operand.Kind);
-        Assert.Equal(300, neutral.Instructions[0].Operand.AsArgumentSlot());
-
-        ILGenerator generator = NewGenerator();
-        NeutralConversionException exception = Assert.Throws<NeutralConversionException>(
-            () => CodeInstructionConverter.FromNeutral(neutral, context, generator));
-        Assert.Contains("exceeds the short-form range", exception.Message);
     }
 
-    [Fact]
-    public void UsedButUnmarkedLabel_FromNeutralThrows()
+    [Fact(Skip = "FromConcord no longer throws for an unmarked label target: WrapperComposer.TransformStream's own contract is to silently drop a caller label whose target did not survive composition (see TransformStreamTests.TransformStream_CallerLabelWhoseTargetDidNotSurviveComposition_IsDropped), and ResolveLabel mirrors that by minting a fresh label rather than throwing. A replacement covering the new contract belongs in harmony-port P8.")]
+    public void UsedButUnmarkedLabel_FromConcordThrows()
     {
-        NeutralInstruction branch = new NeutralInstruction("br", NeutralOperand.OfLabel(0));
-        NeutralInstruction ret = new NeutralInstruction("ret", NeutralOperand.None);
-        NeutralBody body = new NeutralBody(
-            new List<NeutralInstruction> { branch, ret },
-            new List<NeutralLocal>(),
-            true,
-            new List<NeutralRegionEvent>());
-        HarmonyStreamContext context = new HarmonyStreamContext();
-
-        ILGenerator generator = NewGenerator();
-        NeutralConversionException exception = Assert.Throws<NeutralConversionException>(
-            () => CodeInstructionConverter.FromNeutral(body, context, generator));
-        Assert.Contains("did not survive", exception.Message);
     }
 
     [Fact]
@@ -198,15 +192,11 @@ public class CodeInstructionConverterTests
             new CodeInstruction(OpCodes.Ret),
         };
 
-        NeutralBody neutral = CodeInstructionConverter.ToNeutral(stream, out HarmonyStreamContext context);
-
-        NeutralLocal slotZero = neutral.Locals.Find(local => local.Id == 0);
-        Assert.NotNull(slotZero);
-        Assert.Equal(typeof(object), slotZero.Type);
-        Assert.True(slotZero.IlgenOwned);
+        Concord.ITranspilerContext context = NewStreamContext();
+        List<Concord.CodeInstruction> concord = CodeInstructionConverter.ToConcord(stream, context, out HarmonyStreamContext harmonyContext);
 
         ILGenerator generator = NewGenerator();
-        List<CodeInstruction> outgoing = CodeInstructionConverter.FromNeutral(neutral, context, generator);
+        List<CodeInstruction> outgoing = CodeInstructionConverter.FromConcord(concord, harmonyContext, generator);
 
         Assert.Equal(OpCodes.Ldloc_0, outgoing[0].opcode);
         Assert.Null(outgoing[0].operand);
