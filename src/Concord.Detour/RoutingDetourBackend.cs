@@ -355,12 +355,10 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
             real = null;
         }
 
+        // Same operation as Attach; the separate name marks the promotion/rebuild call sites, which
+        // replace an already-installed handle rather than installing the first one.
         public void Swap(IDetourHandle handle) {
-            real = handle;
-
-            if (disposed) {
-                real.Dispose();
-            }
+            Attach(handle);
         }
 
         public void Dispose() {
