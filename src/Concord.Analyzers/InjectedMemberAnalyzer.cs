@@ -553,7 +553,12 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
 
             AnalyzeMemberNameStyle(context, patchType, targetField, injectAttribute, "targetName");
 
-            if (!SymbolEqualityComparer.Default.Equals(targetField.Type, field.Type) || targetField.IsStatic != field.IsStatic) {
+            // object is the escape hatch for a target whose type cannot be named here, so it is
+            // accepted against any target type; Concord boxes on read and unboxes on write.
+            bool declaredAsObject = field.Type.SpecialType == SpecialType.System_Object &&
+                                    targetField.Type.SpecialType != SpecialType.System_Object;
+            if ((!declaredAsObject && !SymbolEqualityComparer.Default.Equals(targetField.Type, field.Type)) ||
+                targetField.IsStatic != field.IsStatic) {
                 ReportMismatch(
                     context,
                     field,
@@ -581,7 +586,9 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             return;
         }
 
-        if (targetTypeName != declaredTypeName || isStatic != field.IsStatic) {
+        // See ValidateFieldParameter: object accepts any target type.
+        bool declaredAsObject = declaredTypeName == "System.Object" && targetTypeName != "System.Object";
+        if ((!declaredAsObject && targetTypeName != declaredTypeName) || isStatic != field.IsStatic) {
             ReportMismatch(
                 context,
                 field,

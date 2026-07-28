@@ -63,6 +63,60 @@ public abstract class MismatchedFieldProjectionInjectionMethod {
 }
 #pragma warning restore CS0414, CS0649
 
+// Mirrors Pawn_FlightTracker: a private nested enum field whose type cannot be named from a
+// patch class, so an [InjectField] has no way to declare it exactly.
+public sealed class UnnameableFieldTarget {
+    private FlightState flightState = FlightState.Grounded;
+    private string label = "grounded";
+
+    private enum FlightState {
+        Grounded = 0,
+        Flying = 1,
+    }
+
+    public int StateSnapshot => (int)flightState;
+    public string LabelSnapshot => label;
+
+    public int Tick(int delta) {
+        return delta;
+    }
+}
+
+#pragma warning disable CS0414, CS0649
+public abstract class ObjectTypedFieldInjectionMethod {
+    [InjectField("flightState")]
+    private object flightState = null!;
+
+    public void Head(ControlHandle<int> ch, int delta) {
+        // Reads the boxed enum back out and writes a new one in, exercising both directions.
+        if (flightState is not null) {
+            flightState = System.Enum.ToObject(flightState.GetType(), 1);
+        }
+    }
+}
+
+public abstract class ObjectTypedReferenceFieldInjectionMethod {
+    [InjectField("label")]
+    private object label = null!;
+
+    public void Head(ControlHandle<int> ch, int delta) {
+        label = "flying";
+    }
+}
+
+public abstract class ObjectTypedFieldAddressInjectionMethod {
+    [InjectField("flightState")]
+    private object flightState = null!;
+
+    public void Head(ControlHandle<int> ch, int delta) {
+        Consume(ref flightState);
+    }
+
+    private static void Consume(ref object value) {
+    }
+}
+#pragma warning restore CS0414, CS0649
+
 public sealed class StaticProjectionTarget {
     public static int Run() {
         return 1;
@@ -150,5 +204,52 @@ public sealed class InjectedMemberTests {
             WrapperComposer.Compose(target, [head]));
 
         Assert.Equal("CONC074", ex.Code);
+    }
+
+    // The escape hatch for a target whose type cannot be named: declare object, and Concord boxes
+    // on read / unboxes on write against the real field.
+    [Fact]
+    public void Compose_ObjectTypedFieldOverPrivateNestedEnum_ReadsAndWritesTheRealField() {
+        MethodBase target = typeof(UnnameableFieldTarget).GetMethod(nameof(UnnameableFieldTarget.Tick))!;
+        MethodBase injectionMethod = typeof(ObjectTypedFieldInjectionMethod).GetMethod(nameof(ObjectTypedFieldInjectionMethod.Head))!;
+        Injection head = new Injection(injectionMethod, new InjectAt.Head(), "test", 0);
+
+        ComposeResult result = WrapperComposer.Compose(target, [head]);
+
+        UnnameableFieldTarget instance = new UnnameableFieldTarget();
+        Assert.Equal(0, instance.StateSnapshot);
+
+        result.Wrapper.Invoke(null, [instance, 3]);
+
+        Assert.Equal(1, instance.StateSnapshot);
+    }
+
+    [Fact]
+    public void Compose_ObjectTypedFieldOverReferenceType_WritesTheRealField() {
+        MethodBase target = typeof(UnnameableFieldTarget).GetMethod(nameof(UnnameableFieldTarget.Tick))!;
+        MethodBase injectionMethod =
+            typeof(ObjectTypedReferenceFieldInjectionMethod).GetMethod(nameof(ObjectTypedReferenceFieldInjectionMethod.Head))!;
+        Injection head = new Injection(injectionMethod, new InjectAt.Head(), "test", 0);
+
+        ComposeResult result = WrapperComposer.Compose(target, [head]);
+
+        UnnameableFieldTarget instance = new UnnameableFieldTarget();
+        result.Wrapper.Invoke(null, [instance, 3]);
+
+        Assert.Equal("flying", instance.LabelSnapshot);
+    }
+
+    // A boxed value has no stable address, so ldflda against it cannot mean anything useful.
+    [Fact]
+    public void Compose_ObjectTypedFieldAddress_ThrowsCONC126() {
+        MethodBase target = typeof(UnnameableFieldTarget).GetMethod(nameof(UnnameableFieldTarget.Tick))!;
+        MethodBase injectionMethod =
+            typeof(ObjectTypedFieldAddressInjectionMethod).GetMethod(nameof(ObjectTypedFieldAddressInjectionMethod.Head))!;
+        Injection head = new Injection(injectionMethod, new InjectAt.Head(), "test", 0);
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() =>
+            WrapperComposer.Compose(target, [head]));
+
+        Assert.Equal("CONC126", ex.Code);
     }
 }
