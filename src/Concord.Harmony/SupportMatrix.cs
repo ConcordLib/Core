@@ -84,7 +84,6 @@ namespace Concord.Harmony
             try
             {
                 byte[] il = body.GetILAsByteArray();
-                Module module = method.Module;
                 int position = 0;
                 while (position < il.Length)
                 {
@@ -101,23 +100,10 @@ namespace Concord.Harmony
                         return true;
                     }
 
-                    if (opcode.OperandType == OperandType.InlineMethod)
+                    if (opcode.OperandType == OperandType.InlineMethod
+                        && TargetsGetExecutingAssembly(method, BitConverter.ToInt32(il, position)))
                     {
-                        int token = BitConverter.ToInt32(il, position);
-                        MethodBase resolved;
-                        try
-                        {
-                            resolved = module.ResolveMethod(token, method.DeclaringType?.GetGenericArguments(), method is MethodInfo genericSource ? genericSource.GetGenericArguments() : null);
-                        }
-                        catch (ArgumentException)
-                        {
-                            resolved = null;
-                        }
-
-                        if (resolved != null && resolved.Name == "GetExecutingAssembly" && resolved.DeclaringType == typeof(System.Reflection.Assembly))
-                        {
-                            return true;
-                        }
+                        return true;
                     }
 
                     position += OperandSize(opcode, il, position);
@@ -129,6 +115,32 @@ namespace Concord.Harmony
             {
                 return true;
             }
+        }
+
+        /// <summary>
+        ///     Resolves an InlineMethod operand token and reports whether it names
+        ///     <c>Assembly.GetExecutingAssembly</c>.
+        /// </summary>
+        /// <remarks>
+        ///     A token that will not resolve is treated as "not a match" rather than propagating:
+        ///     ResolveMethod throws ArgumentException for tokens outside this module's scope, which is
+        ///     an ordinary outcome when walking a body that references another assembly.
+        /// </remarks>
+        private static bool TargetsGetExecutingAssembly(MethodBase method, int token)
+        {
+            MethodBase resolved;
+            try
+            {
+                resolved = method.Module.ResolveMethod(token, method.DeclaringType?.GetGenericArguments(), method is MethodInfo genericSource ? genericSource.GetGenericArguments() : null);
+            }
+            catch (ArgumentException)
+            {
+                resolved = null;
+            }
+
+            return resolved != null
+                && resolved.Name == "GetExecutingAssembly"
+                && resolved.DeclaringType == typeof(System.Reflection.Assembly);
         }
 
         private static Dictionary<short, OpCode> BuildOpCodeTable()

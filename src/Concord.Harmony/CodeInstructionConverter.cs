@@ -48,52 +48,8 @@ internal static class CodeInstructionConverter {
             return minted;
         }
 
-        int maxSlot = -1;
-        Dictionary<int, LocalVariableInfo> localBySlot = new Dictionary<int, LocalVariableInfo>();
-        foreach (CodeInstruction instruction in stream) {
-            if (instruction.operand is LocalVariableInfo localInfo) {
-                localBySlot[localInfo.LocalIndex] = localInfo;
-                if (localInfo.LocalIndex > maxSlot) {
-                    maxSlot = localInfo.LocalIndex;
-                }
-            }
-
-            int compactSlot = CompactLocalSlot(instruction.opcode);
-            if (compactSlot > maxSlot) {
-                maxSlot = compactSlot;
-            }
-        }
-
-        List<Concord.LocalRef> localRefBySlot = new List<Concord.LocalRef>(maxSlot + 1);
-        for (int slot = 0; slot <= maxSlot; slot++) {
-            localBySlot.TryGetValue(slot, out LocalVariableInfo? original);
-            Type localType = original is null ? typeof(object) : original.LocalType;
-            Concord.LocalRef declared = context.DeclareLocal(localType);
-            localRefBySlot.Add(declared);
-            if (original is not null) {
-                built.HarmonyLocalByRef[declared] = original;
-            }
-        }
-
-        List<Concord.CodeInstruction> converted = new List<Concord.CodeInstruction>(stream.Count);
-        foreach (CodeInstruction instruction in stream) {
-            if (instruction.opcode == OpCodes.Calli) {
-                throw new ConcordEmitException(
-                    CodeCalliRejected,
-                    "The Harmony coexistence bridge cannot compose a calli instruction: Harmony carries its call-site operand as HarmonyLib.InlineSignature, whose constructor is internal, so Concord has no way to build a call site from it.");
-            }
-
-            Concord.CodeInstruction mapped = new Concord.CodeInstruction(instruction.opcode, ConvertOperand(instruction.operand, LabelFor, localRefBySlot));
-            foreach (Label label in instruction.labels) {
-                mapped.labels.Add(LabelFor(label));
-            }
-
-            foreach (ExceptionBlock block in instruction.blocks) {
-                mapped.blocks.Add(MapBlock(block));
-            }
-
-            converted.Add(mapped);
-        }
+        List<Concord.LocalRef> localRefBySlot = DeclareLocalsForStream(stream, context, built);
+        List<Concord.CodeInstruction> converted = ConvertInstructions(stream, LabelFor, localRefBySlot);
 
         if (HasExceptionBlocks(converted)) {
             AppendSacrificialNopAndShiftEnds(converted);
@@ -132,6 +88,73 @@ internal static class CodeInstructionConverter {
         }
 
         return outgoing;
+    }
+
+    /// <summary>
+    ///     Declares one Concord local per slot the Harmony stream touches, so slot indices in the
+    ///     incoming stream stay usable as positions into the returned list.
+    /// </summary>
+    /// <remarks>
+    ///     Slots are scanned from both directions Harmony can express them: an explicit
+    ///     <see cref="LocalVariableInfo" /> operand, and the compact <c>ldloc.0</c>-style opcodes that
+    ///     carry the slot in the opcode itself. A gap in the middle of the range gets a filler local
+    ///     typed <see cref="object" />, because the list is indexed by slot and cannot be sparse.
+    /// </remarks>
+    private static List<Concord.LocalRef> DeclareLocalsForStream(List<CodeInstruction> stream, Concord.ITranspilerContext context, HarmonyStreamContext built) {
+        int maxSlot = -1;
+        Dictionary<int, LocalVariableInfo> localBySlot = new Dictionary<int, LocalVariableInfo>();
+        foreach (CodeInstruction instruction in stream) {
+            if (instruction.operand is LocalVariableInfo localInfo) {
+                localBySlot[localInfo.LocalIndex] = localInfo;
+                if (localInfo.LocalIndex > maxSlot) {
+                    maxSlot = localInfo.LocalIndex;
+                }
+            }
+
+            int compactSlot = CompactLocalSlot(instruction.opcode);
+            if (compactSlot > maxSlot) {
+                maxSlot = compactSlot;
+            }
+        }
+
+        List<Concord.LocalRef> localRefBySlot = new List<Concord.LocalRef>(maxSlot + 1);
+        for (int slot = 0; slot <= maxSlot; slot++) {
+            localBySlot.TryGetValue(slot, out LocalVariableInfo? original);
+            Type localType = original is null ? typeof(object) : original.LocalType;
+            Concord.LocalRef declared = context.DeclareLocal(localType);
+            localRefBySlot.Add(declared);
+            if (original is not null) {
+                built.HarmonyLocalByRef[declared] = original;
+            }
+        }
+
+        return localRefBySlot;
+    }
+
+    /// <summary>Maps each Harmony instruction, its labels, and its exception blocks onto the Concord model.</summary>
+    /// <exception cref="ConcordEmitException">Thrown with code <c>CONC124</c> when the stream contains a <c>calli</c>.</exception>
+    private static List<Concord.CodeInstruction> ConvertInstructions(List<CodeInstruction> stream, Func<Label, Concord.Label> labelFor, List<Concord.LocalRef> localRefBySlot) {
+        List<Concord.CodeInstruction> converted = new List<Concord.CodeInstruction>(stream.Count);
+        foreach (CodeInstruction instruction in stream) {
+            if (instruction.opcode == OpCodes.Calli) {
+                throw new ConcordEmitException(
+                    CodeCalliRejected,
+                    "The Harmony coexistence bridge cannot compose a calli instruction: Harmony carries its call-site operand as HarmonyLib.InlineSignature, whose constructor is internal, so Concord has no way to build a call site from it.");
+            }
+
+            Concord.CodeInstruction mapped = new Concord.CodeInstruction(instruction.opcode, ConvertOperand(instruction.operand, labelFor, localRefBySlot));
+            foreach (Label label in instruction.labels) {
+                mapped.labels.Add(labelFor(label));
+            }
+
+            foreach (ExceptionBlock block in instruction.blocks) {
+                mapped.blocks.Add(MapBlock(block));
+            }
+
+            converted.Add(mapped);
+        }
+
+        return converted;
     }
 
     private static object? ConvertOperand(object? operand, Func<Label, Concord.Label> labelFor, IReadOnlyList<Concord.LocalRef> localRefBySlot) {
