@@ -28,3 +28,4 @@ CONCORD021 | Concord.Patches | Error | Patch ordering attributes must appear on 
 CONCORD022 | Concord.Patches | Error | At.Transpiler and At.TranspilerFinal injection methods must be static.
 CONCORD023 | Concord.Patches | Error | At.Transpiler and At.TranspilerFinal injection methods must be shaped IEnumerable<CodeInstruction> in and out, with an optional ITranspilerContext second parameter.
 CONCORD024 | Concord.Patches | Error | Transpiler injection methods must not reference [Shadow]/[InjectField]/[InjectProperty]/[InjectMethod] members of the declaring [Patch] type.
+CONCORD025 | Concord.Patches | Error | [Shadow]/[InjectField]/[InjectProperty]/[InjectMethod] members must only be referenced from [Inject] injection methods.
