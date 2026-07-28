@@ -1,5 +1,7 @@
 using System.Reflection;
+using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
+using Concord.Emit;
 using Xunit;
 
 namespace Concord.Orchestration.Tests;
@@ -50,6 +52,56 @@ public static class BuilderAroundTarget2 {
     [MethodImpl(MethodImplOptions.NoInlining)]
     public static void Step() {
         BuilderLog.Entries.Add("spine");
+    }
+}
+
+public static class BuilderTranspilerTarget {
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static int Compute() {
+        return 5;
+    }
+}
+
+public static class BuilderTranspilerFinalTarget {
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static int Compute() {
+        return 5;
+    }
+}
+
+public static class BuilderTranspilerBehaviorTarget {
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static int Compute() {
+        return 5;
+    }
+}
+
+public static class BuilderTranspilerChainTarget {
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static int Compute() {
+        return 5;
+    }
+}
+
+public static class BuilderTranspilers {
+    public static IEnumerable<CodeInstruction> FiveToTen(IEnumerable<CodeInstruction> instructions) {
+        foreach (CodeInstruction instruction in instructions) {
+            if (instruction.opcode == OpCodes.Ldc_I4_5) {
+                yield return new CodeInstruction(OpCodes.Ldc_I4, 10);
+            } else {
+                yield return instruction;
+            }
+        }
+    }
+
+    public static IEnumerable<CodeInstruction> TenToTwenty(IEnumerable<CodeInstruction> instructions) {
+        foreach (CodeInstruction instruction in instructions) {
+            if (instruction.Is(OpCodes.Ldc_I4, 10)) {
+                yield return new CodeInstruction(OpCodes.Ldc_I4, 20);
+            } else {
+                yield return instruction;
+            }
+        }
     }
 }
 
@@ -313,5 +365,79 @@ public sealed class PatchBuilderTests {
         BuilderInvokeTarget2 instance2 = new BuilderInvokeTarget2();
         instance2.Run();
         Assert.Equal(["before", "step", "after"], BuilderLog.Entries);
+    }
+
+    [Fact]
+    public void Transpiler_MethodInfo_RegistersSuccessfully() {
+        MethodBase target = typeof(BuilderTranspilerTarget).GetMethod(nameof(BuilderTranspilerTarget.Compute))!;
+        MethodInfo transpiler = typeof(BuilderTranspilers).GetMethod(nameof(BuilderTranspilers.FiveToTen))!;
+
+        using IPatchHandle handle = Patcher.For(target).Transpiler(transpiler).Apply();
+        Assert.NotNull(handle);
+    }
+
+    [Fact]
+    public void Transpiler_TypeAndName_RegistersSuccessfully() {
+        MethodBase target = typeof(BuilderTranspilerTarget).GetMethod(nameof(BuilderTranspilerTarget.Compute))!;
+
+        using IPatchHandle handle = Patcher.For(target)
+            .Transpiler(typeof(BuilderTranspilers), nameof(BuilderTranspilers.FiveToTen))
+            .Apply();
+        Assert.NotNull(handle);
+    }
+
+    [Fact]
+    public void Transpiler_Final_MethodInfo_RegistersSuccessfully() {
+        MethodBase target = typeof(BuilderTranspilerFinalTarget).GetMethod(nameof(BuilderTranspilerFinalTarget.Compute))!;
+        MethodInfo transpiler = typeof(BuilderTranspilers).GetMethod(nameof(BuilderTranspilers.FiveToTen))!;
+
+        using IPatchHandle handle = Patcher.For(target).Transpiler(transpiler, final: true).Apply();
+        Assert.NotNull(handle);
+    }
+
+    [Fact]
+    public void Transpiler_Final_TypeAndName_RegistersSuccessfully() {
+        MethodBase target = typeof(BuilderTranspilerFinalTarget).GetMethod(nameof(BuilderTranspilerFinalTarget.Compute))!;
+
+        using IPatchHandle handle = Patcher.For(target)
+            .Transpiler(typeof(BuilderTranspilers), nameof(BuilderTranspilers.FiveToTen), final: true)
+            .Apply();
+        Assert.NotNull(handle);
+    }
+
+    [Fact]
+    public void Transpiler_ChangesObservableBehavior_DisposeReverts() {
+        Assert.Equal(5, BuilderTranspilerBehaviorTarget.Compute());
+
+        MethodBase target = typeof(BuilderTranspilerBehaviorTarget).GetMethod(nameof(BuilderTranspilerBehaviorTarget.Compute))!;
+        MethodInfo transpiler = typeof(BuilderTranspilers).GetMethod(nameof(BuilderTranspilers.FiveToTen))!;
+
+        IPatchHandle handle = Patcher.For(target).Transpiler(transpiler).Apply();
+        try {
+            Assert.Equal(10, BuilderTranspilerBehaviorTarget.Compute());
+        } finally {
+            handle.Dispose();
+        }
+
+        Assert.Equal(5, BuilderTranspilerBehaviorTarget.Compute());
+    }
+
+    [Fact]
+    public void Transpiler_Chained_ThroughPatcherFor_AppliesInRegistrationOrder() {
+        Assert.Equal(5, BuilderTranspilerChainTarget.Compute());
+
+        MethodBase target = typeof(BuilderTranspilerChainTarget).GetMethod(nameof(BuilderTranspilerChainTarget.Compute))!;
+
+        IPatchHandle handle = Patcher.For(target)
+            .Transpiler(typeof(BuilderTranspilers), nameof(BuilderTranspilers.FiveToTen))
+            .Transpiler(typeof(BuilderTranspilers), nameof(BuilderTranspilers.TenToTwenty))
+            .Apply();
+        try {
+            Assert.Equal(20, BuilderTranspilerChainTarget.Compute());
+        } finally {
+            handle.Dispose();
+        }
+
+        Assert.Equal(5, BuilderTranspilerChainTarget.Compute());
     }
 }

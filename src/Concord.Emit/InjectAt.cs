@@ -60,4 +60,13 @@ public abstract record InjectAt {
     /// </param>
     /// <param name="Arg">The 1-based argument to rewrite for At.Argument, or 0 to infer by unique type match.</param>
     public sealed record Invoke(Type DeclaringType, string Method, At Shift, uint By = 0, Type[]? ParameterTypes = null, uint Arg = 0) : InjectAt;
+
+    /// <summary>
+    ///     Rewrites the target body's raw IL through an author-supplied transpiler method.
+    /// </summary>
+    /// <param name="Final">
+    ///     <see langword="false" /> rewrites the original body before declarative injections compose onto it.
+    ///     <see langword="true" /> rewrites the fully composed wrapper.
+    /// </param>
+    public sealed record Transpiler(bool Final = false) : InjectAt;
 }

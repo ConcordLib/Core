@@ -3,7 +3,7 @@ namespace Concord.Emit;
 /// <summary>
 /// An IL instruction in language-neutral form.
 /// </summary>
-public sealed class NeutralInstruction {
+internal sealed class NeutralInstruction {
     /// <summary>
     /// Creates a neutral instruction.
     /// </summary>

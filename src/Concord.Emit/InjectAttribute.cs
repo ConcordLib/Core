@@ -180,10 +180,13 @@ public sealed class InjectAttribute : Attribute {
             }
 
             return At switch {
+                Concord.At.Head => new InjectAt.Head(),
                 Concord.At.Return => new InjectAt.Return(by),
                 Concord.At.Tail => new InjectAt.Tail(),
                 Concord.At.Around => new InjectAt.Around(),
-                _ => new InjectAt.Head(),
+                Concord.At.Transpiler => new InjectAt.Transpiler(false),
+                Concord.At.TranspilerFinal => new InjectAt.Transpiler(true),
+                _ => throw new ConcordEmitException("CONC116", $"Unsupported injection position '{At}'."),
             };
         }
     }

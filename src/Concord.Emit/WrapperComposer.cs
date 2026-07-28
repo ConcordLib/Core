@@ -36,7 +36,12 @@ public static class WrapperComposer {
         using DynamicMethodDefinition wrapper = new DynamicMethodDefinition(WrapperName(resolved), returnType, parameterTypes);
         BodyCopier.CopySpine(source.Definition, wrapper.Definition);
 
-        AssembleInto(wrapper.Definition, resolved, ordered, returnType);
+        PartitionTranspilers(ordered, out List<Injection> preTranspilers, out List<Injection> finalTranspilers, out List<Injection> declarative);
+
+        RunTranspilers(wrapper.Definition, resolved, preTranspilers);
+
+        AssembleInto(wrapper.Definition, resolved, declarative, returnType);
+        RunTranspilers(wrapper.Definition, resolved, finalTranspilers);
         MethodInfo wrapperMethod = wrapper.Generate();
         return new ComposeResult(wrapperMethod, originalBody);
     }
@@ -59,7 +64,12 @@ public static class WrapperComposer {
         using DynamicMethodDefinition wrapper = new DynamicMethodDefinition(WrapperName(resolved), returnType, parameterTypes);
         BodyCopier.CopySpine(source.Definition, wrapper.Definition);
 
-        Assemble(wrapper.Definition, resolved, ordered, returnType);
+        PartitionTranspilers(ordered, out List<Injection> preTranspilers, out List<Injection> finalTranspilers, out List<Injection> declarative);
+
+        RunTranspilers(wrapper.Definition, resolved, preTranspilers);
+
+        Assemble(wrapper.Definition, resolved, declarative, returnType);
+        RunTranspilers(wrapper.Definition, resolved, finalTranspilers);
 
         return IlDump.Format(wrapper.Definition);
     }
@@ -180,6 +190,43 @@ public static class WrapperComposer {
 
     internal static string WrapperName(MethodBase target) {
         return $"{target.DeclaringType?.Name}.{target.Name}‹concord›";
+    }
+
+    private static void PartitionTranspilers(
+        IReadOnlyList<Injection> ordered,
+        out List<Injection> preTranspilers,
+        out List<Injection> finalTranspilers,
+        out List<Injection> declarative) {
+        preTranspilers = new List<Injection>();
+        finalTranspilers = new List<Injection>();
+        declarative = new List<Injection>();
+
+        for (int i = 0; i < ordered.Count; i++) {
+            Injection injection = ordered[i];
+            if (injection.At is InjectAt.Transpiler { Final: false }) {
+                preTranspilers.Add(injection);
+            } else if (injection.At is InjectAt.Transpiler { Final: true }) {
+                finalTranspilers.Add(injection);
+            } else {
+                declarative.Add(injection);
+            }
+        }
+    }
+
+    private static void RunTranspilers(MethodDefinition wrapperDefinition, MethodBase resolved, IReadOnlyList<Injection> transpilers) {
+        if (transpilers.Count == 0) {
+            return;
+        }
+
+        TranspilerContext context = new TranspilerContext(resolved);
+        List<CodeInstruction> instructions = CecilCodeConverter.ToInstructions(wrapperDefinition, context);
+
+        for (int i = 0; i < transpilers.Count; i++) {
+            IEnumerable<CodeInstruction> produced = TranspilerInvoker.Invoke(transpilers[i].InjectionMethod, instructions, context);
+            instructions = produced as List<CodeInstruction> ?? new List<CodeInstruction>(produced);
+        }
+
+        CecilCodeConverter.WriteBack(wrapperDefinition, instructions, context);
     }
 
     private static bool HasWholeMethodAround(IReadOnlyList<Injection> ordered) {
@@ -466,7 +513,10 @@ public static class WrapperComposer {
 
             if (injection.At is InjectAt.Around) {
                 aroundInjection = RegisterAroundInjection(injection, aroundInjection, context.Target);
+                continue;
             }
+
+            throw new ConcordEmitException("CONC116", $"Unsupported injection position '{injection.At.GetType().Name}' reached composition dispatch.");
         }
 
         return hasHead;

@@ -9,7 +9,7 @@ public sealed class ConcordEmitException : Exception {
     /// </summary>
     /// <param name="code">The Concord diagnostic code, such as <c>CONC012</c>.</param>
     /// <param name="message">The human-readable error message.</param>
-    public ConcordEmitException(string code, string message) : base(message) {
+    public ConcordEmitException(string code, string message) : base(code + ": " + message) {
         Code = code;
     }
 

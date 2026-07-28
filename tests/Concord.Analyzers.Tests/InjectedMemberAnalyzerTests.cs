@@ -1475,7 +1475,9 @@ public sealed class InjectedMemberAnalyzerTests {
             Tail,
             Around,
             Constant,
-            Argument
+            Argument,
+            Transpiler,
+            TranspilerFinal
         }
 
         [AttributeUsage(AttributeTargets.Class)]
@@ -1555,6 +1557,12 @@ public sealed class InjectedMemberAnalyzerTests {
 
             public InjectMethodAttribute(string targetName) {
             }
+        }
+
+        public sealed class CodeInstruction {
+        }
+
+        public interface ITranspilerContext {
         }
 
         public sealed class ControlHandle {

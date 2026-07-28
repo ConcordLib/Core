@@ -3,7 +3,7 @@ namespace Concord.Emit;
 /// <summary>
 /// Distinguishes the kind of value held by a <see cref="NeutralOperand"/>.
 /// </summary>
-public enum NeutralOperandKind {
+internal enum NeutralOperandKind {
     /// <summary>No operand.</summary>
     None,
 

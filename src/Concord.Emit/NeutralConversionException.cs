@@ -3,7 +3,7 @@ namespace Concord.Emit;
 /// <summary>
 /// An exception thrown during neutral model conversion.
 /// </summary>
-public sealed class NeutralConversionException : Exception {
+internal sealed class NeutralConversionException : Exception {
     /// <summary>
     /// Creates a conversion exception.
     /// </summary>

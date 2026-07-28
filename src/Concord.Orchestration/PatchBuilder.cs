@@ -18,25 +18,43 @@ public sealed class PatchBuilder {
     }
 
     /// <summary>
-    ///     Records a head, tail, return, or around injection at the given position using the supplied injection method.
-    ///     For an invoke-splice injection use <see cref="Invoke(Type, string, MethodInfo, At, uint)" />.
+    ///     Records a head, tail, return, around, or transpiler injection at the given position using the supplied
+    ///     injection method. For an invoke-splice injection use <see cref="Invoke(Type, string, MethodInfo, At, uint)" />.
     /// </summary>
-    /// <param name="at">The injection position. <see cref="At.Return" /> targets every return.</param>
+    /// <param name="at">
+    ///     The injection position. <see cref="At.Return" /> targets every return. <see cref="At.Constant" /> and
+    ///     <see cref="At.Argument" /> are not reachable through this overload: use <see cref="InjectAttribute" />
+    ///     for <see cref="At.Constant" />, and <see cref="Invoke(Type, string, MethodInfo, At, uint)" /> with
+    ///     <c>shift: At.Argument</c> for <see cref="At.Argument" />.
+    /// </param>
     /// <param name="injectionMethod">The method that supplies the injected body.</param>
     /// <returns>This builder, for chaining.</returns>
+    /// <exception cref="ConcordEmitException">
+    ///     Thrown with code <c>CONC116</c> when <paramref name="at" /> is <see cref="At.Constant" /> or
+    ///     <see cref="At.Argument" />, neither of which this overload can express.
+    /// </exception>
     public PatchBuilder Inject(At at, MethodInfo injectionMethod) {
         return Inject(ToInjectAt(at), injectionMethod);
     }
 
     /// <summary>
-    ///     Records a head, tail, return, or around injection at the given position, resolving the injection method by
-    ///     name on <paramref name="injectionMethodType" />.
+    ///     Records a head, tail, return, around, or transpiler injection at the given position, resolving the
+    ///     injection method by name on <paramref name="injectionMethodType" />.
     /// </summary>
-    /// <param name="at">The injection position. <see cref="At.Return" /> targets every return.</param>
+    /// <param name="at">
+    ///     The injection position. <see cref="At.Return" /> targets every return. <see cref="At.Constant" /> and
+    ///     <see cref="At.Argument" /> are not reachable through this overload: use <see cref="InjectAttribute" />
+    ///     for <see cref="At.Constant" />, and <see cref="Invoke(Type, string, MethodInfo, At, uint)" /> with
+    ///     <c>shift: At.Argument</c> for <see cref="At.Argument" />.
+    /// </param>
     /// <param name="injectionMethodType">The type that declares the injection method.</param>
     /// <param name="injectionMethodName">The name of the injection method.</param>
     /// <returns>This builder, for chaining.</returns>
     /// <exception cref="ArgumentException">Thrown when the injection method is not found.</exception>
+    /// <exception cref="ConcordEmitException">
+    ///     Thrown with code <c>CONC116</c> when <paramref name="at" /> is <see cref="At.Constant" /> or
+    ///     <see cref="At.Argument" />, neither of which this overload can express.
+    /// </exception>
     public PatchBuilder Inject(At at, Type injectionMethodType, string injectionMethodName) {
         return Inject(ToInjectAt(at), ResolveInjectionMethod(injectionMethodType, injectionMethodName));
     }
@@ -162,6 +180,29 @@ public sealed class PatchBuilder {
     /// <returns>This builder, for chaining.</returns>
     public PatchBuilder Around(Type injectionMethodType, string injectionMethodName, Type[] parameterTypes) {
         return Inject(new InjectAt.Around(), ResolveInjectionMethod(injectionMethodType, injectionMethodName, parameterTypes));
+    }
+
+    /// <summary>Records a raw IL transpiler injection using the supplied injection method.</summary>
+    /// <param name="injectionMethod">The static method that rewrites the instruction stream.</param>
+    /// <param name="final">
+    ///     <see langword="false" /> rewrites the original body before declarative injections compose onto
+    ///     it. <see langword="true" /> rewrites the fully composed wrapper, which has no stability guarantee.
+    /// </param>
+    /// <returns>This builder, for chaining.</returns>
+    public PatchBuilder Transpiler(MethodInfo injectionMethod, bool final = false) {
+        return Inject(new InjectAt.Transpiler(final), injectionMethod);
+    }
+
+    /// <summary>
+    ///     Records a raw IL transpiler injection, resolving the injection method by name on
+    ///     <paramref name="injectionMethodType" />.
+    /// </summary>
+    /// <param name="injectionMethodType">The type that declares the injection method.</param>
+    /// <param name="injectionMethodName">The name of the injection method.</param>
+    /// <param name="final">Whether to rewrite the composed wrapper rather than the original body.</param>
+    /// <returns>This builder, for chaining.</returns>
+    public PatchBuilder Transpiler(Type injectionMethodType, string injectionMethodName, bool final = false) {
+        return Inject(new InjectAt.Transpiler(final), injectionMethodType, injectionMethodName);
     }
 
     /// <summary>
@@ -304,10 +345,13 @@ public sealed class PatchBuilder {
 
     private static InjectAt ToInjectAt(At at) {
         return at switch {
+            At.Head => new InjectAt.Head(),
             At.Return => new InjectAt.Return(0),
             At.Tail => new InjectAt.Tail(),
             At.Around => new InjectAt.Around(),
-            _ => new InjectAt.Head(),
+            At.Transpiler => new InjectAt.Transpiler(false),
+            At.TranspilerFinal => new InjectAt.Transpiler(true),
+            _ => throw new ConcordEmitException("CONC116", $"Unsupported injection position '{at}'."),
         };
     }
 }

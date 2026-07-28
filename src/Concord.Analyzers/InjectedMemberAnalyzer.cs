@@ -115,6 +115,23 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     /// </summary>
     public const string InvalidPatchOrderingDiagnosticId = "CONCORD021";
 
+    /// <summary>
+    ///     Diagnostic id for At.Transpiler/At.TranspilerFinal injection methods that are not static.
+    /// </summary>
+    public const string TranspilerMustBeStaticDiagnosticId = "CONCORD022";
+
+    /// <summary>
+    ///     Diagnostic id for At.Transpiler/At.TranspilerFinal injection methods whose signature is not
+    ///     IEnumerable&lt;CodeInstruction&gt; in and out, with an optional ITranspilerContext second parameter.
+    /// </summary>
+    public const string InvalidTranspilerSignatureDiagnosticId = "CONCORD023";
+
+    /// <summary>
+    ///     Diagnostic id for transpiler method bodies that reference a [Shadow]/[InjectField]/[InjectProperty]/
+    ///     [InjectMethod] member of the declaring [Patch] type.
+    /// </summary>
+    public const string TranspilerInjectedMemberAccessDiagnosticId = "CONCORD024";
+
     private const string ConcordPatchesNamespace = "Concord.Patches";
     private const string ConcordNamespace = "Concord";
     private const string OperationTypeName = "Operation";
@@ -301,6 +318,33 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         true,
         "PatchBefore and PatchAfter must appear on patch declarations and name valid, non-conflicting patch owners.");
 
+    private static readonly DiagnosticDescriptor TranspilerMustBeStaticRule = new(
+        TranspilerMustBeStaticDiagnosticId,
+        "Transpiler injection must be static",
+        "Transpiler injection method '{0}' must be static; a [Patch] declaration is abstract, so an instance transpiler can never be invoked",
+        ConcordPatchesNamespace,
+        DiagnosticSeverity.Error,
+        true,
+        "At.Transpiler and At.TranspilerFinal injection methods rewrite raw IL directly and are invoked by reflection, so they must be static.");
+
+    private static readonly DiagnosticDescriptor InvalidTranspilerSignatureRule = new(
+        InvalidTranspilerSignatureDiagnosticId,
+        "Transpiler injection signature is invalid",
+        "Transpiler injection method '{0}' must be shaped 'static IEnumerable<CodeInstruction> M(IEnumerable<CodeInstruction> instructions)', optionally with a second 'ITranspilerContext' parameter",
+        ConcordPatchesNamespace,
+        DiagnosticSeverity.Error,
+        true,
+        "At.Transpiler and At.TranspilerFinal injection methods must take and return IEnumerable<CodeInstruction> exactly, with an optional ITranspilerContext second parameter.");
+
+    private static readonly DiagnosticDescriptor TranspilerInjectedMemberAccessRule = new(
+        TranspilerInjectedMemberAccessDiagnosticId,
+        "Transpiler must not reference injected members",
+        "Transpiler injection method '{0}' references '{1}', a [Shadow]/[InjectField]/[InjectProperty]/[InjectMethod] member; those members are abstract IL-copy sources that only exist for declarative injections, so an invoked transpiler can never reach them",
+        ConcordPatchesNamespace,
+        DiagnosticSeverity.Error,
+        true,
+        "Shadow and injected members exist only as IL-copy sources for declarative injections. A transpiler is invoked directly rather than copied, so touching one fails at runtime instead of compile time.");
+
     private enum MetadataMemberKind {
         Field,
         Property,
@@ -329,7 +373,10 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             InvalidConstantPositionRule,
             AmbiguousArgumentInjectionRule,
             AmbiguousAccessorNameRule,
-            InvalidPatchOrderingRule);
+            InvalidPatchOrderingRule,
+            TranspilerMustBeStaticRule,
+            InvalidTranspilerSignatureRule,
+            TranspilerInjectedMemberAccessRule);
 
     /// <inheritdoc />
     public override void Initialize(AnalysisContext context) {
@@ -872,6 +919,11 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         InjectionInfo injection,
         InjectionTarget target,
         INamedTypeSymbol targetType) {
+        if (injection.AtValue is 6 or 7) {
+            ValidateTranspilerInjection(context, injection, targetType);
+            return;
+        }
+
         if (IsValueInjection(injection)) {
             ValidateValueInjectionSignature(context, injection);
             return;
@@ -895,6 +947,141 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         }
 
         ValidateInjectionReturnPosition(context, injection, target, targetType);
+    }
+
+    private static void ValidateTranspilerInjection(SymbolAnalysisContext context, InjectionInfo injection, INamedTypeSymbol targetType) {
+        IMethodSymbol method = injection.Method;
+
+        if (!method.IsStatic) {
+            context.ReportDiagnostic(Diagnostic.Create(
+                TranspilerMustBeStaticRule,
+                LocationOf(injection.Attribute, method, context.CancellationToken),
+                method.Name));
+        }
+
+        if (!IsValidTranspilerSignature(method)) {
+            context.ReportDiagnostic(Diagnostic.Create(
+                InvalidTranspilerSignatureRule,
+                LocationOf(injection.Attribute, method, context.CancellationToken),
+                method.Name));
+        }
+
+        ValidateTranspilerInjectedMemberAccess(context, injection, targetType);
+    }
+
+    private static bool IsValidTranspilerSignature(IMethodSymbol method) {
+        if (method.RefKind != RefKind.None || !IsCodeInstructionEnumerableParameterType(method.ReturnType)) {
+            return false;
+        }
+
+        ImmutableArray<IParameterSymbol> parameters = method.Parameters;
+        if (parameters.Length == 1) {
+            return IsCodeInstructionEnumerableParameter(parameters[0]);
+        }
+
+        return parameters.Length == 2 &&
+               IsCodeInstructionEnumerableParameter(parameters[0]) &&
+               parameters[1].RefKind == RefKind.None &&
+               IsTranspilerContextType(parameters[1].Type);
+    }
+
+    private static bool IsCodeInstructionEnumerableParameter(IParameterSymbol parameter) {
+        return parameter.RefKind == RefKind.None && IsCodeInstructionEnumerableParameterType(parameter.Type);
+    }
+
+    private static bool IsCodeInstructionEnumerableParameterType(ITypeSymbol type) {
+        return type is INamedTypeSymbol named &&
+               named.IsGenericType &&
+               named.Name == "IEnumerable" &&
+               named.ContainingNamespace.ToDisplayString() == "System.Collections.Generic" &&
+               named.TypeArguments.Length == 1 &&
+               IsCodeInstructionType(named.TypeArguments[0]);
+    }
+
+    private static bool IsCodeInstructionType(ITypeSymbol type) {
+        return type is INamedTypeSymbol named &&
+               named.Name == "CodeInstruction" &&
+               named.ContainingNamespace.ToDisplayString() == ConcordNamespace;
+    }
+
+    private static bool IsTranspilerContextType(ITypeSymbol type) {
+        return type is INamedTypeSymbol named &&
+               named.Name == "ITranspilerContext" &&
+               named.ContainingNamespace.ToDisplayString() == ConcordNamespace;
+    }
+
+    private static void ValidateTranspilerInjectedMemberAccess(SymbolAnalysisContext context, InjectionInfo injection, INamedTypeSymbol targetType) {
+        IMethodSymbol method = injection.Method;
+        if (method.ContainingType is not INamedTypeSymbol patchType) {
+            return;
+        }
+
+        HashSet<string> injectedMemberNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (ISymbol member in patchType.GetMembers()) {
+            if (member.GetAttributes().Any(IsShadowOrInjectedMemberAttribute)) {
+                injectedMemberNames.Add(member.Name);
+            }
+        }
+
+        AddShadowFieldNames(patchType, targetType, injectedMemberNames);
+
+        if (injectedMemberNames.Count == 0) {
+            return;
+        }
+
+        foreach (SyntaxReference syntaxReference in method.DeclaringSyntaxReferences) {
+            if (syntaxReference.GetSyntax(context.CancellationToken) is not MethodDeclarationSyntax declaration) {
+                continue;
+            }
+
+            SyntaxNode? body = (SyntaxNode?)declaration.Body ?? declaration.ExpressionBody;
+            if (body is null) {
+                continue;
+            }
+
+            foreach (SyntaxNode descendant in body.DescendantNodesAndSelf()) {
+                if (descendant is not IdentifierNameSyntax identifier || !injectedMemberNames.Contains(identifier.Identifier.Text)) {
+                    continue;
+                }
+
+                context.ReportDiagnostic(Diagnostic.Create(
+                    TranspilerInjectedMemberAccessRule,
+                    identifier.GetLocation(),
+                    method.Name,
+                    identifier.Identifier.Text));
+                return;
+            }
+        }
+    }
+
+    private static void AddShadowFieldNames(INamedTypeSymbol patchType, INamedTypeSymbol targetType, HashSet<string> injectedMemberNames) {
+        foreach (IFieldSymbol field in patchType.GetMembers().OfType<IFieldSymbol>()) {
+            if (field.IsImplicitlyDeclared ||
+                field.IsConst ||
+                field.GetAttributes().Any(IsInjectFieldAttribute)) {
+                continue;
+            }
+
+            IFieldSymbol? targetField = targetType.GetMembers(field.Name).OfType<IFieldSymbol>().FirstOrDefault();
+            if (targetField is null) {
+                continue;
+            }
+
+            if (targetField.IsStatic == field.IsStatic && SymbolEqualityComparer.Default.Equals(targetField.Type, field.Type)) {
+                injectedMemberNames.Add(field.Name);
+            }
+        }
+    }
+
+    private static bool IsShadowOrInjectedMemberAttribute(AttributeData attribute) {
+        return IsInjectFieldAttribute(attribute) ||
+               IsInjectPropertyAttribute(attribute) ||
+               IsInjectMethodAttribute(attribute) ||
+               IsShadowAttribute(attribute);
+    }
+
+    private static bool IsShadowAttribute(AttributeData attribute) {
+        return IsConcordAttribute(attribute, "ShadowAttribute");
     }
 
     private static void ValidateInjectionParameter(
