@@ -367,6 +367,86 @@ public sealed class InjectedMemberAnalyzerTests {
         Assert.Contains("by value", diagnostic.GetMessage());
     }
 
+    // object is Concord's escape hatch for a target whose type cannot be named from the patch
+    // class, so the analyzer must not treat it as a mismatch.
+    [Fact]
+    public async Task ObjectTypedInjectField_AgainstAnyTargetType_IsClean() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public class Target {
+                private int fuel;
+                private string label;
+            }
+
+            [Concord.Patch]
+            public abstract class Patch : Target {
+                [Concord.InjectField("fuel")]
+                private object fuel;
+
+                [Concord.InjectField("label")]
+                private object label;
+            }
+            """);
+
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
+    public async Task ObjectTypedInjectField_OnReferencedPrivateField_IsClean() {
+        MetadataReference targetReference = CreateReference(
+            "GameAssembly",
+            """
+            namespace Game {
+                public sealed class Target {
+                    private FlightState flightState;
+
+                    private enum FlightState {
+                        Grounded,
+                        Flying,
+                    }
+                }
+            }
+            """);
+
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            [Concord.Patch(typeof(Game.Target))]
+            public abstract class Patch {
+                [Concord.InjectField("flightState")]
+                private object flightState;
+            }
+            """,
+            targetReference);
+
+        Assert.Empty(diagnostics);
+    }
+
+    // object relaxes the type, not the static-ness.
+    [Fact]
+    public async Task ObjectTypedInjectField_WithWrongStaticness_StillReportsMismatch() {
+        ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(
+            AttributeSource +
+            """
+
+            public class Target {
+                private static int fuel;
+            }
+
+            [Concord.Patch]
+            public abstract class Patch : Target {
+                [Concord.InjectField("fuel")]
+                private object fuel;
+            }
+            """);
+
+        Diagnostic diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(InjectedMemberAnalyzer.MismatchedMemberDiagnosticId, diagnostic.Id);
+    }
+
     [Fact]
     public async Task StringTarget_UnresolvedTarget_ReportsDiagnostic() {
         ImmutableArray<Diagnostic> diagnostics = await GetAnalyzerDiagnosticsAsync(

@@ -87,7 +87,13 @@ internal static class InjectedMemberResolver {
 
             string targetName = attribute.TargetName ?? declarationField.Name;
             FieldInfo targetField = ResolveField(declarationType, targetType, declarationField, targetName);
-            if (targetField.FieldType != declarationField.FieldType || targetField.IsStatic != declarationField.IsStatic) {
+
+            // object is the escape hatch for a target whose type cannot be named from the patch
+            // class - a private nested enum, for instance. BodyCopier boxes on read and unboxes on
+            // write so the access still lands on the real field.
+            bool declaredAsObject = declarationField.FieldType == typeof(object) && targetField.FieldType != typeof(object);
+            if ((!declaredAsObject && targetField.FieldType != declarationField.FieldType) ||
+                targetField.IsStatic != declarationField.IsStatic) {
                 throw Error(
                     CodeCONC072,
                     "Injected field declaration '" + declarationType.Name + "." + declarationField.Name + HasType +

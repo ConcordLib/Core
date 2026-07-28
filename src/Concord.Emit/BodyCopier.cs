@@ -305,6 +305,10 @@ internal static class BodyCopier {
             return new List<Instruction> { local! };
         }
 
+        if (TryLowerObjectTypedInjectedField(source, ctx, out List<Instruction>? boxedField)) {
+            return boxedField!;
+        }
+
         Instruction copy = CloneInstruction(source, ctx.Module, ctx.VariableMap, ctx.InjectedMembers);
         RemapArgInstruction(copy, ctx.ArgRemap);
         return new List<Instruction> { copy };
@@ -415,6 +419,10 @@ internal static class BodyCopier {
 
         if (TryNormalizeLocal(source, ctx.VariableMap, ctx.InjectionMethodLocals, out Instruction? local)) {
             return new List<Instruction> { local! };
+        }
+
+        if (TryLowerObjectTypedInjectedField(source, ctx, out List<Instruction>? boxedField)) {
+            return boxedField!;
         }
 
         Instruction copy = CloneInstruction(source, ctx.Module, ctx.VariableMap, ctx.InjectedMembers);
@@ -562,6 +570,10 @@ internal static class BodyCopier {
 
         if (TryNormalizeLocal(source, ctx.VariableMap, ctx.InjectionMethodLocals, out Instruction? local)) {
             return new List<Instruction> { local! };
+        }
+
+        if (TryLowerObjectTypedInjectedField(source, ctx, out List<Instruction>? boxedField)) {
+            return boxedField!;
         }
 
         Instruction copy = CloneInstruction(source, ctx.Module, ctx.VariableMap, ctx.InjectedMembers);
@@ -1024,6 +1036,49 @@ internal static class BodyCopier {
             VariableDefinition variable => Instruction.Create(source.OpCode, variableMap[variable]),
             _ => CloneNonImported(source),
         };
+    }
+
+    // An [InjectField] declared as object reaches a target whose type cannot be named from the
+    // patch class - a private nested enum, say. The access still has to be emitted against the
+    // real field, so the value is boxed on the way out and unboxed on the way back in.
+    private static bool TryLowerObjectTypedInjectedField(Instruction source, LoweringContext ctx, out List<Instruction>? lowered) {
+        lowered = null;
+        if (source.Operand is not FieldReference reference ||
+            reference.FieldType.FullName != "System.Object" ||
+            !ctx.InjectedMembers.TryGetField(reference.Name, out FieldInfo? target) ||
+            target.FieldType == typeof(object)) {
+            return false;
+        }
+
+        FieldReference importedField = ctx.Module.ImportReference(target);
+        TypeReference importedType = ctx.Module.ImportReference(target.FieldType);
+
+        if (source.OpCode == OpCodes.Ldfld || source.OpCode == OpCodes.Ldsfld) {
+            lowered = new List<Instruction> { Instruction.Create(source.OpCode, importedField) };
+            if (target.FieldType.IsValueType) {
+                lowered.Add(Instruction.Create(OpCodes.Box, importedType));
+            }
+
+            return true;
+        }
+
+        if (source.OpCode == OpCodes.Stfld || source.OpCode == OpCodes.Stsfld) {
+            lowered = new List<Instruction> {
+                Instruction.Create(target.FieldType.IsValueType ? OpCodes.Unbox_Any : OpCodes.Castclass, importedType),
+                Instruction.Create(source.OpCode, importedField),
+            };
+            return true;
+        }
+
+        if (source.OpCode == OpCodes.Ldflda || source.OpCode == OpCodes.Ldsflda) {
+            throw new ConcordEmitException(
+                "CONC126",
+                $"Injected field '{reference.Name}' is declared as object against target type '{target.FieldType.Name}', " +
+                "so its value is boxed on access and has no stable address. Taking its address is not supported; " +
+                "read it into a local instead.");
+        }
+
+        return false;
     }
 
     private static Instruction CloneFieldInstruction(
