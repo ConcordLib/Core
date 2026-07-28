@@ -28,6 +28,13 @@
     <None Include="../../Assemblies/net10.0/Concord.dll" Pack="true" PackagePath="lib/net10.0" Visible="false"/>
     <None Include="../../Assemblies/netstandard2.0/Concord.dll" Pack="true" PackagePath="lib/netstandard2.0" Visible="false"/>
     <None Include="../../Assemblies/net472/Concord.dll" Pack="true" PackagePath="lib/net472" Visible="false"/>
+
+    <!-- The netstandard2.0 leg binds System.Reflection.Emit.OpCode through these facades, and
+         SuppressDependenciesWhenPacking means the package declares no dependency group to
+         restore them from. Ship them beside Concord.dll or the assembly reference dangles.
+         net10.0 and net472 resolve OpCode from the shared framework and mscorlib respectively. -->
+    <None Include="../../Assemblies/netstandard2.0/System.Reflection.Emit.ILGeneration.dll" Pack="true" PackagePath="lib/netstandard2.0" Visible="false"/>
+    <None Include="../../Assemblies/netstandard2.0/System.Reflection.Emit.Lightweight.dll" Pack="true" PackagePath="lib/netstandard2.0" Visible="false"/>
   </ItemGroup>
 
   <ItemGroup>
