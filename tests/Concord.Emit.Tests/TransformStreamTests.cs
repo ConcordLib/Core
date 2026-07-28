@@ -171,5 +171,9 @@ public sealed class TransformStreamTests {
         public LocalRef DeclareLocal(Type type) {
             return default;
         }
+
+        public LocalRef GetLocal(int index) {
+            return default;
+        }
     }
 }

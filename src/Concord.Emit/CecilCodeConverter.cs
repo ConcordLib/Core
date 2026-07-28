@@ -18,6 +18,11 @@ internal static class CecilCodeConverter {
         MethodBody body = definition.Body;
         context.ExistingLocalCount = body.Variables.Count;
 
+        context.ExistingLocalTypes.Clear();
+        foreach (VariableDefinition existing in body.Variables) {
+            context.ExistingLocalTypes.Add(ResolveType(existing.VariableType));
+        }
+
         AssignLabels(body, context);
 
         List<CodeInstruction> instructions = new List<CodeInstruction>(body.Instructions.Count);
@@ -414,8 +419,8 @@ internal static class CecilCodeConverter {
             MethodInfo method => Instruction.Create(opcode, module.ImportReference(method)),
             string s => Instruction.Create(opcode, s),
             sbyte sb => Instruction.Create(opcode, sb),
-            byte b => IsArgumentOperand(opcode) ? Instruction.Create(opcode, ResolveParameter(definition, b)) : Instruction.Create(opcode, b),
-            int i32 => IsArgumentOperand(opcode) ? Instruction.Create(opcode, ResolveParameter(definition, i32)) : Instruction.Create(opcode, i32),
+            byte b => ResolveSlotOperand(opcode, b, definition, localsByIndex, source) ?? Instruction.Create(opcode, b),
+            int i32 => ResolveSlotOperand(opcode, i32, definition, localsByIndex, source) ?? Instruction.Create(opcode, i32),
             long i64 => Instruction.Create(opcode, i64),
             float f32 => Instruction.Create(opcode, f32),
             double f64 => Instruction.Create(opcode, f64),
@@ -425,6 +430,37 @@ internal static class CecilCodeConverter {
 
     private static bool IsArgumentOperand(Mono.Cecil.Cil.OpCode opcode) {
         return opcode.OperandType == OperandType.ShortInlineArg || opcode.OperandType == OperandType.InlineArg;
+    }
+
+    private static bool IsLocalOperand(Mono.Cecil.Cil.OpCode opcode) {
+        return opcode.OperandType == OperandType.ShortInlineVar || opcode.OperandType == OperandType.InlineVar;
+    }
+
+    // A bare slot number is how Harmony transpilers address both arguments and locals, so an int
+    // operand resolves against whichever table the opcode calls for rather than being emitted raw.
+    private static Instruction? ResolveSlotOperand(
+        Mono.Cecil.Cil.OpCode opcode,
+        int rawSlot,
+        MethodDefinition definition,
+        Dictionary<int, VariableDefinition> localsByIndex,
+        CodeInstruction source) {
+        if (IsArgumentOperand(opcode)) {
+            return Instruction.Create(opcode, ResolveParameter(definition, rawSlot));
+        }
+
+        if (IsLocalOperand(opcode)) {
+            return Instruction.Create(opcode, ResolveLocalBySlot(rawSlot, localsByIndex, source));
+        }
+
+        return null;
+    }
+
+    private static VariableDefinition ResolveLocalBySlot(int rawSlot, Dictionary<int, VariableDefinition> localsByIndex, CodeInstruction source) {
+        if (localsByIndex.TryGetValue(rawSlot, out VariableDefinition? variable)) {
+            return variable;
+        }
+
+        throw new ConcordEmitException("CONC118", $"Local slot {rawSlot} referenced by opcode '{source.opcode.Name}' is out of range for a body with {localsByIndex.Count} local(s).");
     }
 
     private static ParameterDefinition ResolveParameter(MethodDefinition definition, int rawSlot) {

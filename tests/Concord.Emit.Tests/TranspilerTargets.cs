@@ -49,6 +49,13 @@ public static class TranspilerTargets {
         }
     }
 
+    // Two locals, so a transpiler can address slot 0 and slot 1 by bare index.
+    public static int TwoLocals(int seed) {
+        int first = seed + 1;
+        int second = first + 2;
+        return second;
+    }
+
     public static int Switched(int mode) {
         switch (mode) {
             case 0: return 10;
