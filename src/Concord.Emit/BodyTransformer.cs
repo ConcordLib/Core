@@ -30,7 +30,12 @@ public static class BodyTransformer {
         Type[] parameterTypes = WrapperComposer.ResolveParameterTypes(resolved);
         using DynamicMethodDefinition wrapper = new DynamicMethodDefinition(WrapperComposer.WrapperName(resolved), returnType, parameterTypes);
         Dictionary<Instruction, List<int>> provenance = NeutralToCecilConverter.Populate(source, wrapper.Definition);
-        WrapperComposer.AssembleInto(wrapper.Definition, resolved, ordered, returnType);
+
+        WrapperComposer.PartitionTranspilers(ordered, out List<Injection> preTranspilers, out List<Injection> finalTranspilers, out List<Injection> declarative);
+
+        WrapperComposer.RunTranspilers(wrapper.Definition, resolved, preTranspilers);
+        WrapperComposer.AssembleInto(wrapper.Definition, resolved, declarative, returnType);
+        WrapperComposer.RunTranspilers(wrapper.Definition, resolved, finalTranspilers);
         return CecilToNeutralConverter.Convert(wrapper.Definition, provenance, NextFreshLabelId(source));
     }
 

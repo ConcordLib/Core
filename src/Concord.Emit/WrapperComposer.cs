@@ -192,7 +192,7 @@ public static class WrapperComposer {
         return $"{target.DeclaringType?.Name}.{target.Name}‹concord›";
     }
 
-    private static void PartitionTranspilers(
+    internal static void PartitionTranspilers(
         IReadOnlyList<Injection> ordered,
         out List<Injection> preTranspilers,
         out List<Injection> finalTranspilers,
@@ -213,7 +213,7 @@ public static class WrapperComposer {
         }
     }
 
-    private static void RunTranspilers(MethodDefinition wrapperDefinition, MethodBase resolved, IReadOnlyList<Injection> transpilers) {
+    internal static void RunTranspilers(MethodDefinition wrapperDefinition, MethodBase resolved, IReadOnlyList<Injection> transpilers) {
         if (transpilers.Count == 0) {
             return;
         }

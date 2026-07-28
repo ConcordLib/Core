@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Reflection.Emit;
 using Concord.Emit;
 using Concord.Emit.Tests.NeutralRoundTrip;
 using Xunit;
@@ -14,6 +15,20 @@ public static class BodyTransformerTargets {
 
     public static void HeadInjection() {
         HeadObserved++;
+    }
+
+    public static int Priced() {
+        return 5;
+    }
+
+    public static IEnumerable<CodeInstruction> FiveToTen(IEnumerable<CodeInstruction> instructions) {
+        foreach (CodeInstruction instruction in instructions) {
+            if (instruction.opcode == OpCodes.Ldc_I4_5 || instruction.Is(OpCodes.Ldc_I4, 5)) {
+                yield return new CodeInstruction(OpCodes.Ldc_I4, 10);
+            } else {
+                yield return instruction;
+            }
+        }
     }
 }
 
@@ -84,5 +99,44 @@ public class BodyTransformerTests {
             "test",
             1);
         Assert.Throws<ConcordEmitException>(() => BodyTransformer.Transform(target, supplied, [around, invoke]));
+    }
+
+    [Fact]
+    public void TransformPartitionsTranspilersInsteadOfRejectingThem() {
+        MethodBase target = typeof(BodyTransformerTargets).GetMethod(nameof(BodyTransformerTargets.Priced))!;
+        NeutralBody supplied = BodyTransformer.FromMethod(target);
+        Injection transpiler = new Injection(
+            typeof(BodyTransformerTargets).GetMethod(nameof(BodyTransformerTargets.FiveToTen))!,
+            new InjectAt.Transpiler(false),
+            "test",
+            0);
+
+        NeutralBody composed = BodyTransformer.Transform(target, supplied, [transpiler]);
+
+        MethodInfo generated = RoundTrip.Generate(composed, target);
+        Assert.Equal(10, generated.Invoke(null, null));
+    }
+
+    [Fact]
+    public void TransformComposesATranspilerAlongsideADeclarativeInjection() {
+        MethodBase target = typeof(BodyTransformerTargets).GetMethod(nameof(BodyTransformerTargets.Priced))!;
+        NeutralBody supplied = BodyTransformer.FromMethod(target);
+        Injection transpiler = new Injection(
+            typeof(BodyTransformerTargets).GetMethod(nameof(BodyTransformerTargets.FiveToTen))!,
+            new InjectAt.Transpiler(false),
+            "test-transpiler",
+            0);
+        Injection head = new Injection(
+            typeof(BodyTransformerTargets).GetMethod(nameof(BodyTransformerTargets.HeadInjection))!,
+            new InjectAt.Head(),
+            "test-head",
+            0);
+
+        NeutralBody composed = BodyTransformer.Transform(target, supplied, [transpiler, head]);
+
+        MethodInfo generated = RoundTrip.Generate(composed, target);
+        BodyTransformerTargets.HeadObserved = 0;
+        Assert.Equal(10, generated.Invoke(null, null));
+        Assert.Equal(1, BodyTransformerTargets.HeadObserved);
     }
 }
