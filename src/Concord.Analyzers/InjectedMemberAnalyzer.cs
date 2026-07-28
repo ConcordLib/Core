@@ -956,20 +956,29 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
 
         for (INamedTypeSymbol? current = targetType; current is not null && !IsObject(current); current = current.BaseType) {
             foreach (IMethodSymbol method in current.GetMembers(targetName).OfType<IMethodSymbol>()) {
-                if (method.MethodKind is not (MethodKind.Ordinary or MethodKind.PropertyGet or MethodKind.PropertySet)) {
+                if (!IsReachableCandidate(method, current, targetType)) {
                     continue;
                 }
 
-                if (current.Equals(targetType, SymbolEqualityComparer.Default) || method.DeclaredAccessibility != Accessibility.Private) {
-                    if (moreDerivedCandidates.Any(candidate => MethodSignatureMatches(candidate, method))) {
-                        continue;
-                    }
-
-                    moreDerivedCandidates.Add(method);
-                    yield return method;
+                if (moreDerivedCandidates.Any(candidate => MethodSignatureMatches(candidate, method))) {
+                    continue;
                 }
+
+                moreDerivedCandidates.Add(method);
+                yield return method;
             }
         }
+    }
+
+    // A member qualifies as an ordinary method or a property accessor that the target type can
+    // actually see: a private member counts only when declared on the target itself, never when
+    // inherited from a base class, where it would be out of reach.
+    private static bool IsReachableCandidate(IMethodSymbol method, INamedTypeSymbol current, INamedTypeSymbol targetType) {
+        if (method.MethodKind is not (MethodKind.Ordinary or MethodKind.PropertyGet or MethodKind.PropertySet)) {
+            return false;
+        }
+
+        return current.Equals(targetType, SymbolEqualityComparer.Default) || method.DeclaredAccessibility != Accessibility.Private;
     }
 
     private static bool MethodSignatureMatches(IMethodSymbol left, IMethodSymbol right) {
@@ -1214,6 +1223,13 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             return;
         }
 
+        ReportFirstInjectedMemberReference(context, method, injectedMemberNames);
+    }
+
+    // Reports only the first identifier in the transpiler's own body that names an injected member:
+    // one diagnostic per transpiler is enough to make the point, and the same name typically recurs
+    // throughout the method, so reporting every occurrence would just be noise.
+    private static void ReportFirstInjectedMemberReference(SymbolAnalysisContext context, IMethodSymbol method, HashSet<string> injectedMemberNames) {
         foreach (SyntaxReference syntaxReference in method.DeclaringSyntaxReferences) {
             if (syntaxReference.GetSyntax(context.CancellationToken) is not MethodDeclarationSyntax declaration) {
                 continue;
@@ -1974,23 +1990,36 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             }
 
             foreach (ModuleMetadata module in assemblyMetadata.GetModules()) {
-                MetadataReader reader = module.GetMetadataReader();
-                foreach (TypeDefinitionHandle handle in reader.TypeDefinitions) {
-                    if (TypeDefinitionMetadataName(reader, handle) != targetMetadataName) {
-                        continue;
-                    }
-
-                    TypeDefinition definition = reader.GetTypeDefinition(handle);
-                    foreach (FieldDefinitionHandle fieldHandle in definition.GetFields()) {
-                        FieldDefinition field = reader.GetFieldDefinition(fieldHandle);
-                        if (reader.GetString(field.Name) != targetName) {
-                            continue;
-                        }
-
-                        isStatic = (field.Attributes & System.Reflection.FieldAttributes.Static) != 0;
-                        return field.DecodeSignature(new MetadataTypeNameProvider(), null);
-                    }
+                string? signature = ModuleFieldTypeName(module, targetMetadataName, targetName, out isStatic);
+                if (signature is not null) {
+                    return signature;
                 }
+            }
+        }
+
+        return null;
+    }
+
+    // Walks one module for the target type definition, then that type's fields for the named one,
+    // decoding the field's type straight out of its metadata signature.
+    private static string? ModuleFieldTypeName(ModuleMetadata module, string targetMetadataName, string targetName, out bool isStatic) {
+        isStatic = false;
+        MetadataReader reader = module.GetMetadataReader();
+
+        foreach (TypeDefinitionHandle handle in reader.TypeDefinitions) {
+            if (TypeDefinitionMetadataName(reader, handle) != targetMetadataName) {
+                continue;
+            }
+
+            TypeDefinition definition = reader.GetTypeDefinition(handle);
+            foreach (FieldDefinitionHandle fieldHandle in definition.GetFields()) {
+                FieldDefinition field = reader.GetFieldDefinition(fieldHandle);
+                if (reader.GetString(field.Name) != targetName) {
+                    continue;
+                }
+
+                isStatic = (field.Attributes & System.Reflection.FieldAttributes.Static) != 0;
+                return field.DecodeSignature(new MetadataTypeNameProvider(), null);
             }
         }
 

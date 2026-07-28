@@ -171,24 +171,9 @@ internal static class ControlHandleLowering {
                 continue;
             }
 
-            if (instruction.OpCode != OpCodes.Call && instruction.OpCode != OpCodes.Callvirt) {
-                continue;
+            if (IsMatchingCall(instruction, declaringType, methodName, parameterTypes)) {
+                matches.Add(instruction);
             }
-
-            if (instruction.Operand is not MethodReference reference) {
-                continue;
-            }
-
-            MethodBase resolved = reference.ResolveReflection();
-            if (resolved.Name != methodName || resolved.DeclaringType != declaringType) {
-                continue;
-            }
-
-            if (parameterTypes != null && !ParameterTypesMatch(resolved, parameterTypes)) {
-                continue;
-            }
-
-            matches.Add(instruction);
         }
 
         return matches;
@@ -244,6 +229,26 @@ internal static class ControlHandleLowering {
         }
 
         return -1;
+    }
+
+    // A call site matches when it is a direct or virtual call to the named member on the given
+    // declaring type. parameterTypes narrows it further when the caller needs one specific overload;
+    // passing null means any overload of that name qualifies.
+    private static bool IsMatchingCall(Instruction instruction, Type declaringType, string methodName, Type[]? parameterTypes) {
+        if (instruction.OpCode != OpCodes.Call && instruction.OpCode != OpCodes.Callvirt) {
+            return false;
+        }
+
+        if (instruction.Operand is not MethodReference reference) {
+            return false;
+        }
+
+        MethodBase resolved = reference.ResolveReflection();
+        if (resolved.Name != methodName || resolved.DeclaringType != declaringType) {
+            return false;
+        }
+
+        return parameterTypes == null || ParameterTypesMatch(resolved, parameterTypes);
     }
 
     private static bool IsMatchingFieldRead(Instruction instruction, Type declaringType, string fieldName) {
