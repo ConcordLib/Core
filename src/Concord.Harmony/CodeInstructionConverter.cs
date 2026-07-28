@@ -9,6 +9,7 @@ using HarmonyLib;
 
 namespace Concord.Harmony;
 
+using CodeInstruction = HarmonyLib.CodeInstruction;
 using ExceptionBlock = HarmonyLib.ExceptionBlock;
 using ExceptionBlockType = HarmonyLib.ExceptionBlockType;
 using Label = System.Reflection.Emit.Label;

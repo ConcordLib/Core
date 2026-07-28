@@ -11,6 +11,8 @@ using Xunit;
 
 namespace Concord.Harmony.Tests
 {
+    using CodeInstruction = HarmonyLib.CodeInstruction;
+
     public static class DiscordSequenceLog
     {
         public static List<string> Entries = new List<string>();

@@ -9,6 +9,7 @@ using Xunit;
 
 namespace Concord.Harmony.Tests;
 
+using CodeInstruction = HarmonyLib.CodeInstruction;
 using ExceptionBlock = HarmonyLib.ExceptionBlock;
 using ExceptionBlockType = HarmonyLib.ExceptionBlockType;
 using Label = System.Reflection.Emit.Label;

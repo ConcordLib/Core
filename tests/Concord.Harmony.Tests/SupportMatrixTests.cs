@@ -13,6 +13,8 @@ using Xunit;
 
 namespace Concord.Harmony.Tests
 {
+    using CodeInstruction = HarmonyLib.CodeInstruction;
+
     public class SupportMatrixTestTargets
     {
         [MethodImpl(MethodImplOptions.NoInlining)]

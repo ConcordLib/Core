@@ -10,6 +10,8 @@ using HarmonyLib;
 
 namespace Concord.Harmony;
 
+using CodeInstruction = HarmonyLib.CodeInstruction;
+
 internal static class TranspilerParticipant
 {
     internal static readonly BridgeTargetRegistry Registry = new BridgeTargetRegistry();
