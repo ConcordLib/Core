@@ -125,8 +125,26 @@ namespace Concord.Harmony.Tests
 
     public sealed class SupportMatrixStateMachineTests
     {
+        // Harmony opens the stream for the method it was asked to patch, so a StateMachine injection
+        // wants a MoveNext body Harmony never handed over and the two cannot be composed.
         [Fact]
-        public void RejectsAsyncEntryMethod()
+        public void RejectsAsyncEntryMethodWhenInjectionSelectsStateMachineBody()
+        {
+            MethodBase target = typeof(SupportMatrixTestTargets).GetMethod(nameof(SupportMatrixTestTargets.AsyncTarget));
+            MethodBase injectionMethod = typeof(SupportMatrixTestInjections).GetMethod(nameof(SupportMatrixTestInjections.SimplePrefix));
+            Injection[] injections = new Injection[]
+            {
+                new Injection(injectionMethod, new InjectAt.Head(), "test", 0) { Body = PatchBody.StateMachine }
+            };
+
+            string reason = SupportMatrix.Validate(target, injections, null);
+            Assert.NotNull(reason);
+            Assert.Contains("async", reason.ToLower());
+        }
+
+        // A Declared injection composes onto the same method Harmony streamed, so coexistence works.
+        [Fact]
+        public void AllowsAsyncEntryMethodWhenInjectionSelectsDeclaredBody()
         {
             MethodBase target = typeof(SupportMatrixTestTargets).GetMethod(nameof(SupportMatrixTestTargets.AsyncTarget));
             MethodBase injectionMethod = typeof(SupportMatrixTestInjections).GetMethod(nameof(SupportMatrixTestInjections.SimplePrefix));
@@ -136,8 +154,7 @@ namespace Concord.Harmony.Tests
             };
 
             string reason = SupportMatrix.Validate(target, injections, null);
-            Assert.NotNull(reason);
-            Assert.Contains("async", reason.ToLower());
+            Assert.Null(reason);
         }
     }
 

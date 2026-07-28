@@ -31,10 +31,16 @@ namespace Concord.Harmony
                 return $"Target {target.Name} has Harmony 2.4 inner patches (not composable with Concord detours)";
             }
 
-            MethodBase canonical = WrapperComposer.ResolveStateMachineTarget(target);
-            if (canonical != target)
+            // Harmony hands us the stream for the method it was asked to patch. That lines up with a
+            // PatchBody.Declared injection, but a PatchBody.StateMachine one composes onto a MoveNext
+            // Harmony never opened, so there is nothing to compose the two streams onto.
+            foreach (Injection injection in added)
             {
-                return $"Async/iterator entry method {target.Name} is not the canonical target (stream source is the state machine method)";
+                if (injection.Body == PatchBody.StateMachine &&
+                    WrapperComposer.ResolveStateMachineTarget(target) != target)
+                {
+                    return $"Injection {injection.InjectionMethod.Name} selected PatchBody.StateMachine on async/iterator method {target.Name} (stream source is the declared method)";
+                }
             }
 
             try

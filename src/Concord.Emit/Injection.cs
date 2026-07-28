@@ -16,6 +16,12 @@ public sealed record Injection(MethodBase InjectionMethod, InjectAt At, string O
     public bool Debug { get; set; }
 
     /// <summary>
+    ///     Which body this injection attaches to when the target is an async or iterator method.
+    ///     Defaults to <see cref="PatchBody.Declared" />.
+    /// </summary>
+    public PatchBody Body { get; set; } = PatchBody.Declared;
+
+    /// <summary>
     ///     The patch owners that should run after this injection.
     /// </summary>
     public IReadOnlyList<string> BeforeOwners { get; set; } = [];

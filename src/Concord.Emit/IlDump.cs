@@ -79,7 +79,16 @@ internal static class IlDump {
         return sb.ToString();
     }
 
-    internal static int PopCount(Instruction instruction, MethodDefinition method) {
+    /// <summary>
+    ///     Pop count for an instruction inspected outside a known method body. <c>ret</c> reports 0
+    ///     because its real pop count depends on the enclosing return type; callers that walk a body
+    ///     treat <c>ret</c> as a terminator instead.
+    /// </summary>
+    internal static int PopCount(Instruction instruction) {
+        return PopCount(instruction, null);
+    }
+
+    internal static int PopCount(Instruction instruction, MethodDefinition? method) {
         switch (instruction.OpCode.StackBehaviourPop) {
             case StackBehaviour.Pop0:
                 return 0;
@@ -306,7 +315,7 @@ internal static class IlDump {
         return type.FullName + " @ " + (type.Scope?.Name ?? "?");
     }
 
-    private static int VarPop(Instruction instruction, MethodDefinition method) {
+    private static int VarPop(Instruction instruction, MethodDefinition? method) {
         if (instruction.Operand is MethodReference reference) {
             if (instruction.OpCode == OpCodes.Newobj) {
                 return reference.Parameters.Count;
@@ -321,7 +330,7 @@ internal static class IlDump {
         }
 
         if (instruction.OpCode == OpCodes.Ret) {
-            return method.ReturnType.FullName == "System.Void" ? 0 : 1;
+            return method is not null && method.ReturnType.FullName != "System.Void" ? 1 : 0;
         }
 
         return 0;

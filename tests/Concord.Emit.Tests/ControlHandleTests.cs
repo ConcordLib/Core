@@ -14,6 +14,11 @@ public static class ControlHandleTargets {
         SpineRuns++;
         return 5;
     }
+
+    public static IEnumerable<int> EnumerableWork() {
+        SpineRuns++;
+        return [1, 2];
+    }
 }
 
 public static class ControlHandleInjectionMethods {
@@ -40,6 +45,32 @@ public static class ControlHandleInjectionMethods {
 
     public static void CaptureHandle(ControlHandle ch) {
         StrayHandleSink.Capture(ch);
+    }
+
+    // The assigned value is a call, so it is emitted between the handle load and the setter that
+    // consumes it. This is ordinary code, not a stray use.
+    public static void ReturnFromCall(ControlHandle<int> ch) {
+        ch.ReturnValue = ValueSource.Produce();
+    }
+
+    // The collection expression lowers to a call too - this is the exact shape that used to be
+    // rejected in the wild.
+    public static void ReturnEmptyCollection(ControlHandle<IEnumerable<int>> ch) {
+        ch.ReturnValue = [];
+    }
+
+    public static void ReturnFromNestedCalls(ControlHandle<int> ch) {
+        ch.ReturnValue = ValueSource.Double(ValueSource.Produce());
+    }
+}
+
+public static class ValueSource {
+    public static int Produce() {
+        return 7;
+    }
+
+    public static int Double(int value) {
+        return value * 2;
     }
 }
 
@@ -143,5 +174,41 @@ public sealed class ControlHandleTests {
             WrapperComposer.Compose(target, [head]));
 
         Assert.Equal("CONC013", ex.Code);
+    }
+
+    // Regression: EnsureNotStrayControlHandleUse used to look only at the instruction right after
+    // the handle load. Since C# evaluates the assigned value after loading the receiver, every
+    // `ch.ReturnValue = <something involving a call>` tripped CONC013.
+    [Fact]
+    public void Compose_ReturnValueFromCall_IsNotAStrayUse() {
+        MethodBase target = typeof(ControlHandleTargets).GetMethod(nameof(ControlHandleTargets.IntWork))!;
+        MethodBase injectionMethod = typeof(ControlHandleInjectionMethods).GetMethod(nameof(ControlHandleInjectionMethods.ReturnFromCall))!;
+        Injection ret = new Injection(injectionMethod, new InjectAt.Return(0), "test", 0);
+
+        ComposeResult result = WrapperComposer.Compose(target, [ret]);
+
+        Assert.Equal(7, result.Wrapper.CreateDelegate<Func<int>>()());
+    }
+
+    [Fact]
+    public void Compose_ReturnValueFromNestedCalls_IsNotAStrayUse() {
+        MethodBase target = typeof(ControlHandleTargets).GetMethod(nameof(ControlHandleTargets.IntWork))!;
+        MethodBase injectionMethod = typeof(ControlHandleInjectionMethods).GetMethod(nameof(ControlHandleInjectionMethods.ReturnFromNestedCalls))!;
+        Injection ret = new Injection(injectionMethod, new InjectAt.Return(0), "test", 0);
+
+        ComposeResult result = WrapperComposer.Compose(target, [ret]);
+
+        Assert.Equal(14, result.Wrapper.CreateDelegate<Func<int>>()());
+    }
+
+    [Fact]
+    public void Compose_ReturnValueFromCollectionExpression_IsNotAStrayUse() {
+        MethodBase target = typeof(ControlHandleTargets).GetMethod(nameof(ControlHandleTargets.EnumerableWork))!;
+        MethodBase injectionMethod = typeof(ControlHandleInjectionMethods).GetMethod(nameof(ControlHandleInjectionMethods.ReturnEmptyCollection))!;
+        Injection ret = new Injection(injectionMethod, new InjectAt.Return(0), "test", 0);
+
+        ComposeResult result = WrapperComposer.Compose(target, [ret]);
+
+        Assert.Empty(result.Wrapper.CreateDelegate<Func<IEnumerable<int>>>()());
     }
 }

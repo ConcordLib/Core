@@ -543,6 +543,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             IFieldSymbol? targetField = FindMember(targetType, type => type.GetMembers(targetName).OfType<IFieldSymbol>());
             if (targetField is null) {
                 if (MetadataMemberExists(context.Compilation, targetType, targetName, MetadataMemberKind.Field)) {
+                    ValidateMetadataFieldShape(context, field, injectAttribute, targetName, targetType);
                     continue;
                 }
 
@@ -562,6 +563,93 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
                     "field type and static-ness must match exactly");
             }
         }
+    }
+
+    // Roslyn's default MetadataImportOptions.Public leaves private members of referenced
+    // assemblies out of the symbol model, so the field a [InjectField] most often targets is
+    // invisible to FindMember. Read the shape straight out of metadata instead, otherwise the
+    // type check never runs for the attribute's primary use case.
+    private static void ValidateMetadataFieldShape(
+        SymbolAnalysisContext context,
+        IFieldSymbol field,
+        AttributeData injectAttribute,
+        string targetName,
+        INamedTypeSymbol targetType) {
+        string? targetTypeName = MetadataFieldTypeName(context.Compilation, targetType, targetName, out bool isStatic);
+        string? declaredTypeName = SymbolMetadataTypeName(field.Type);
+        if (targetTypeName is null || declaredTypeName is null) {
+            return;
+        }
+
+        if (targetTypeName != declaredTypeName || isStatic != field.IsStatic) {
+            ReportMismatch(
+                context,
+                field,
+                injectAttribute,
+                targetName,
+                targetType,
+                "field type and static-ness must match exactly");
+        }
+    }
+
+    // Mirrors what MetadataTypeNameProvider produces so the two names compare directly. Returns
+    // null for shapes that cannot be named the same way from both sides.
+    private static string? SymbolMetadataTypeName(ITypeSymbol type) {
+        switch (type) {
+            case IArrayTypeSymbol array: {
+                string? element = SymbolMetadataTypeName(array.ElementType);
+                if (element is null) {
+                    return null;
+                }
+
+                return array.Rank == 1
+                    ? element + "[]"
+                    : element + "[" + new string(',', array.Rank - 1) + "]";
+            }
+
+            case IPointerTypeSymbol pointer: {
+                string? element = SymbolMetadataTypeName(pointer.PointedAtType);
+                return element is null ? null : element + "*";
+            }
+
+            // A type nested in a generic carries its outer type arguments in the metadata
+            // instantiation but not in TypeArguments, so the two names would never line up.
+            case INamedTypeSymbol named when IsNestedInGenericType(named):
+                return null;
+
+            case INamedTypeSymbol { IsUnboundGenericType: true }:
+                return null;
+
+            case INamedTypeSymbol named when named.IsGenericType &&
+                                             !SymbolEqualityComparer.Default.Equals(named, named.OriginalDefinition): {
+                string definition = MetadataName(named.OriginalDefinition);
+                string?[] arguments = new string?[named.TypeArguments.Length];
+                for (int i = 0; i < named.TypeArguments.Length; i++) {
+                    arguments[i] = SymbolMetadataTypeName(named.TypeArguments[i]);
+                    if (arguments[i] is null) {
+                        return null;
+                    }
+                }
+
+                return definition + "[" + string.Join(",", arguments) + "]";
+            }
+
+            case INamedTypeSymbol named:
+                return MetadataName(named);
+
+            default:
+                return null;
+        }
+    }
+
+    private static bool IsNestedInGenericType(INamedTypeSymbol type) {
+        for (INamedTypeSymbol? containing = type.ContainingType; containing is not null; containing = containing.ContainingType) {
+            if (containing.IsGenericType) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static void AnalyzeInjectionMethods(SymbolAnalysisContext context, INamedTypeSymbol patchType, INamedTypeSymbol targetType) {
@@ -1114,7 +1202,34 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
                 target,
                 targetType,
                 "injection method parameters must match target parameters by name and type");
+            return;
         }
+
+        // IParameterSymbol.Type strips the ref, so the type check above passes for `int x` against
+        // `ref int x`. The argument slot is still a managed pointer, and assigning to the by-value
+        // declaration compiles to starg against it - invalid IL the runtime only rejects at JIT.
+        if (IsByRef(targetParameter.RefKind) != IsByRef(parameter.RefKind)) {
+            ReportInvalidInjectionSignature(
+                context,
+                injection,
+                target,
+                targetType,
+                IsByRef(targetParameter.RefKind)
+                    ? $"target parameter '{targetParameter.Name}' is passed by reference; declare it '{RefKeyword(targetParameter.RefKind)}' on the injection too"
+                    : $"target parameter '{targetParameter.Name}' is passed by value; drop the byref modifier on the injection");
+        }
+    }
+
+    private static bool IsByRef(RefKind refKind) {
+        return refKind is RefKind.Ref or RefKind.Out or RefKind.RefReadOnly or RefKind.In;
+    }
+
+    private static string RefKeyword(RefKind refKind) {
+        return refKind switch {
+            RefKind.Out => "ref",
+            RefKind.In or RefKind.RefReadOnly => "in",
+            _ => "ref",
+        };
     }
 
     private static void ValidateControlHandleParameter(
@@ -1737,6 +1852,52 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         }
 
         return false;
+    }
+
+    // Roslyn's default MetadataImportOptions.Public leaves private members of a referenced
+    // assembly out of the symbol model, which is why the metadata fallback exists at all.
+    // Reaching private fields is the whole point of [InjectField], so the type check has to read
+    // the field's signature straight out of metadata rather than skipping validation.
+    private static string? MetadataFieldTypeName(
+        Compilation compilation,
+        INamedTypeSymbol targetType,
+        string targetName,
+        out bool isStatic) {
+        isStatic = false;
+        string targetMetadataName = MetadataName(targetType);
+
+        foreach (PortableExecutableReference reference in compilation.References.OfType<PortableExecutableReference>()) {
+            if (compilation.GetAssemblyOrModuleSymbol(reference) is not IAssemblySymbol assembly ||
+                !assembly.Identity.Equals(targetType.ContainingAssembly.Identity)) {
+                continue;
+            }
+
+            if (reference.GetMetadata() is not AssemblyMetadata assemblyMetadata) {
+                continue;
+            }
+
+            foreach (ModuleMetadata module in assemblyMetadata.GetModules()) {
+                MetadataReader reader = module.GetMetadataReader();
+                foreach (TypeDefinitionHandle handle in reader.TypeDefinitions) {
+                    if (TypeDefinitionMetadataName(reader, handle) != targetMetadataName) {
+                        continue;
+                    }
+
+                    TypeDefinition definition = reader.GetTypeDefinition(handle);
+                    foreach (FieldDefinitionHandle fieldHandle in definition.GetFields()) {
+                        FieldDefinition field = reader.GetFieldDefinition(fieldHandle);
+                        if (reader.GetString(field.Name) != targetName) {
+                            continue;
+                        }
+
+                        isStatic = (field.Attributes & System.Reflection.FieldAttributes.Static) != 0;
+                        return field.DecodeSignature(new MetadataTypeNameProvider(), null);
+                    }
+                }
+            }
+        }
+
+        return null;
     }
 
     private static bool HasProperty(MetadataReader reader, TypeDefinition definition, string targetName) {
@@ -2585,6 +2746,111 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         public bool SignatureValidated { get; }
 
         public IMethodSymbol? MethodSymbol { get; }
+    }
+
+    // Produces the same Namespace.Outer+Inner shape as MetadataName so the two sides compare
+    // directly. Shapes it cannot name confidently yield null, and the caller then skips the
+    // check rather than reporting a mismatch it is not sure about.
+    private sealed class MetadataTypeNameProvider : ISignatureTypeProvider<string?, object?> {
+        public string? GetPrimitiveType(PrimitiveTypeCode typeCode) {
+            return typeCode switch {
+                PrimitiveTypeCode.Boolean => "System.Boolean",
+                PrimitiveTypeCode.Byte => "System.Byte",
+                PrimitiveTypeCode.SByte => "System.SByte",
+                PrimitiveTypeCode.Char => "System.Char",
+                PrimitiveTypeCode.Int16 => "System.Int16",
+                PrimitiveTypeCode.UInt16 => "System.UInt16",
+                PrimitiveTypeCode.Int32 => "System.Int32",
+                PrimitiveTypeCode.UInt32 => "System.UInt32",
+                PrimitiveTypeCode.Int64 => "System.Int64",
+                PrimitiveTypeCode.UInt64 => "System.UInt64",
+                PrimitiveTypeCode.Single => "System.Single",
+                PrimitiveTypeCode.Double => "System.Double",
+                PrimitiveTypeCode.IntPtr => "System.IntPtr",
+                PrimitiveTypeCode.UIntPtr => "System.UIntPtr",
+                PrimitiveTypeCode.Object => "System.Object",
+                PrimitiveTypeCode.String => "System.String",
+                PrimitiveTypeCode.Void => "System.Void",
+                PrimitiveTypeCode.TypedReference => "System.TypedReference",
+                _ => null,
+            };
+        }
+
+        public string? GetTypeFromDefinition(MetadataReader reader, TypeDefinitionHandle handle, byte rawTypeKind) {
+            return TypeDefinitionMetadataName(reader, handle);
+        }
+
+        public string? GetTypeFromReference(MetadataReader reader, TypeReferenceHandle handle, byte rawTypeKind) {
+            TypeReference reference = reader.GetTypeReference(handle);
+            string name = reader.GetString(reference.Name);
+            if (reference.ResolutionScope.Kind == HandleKind.TypeReference) {
+                string? declaring = GetTypeFromReference(reader, (TypeReferenceHandle)reference.ResolutionScope, 0);
+                return declaring is null ? null : declaring + "+" + name;
+            }
+
+            string ns = reader.GetString(reference.Namespace);
+            return ns.Length == 0 ? name : ns + "." + name;
+        }
+
+        public string? GetSZArrayType(string? elementType) {
+            return elementType is null ? null : elementType + "[]";
+        }
+
+        public string? GetArrayType(string? elementType, ArrayShape shape) {
+            return elementType is null ? null : elementType + "[" + new string(',', shape.Rank - 1) + "]";
+        }
+
+        public string? GetByReferenceType(string? elementType) {
+            return elementType is null ? null : elementType + "&";
+        }
+
+        public string? GetPointerType(string? elementType) {
+            return elementType is null ? null : elementType + "*";
+        }
+
+        public string? GetGenericInstantiation(string? genericType, ImmutableArray<string?> typeArguments) {
+            if (genericType is null) {
+                return null;
+            }
+
+            foreach (string? argument in typeArguments) {
+                if (argument is null) {
+                    return null;
+                }
+            }
+
+            return genericType + "[" + string.Join(",", typeArguments) + "]";
+        }
+
+        public string? GetPinnedType(string? elementType) {
+            return elementType;
+        }
+
+        public string? GetModifiedType(string? modifier, string? unmodifiedType, bool isRequired) {
+            return unmodifiedType;
+        }
+
+        // A field signature never carries these, and naming one anyway would risk reporting a
+        // mismatch against a shape this provider cannot actually describe.
+        public string? GetFunctionPointerType(MethodSignature<string?> signature) {
+            return null;
+        }
+
+        public string? GetGenericMethodParameter(object? genericContext, int index) {
+            return null;
+        }
+
+        public string? GetGenericTypeParameter(object? genericContext, int index) {
+            return null;
+        }
+
+        public string? GetTypeFromSpecification(
+            MetadataReader reader,
+            object? genericContext,
+            TypeSpecificationHandle handle,
+            byte rawTypeKind) {
+            return reader.GetTypeSpecification(handle).DecodeSignature(this, genericContext);
+        }
     }
 
     private sealed class ParameterValidationState {

@@ -595,17 +595,22 @@ internal static class BodyCopier {
             return;
         }
 
-        bool isStore = IsStoreOpCode(next.OpCode);
-        bool isUnrelatedCall = IsCallOpCode(next.OpCode)
-            && ControlHandleLowering.ClassifyCall(next) == ControlHandleLowering.ControlCallKind.None
-            && !(target is not null && ControlHandleLowering.IsOriginalBodySpliceCall(next, target));
-        bool isChainedReceiverLoad = ControlHandleLowering.IsControlHandleReceiverLoad(next, controlHandleArgIndex)
-            || next.OpCode == OpCodes.Dup;
-
-        if (isChainedReceiverLoad) {
+        // Another load or a dup puts a second copy of the handle in flight; that copy is checked
+        // from its own load, so follow it rather than treating it as this one's consumer.
+        if (ControlHandleLowering.IsControlHandleReceiverLoad(next, controlHandleArgIndex) || next.OpCode == OpCodes.Dup) {
             EnsureNotStrayControlHandleUse(next, controlHandleArgIndex, target, injectionMethod);
             return;
         }
+
+        Instruction? consumer = FindStackConsumer(receiverLoad);
+        if (consumer is null) {
+            return;
+        }
+
+        bool isStore = IsStoreOpCode(consumer.OpCode);
+        bool isUnrelatedCall = IsCallOpCode(consumer.OpCode)
+            && ControlHandleLowering.ClassifyCall(consumer) == ControlHandleLowering.ControlCallKind.None
+            && !(target is not null && ControlHandleLowering.IsOriginalBodySpliceCall(consumer, target));
 
         if (isStore || isUnrelatedCall) {
             throw new ConcordEmitException(
@@ -614,6 +619,32 @@ internal static class BodyCopier {
                 "' must be used only for direct control calls (Cancel/ReturnValue/original invoke); " +
                 "it cannot be stored to a local, captured, or passed elsewhere.");
         }
+    }
+
+    // C# evaluates an assigned value AFTER loading the receiver, so `ch.ReturnValue = Build()`
+    // puts a whole expression between the handle load and the setter that consumes it. Looking only
+    // at the next instruction rejects every such assignment, so walk the stack forward to find the
+    // instruction that actually pops the slot this load pushed.
+    private static Instruction? FindStackConsumer(Instruction load) {
+        int depth = 1;
+        for (Instruction? current = load.Next; current is not null; current = current.Next) {
+            // Control flow means the slot may be consumed on a path this linear walk cannot follow.
+            // Give up rather than accuse code the walk does not actually understand.
+            if (current.OpCode.FlowControl is FlowControl.Branch or FlowControl.Cond_Branch
+                    or FlowControl.Return or FlowControl.Throw
+                || current.OpCode == OpCodes.Dup) {
+                return null;
+            }
+
+            int pops = IlDump.PopCount(current);
+            if (pops >= depth) {
+                return current;
+            }
+
+            depth = depth - pops + IlDump.PushCount(current);
+        }
+
+        return null;
     }
 
     private static void EnsureNotStrayOperationUse(Instruction receiverLoad, int operationArgIndex, MethodBase injectionMethod) {

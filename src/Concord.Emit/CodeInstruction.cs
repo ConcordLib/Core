@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Reflection.Emit;
 
 namespace Concord;
@@ -92,6 +93,42 @@ public sealed class CodeInstruction {
         }
 
         return n is null || n.Value == slot;
+    }
+
+    /// <summary>Tests whether this instruction calls the given method.</summary>
+    /// <param name="method">The method to match.</param>
+    /// <returns><see langword="true" /> when the instruction calls it.</returns>
+    /// <remarks>
+    ///     Matches both <see cref="OpCodes.Call" /> and <see cref="OpCodes.Callvirt" />, as Harmony
+    ///     does, so a migrated transpiler body selects the same call sites it selected before.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="method" /> is <see langword="null" />.</exception>
+    public bool Calls(MethodInfo method) {
+        if (method is null) {
+            throw new ArgumentNullException(nameof(method));
+        }
+
+        if (opcode != OpCodes.Call && opcode != OpCodes.Callvirt) {
+            return false;
+        }
+
+        return Equals(operand, method);
+    }
+
+    /// <summary>Attaches branch-target labels to this instruction.</summary>
+    /// <param name="add">The labels to attach.</param>
+    /// <returns>This instruction, so the call can be chained onto a constructor.</returns>
+    public CodeInstruction WithLabels(params Label[] add) {
+        labels.AddRange(add);
+        return this;
+    }
+
+    /// <summary>Attaches branch-target labels to this instruction.</summary>
+    /// <param name="add">The labels to attach.</param>
+    /// <returns>This instruction, so the call can be chained onto a constructor.</returns>
+    public CodeInstruction WithLabels(IEnumerable<Label> add) {
+        labels.AddRange(add);
+        return this;
     }
 
     /// <inheritdoc />

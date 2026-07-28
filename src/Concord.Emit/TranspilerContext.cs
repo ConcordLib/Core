@@ -16,6 +16,10 @@ internal sealed class TranspilerContext : ITranspilerContext {
 
     internal int ExistingLocalCount { get; set; }
 
+    // Recorded so GetLocal can hand back a typed handle for a local the body already declares,
+    // not just for the ones a transpiler declares itself.
+    internal List<Type> ExistingLocalTypes { get; } = new List<Type>();
+
     internal IReadOnlyList<Type> DeclaredLocals => declaredLocals;
 
     internal Dictionary<Instruction, Label> LabelsByInstruction { get; } = new Dictionary<Instruction, Label>();
@@ -37,5 +41,20 @@ internal sealed class TranspilerContext : ITranspilerContext {
 
         declaredLocals.Add(type);
         return LocalRefFactory.Create(ExistingLocalCount + declaredLocals.Count - 1, type);
+    }
+
+    public LocalRef GetLocal(int index) {
+        int total = ExistingLocalCount + declaredLocals.Count;
+        if (index < 0 || index >= total) {
+            throw new ConcordEmitException(
+                "CONC121",
+                $"Local slot {index} is out of range for a body with {total} local(s).");
+        }
+
+        Type type = index < ExistingLocalCount
+            ? ExistingLocalTypes[index]
+            : declaredLocals[index - ExistingLocalCount];
+
+        return LocalRefFactory.Create(index, type);
     }
 }

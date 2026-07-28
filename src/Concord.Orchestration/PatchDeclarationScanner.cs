@@ -166,6 +166,7 @@ public static class PatchDeclarationScanner {
             MethodBase resolvedTarget = ResolveInjectionTarget(declaration, baseType, inject);
             resolved.Add((resolvedTarget, new Injection(method, inject.ResolvedAt, declaration.FullName!, inject.ResolvedPriority) {
                 Debug = debug,
+                Body = inject.Body,
                 BeforeOwners = beforeOwners,
                 AfterOwners = afterOwners
             }));

@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Reflection.Emit;
 using Xunit;
 
@@ -144,5 +145,78 @@ public sealed class CodeInstructionTests {
         CodeInstruction instruction = new CodeInstruction(OpCodes.Ldc_I8, long.MinValue);
 
         Assert.True(instruction.Is(OpCodes.Ldc_I8, long.MinValue));
+    }
+
+    [Fact]
+    public void Calls_MatchesCall() {
+        MethodInfo target = typeof(CallsFixture).GetMethod(nameof(CallsFixture.Target))!;
+        CodeInstruction instruction = new CodeInstruction(OpCodes.Call, target);
+
+        Assert.True(instruction.Calls(target));
+    }
+
+    // Harmony's Calls accepts callvirt as well as call, so a migrated body selects the same sites.
+    [Fact]
+    public void Calls_MatchesCallvirt() {
+        MethodInfo target = typeof(CallsFixture).GetMethod(nameof(CallsFixture.Target))!;
+        CodeInstruction instruction = new CodeInstruction(OpCodes.Callvirt, target);
+
+        Assert.True(instruction.Calls(target));
+    }
+
+    [Fact]
+    public void Calls_RejectsAnotherMethod() {
+        MethodInfo target = typeof(CallsFixture).GetMethod(nameof(CallsFixture.Target))!;
+        MethodInfo other = typeof(CallsFixture).GetMethod(nameof(CallsFixture.Other))!;
+        CodeInstruction instruction = new CodeInstruction(OpCodes.Call, other);
+
+        Assert.False(instruction.Calls(target));
+    }
+
+    [Fact]
+    public void Calls_RejectsANonCallOpcode() {
+        MethodInfo target = typeof(CallsFixture).GetMethod(nameof(CallsFixture.Target))!;
+        CodeInstruction instruction = new CodeInstruction(OpCodes.Ldftn, target);
+
+        Assert.False(instruction.Calls(target));
+    }
+
+    [Fact]
+    public void Calls_WithNullMethod_Throws() {
+        CodeInstruction instruction = new CodeInstruction(OpCodes.Call);
+
+        Assert.Throws<ArgumentNullException>(() => instruction.Calls(null!));
+    }
+
+    [Fact]
+    public void WithLabels_AttachesAndReturnsTheSameInstruction() {
+        Label first = LabelFactory.Create(1);
+        Label second = LabelFactory.Create(2);
+
+        CodeInstruction instruction = new CodeInstruction(OpCodes.Nop).WithLabels(first, second);
+
+        Assert.Equal([first, second], instruction.labels);
+    }
+
+    [Fact]
+    public void WithLabels_AppendsRatherThanReplacing() {
+        Label first = LabelFactory.Create(1);
+        Label second = LabelFactory.Create(2);
+
+        CodeInstruction instruction = new CodeInstruction(OpCodes.Nop)
+            .WithLabels(first)
+            .WithLabels(new List<Label> { second });
+
+        Assert.Equal([first, second], instruction.labels);
+    }
+
+    private static class CallsFixture {
+        public static int Target() {
+            return 0;
+        }
+
+        public static int Other() {
+            return 1;
+        }
     }
 }
