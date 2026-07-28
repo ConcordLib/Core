@@ -115,7 +115,7 @@ public sealed class HarmonyStyleExceptionRegionTests {
 
     [Fact]
     public void EndOfBodyFinally_HarmonyEndPlacement_LandsOnSacrificialNopAndExecutes() {
-        MethodBase target = typeof(BodyTransformerTargets).GetMethod(nameof(BodyTransformerTargets.Target))!;
+        MethodBase target = typeof(StreamTargets).GetMethod(nameof(StreamTargets.Target))!;
         ITranspilerContext context = WrapperComposer.CreateStreamContext(target);
 
         CodeInstruction tryStart = new CodeInstruction(OpCodes.Newobj, typeof(InvalidOperationException).GetConstructor(Type.EmptyTypes)!);
@@ -149,7 +149,7 @@ public sealed class HarmonyStyleExceptionRegionTests {
 
     [Fact]
     public void MidBodyCatch_WithHeadInjectionShiftingPositions_StillExecutesCorrectly() {
-        MethodBase target = typeof(BodyTransformerTargets).GetMethod(nameof(BodyTransformerTargets.Target))!;
+        MethodBase target = typeof(StreamTargets).GetMethod(nameof(StreamTargets.Target))!;
         ITranspilerContext context = WrapperComposer.CreateStreamContext(target);
         LocalRef result = context.DeclareLocal(typeof(int));
         Label compute = context.DefineLabel();
@@ -187,7 +187,7 @@ public sealed class HarmonyStyleExceptionRegionTests {
         ApplyHarmonyEndPlacement(harmonyStyle);
 
         Injection head = new Injection(
-            typeof(BodyTransformerTargets).GetMethod(nameof(BodyTransformerTargets.HeadInjection))!,
+            typeof(StreamTargets).GetMethod(nameof(StreamTargets.HeadInjection))!,
             new InjectAt.Head(),
             "test",
             0);
@@ -202,11 +202,11 @@ public sealed class HarmonyStyleExceptionRegionTests {
         Assert.True(composed.Count > harmonyStyle.Count, "Expected the Head injection to insert instructions ahead of the region.");
 
         MethodInfo generated = StreamRoundTrip.Generate(composed, target);
-        BodyTransformerTargets.HeadObserved = 0;
+        StreamTargets.HeadObserved = 0;
         Assert.Equal(6, generated.Invoke(null, [3]));
-        Assert.Equal(1, BodyTransformerTargets.HeadObserved);
+        Assert.Equal(1, StreamTargets.HeadObserved);
         Assert.Equal(-1, generated.Invoke(null, [0]));
-        Assert.Equal(2, BodyTransformerTargets.HeadObserved);
+        Assert.Equal(2, StreamTargets.HeadObserved);
     }
 
     [Fact]

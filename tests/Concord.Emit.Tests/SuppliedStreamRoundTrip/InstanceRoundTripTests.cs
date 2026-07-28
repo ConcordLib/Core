@@ -5,7 +5,7 @@ namespace Concord.Emit.Tests.SuppliedStreamRoundTrip;
 
 public sealed class InstanceRoundTripTests {
     [Fact]
-    public void HeadInjection_OnClassInstanceMethod_RoundTripsThroughNeutralBody() {
+    public void HeadInjection_OnClassInstanceMethod_RoundTripsThroughStream() {
         MethodBase target = typeof(InstanceClassTarget).GetMethod(nameof(InstanceClassTarget.AddToBase))!;
         MethodBase headMethod = typeof(InstanceInjectionMethods).GetMethod(nameof(InstanceInjectionMethods.Head))!;
         Injection head = new Injection(headMethod, new InjectAt.Head(), "spike", 0);
@@ -23,7 +23,7 @@ public sealed class InstanceRoundTripTests {
     }
 
     [Fact]
-    public void AroundInjection_OnClassInstanceMethod_KeepsAmbientThis_RoundTripsThroughNeutralBody() {
+    public void AroundInjection_OnClassInstanceMethod_KeepsAmbientThis_RoundTripsThroughStream() {
         MethodBase target = typeof(InstanceClassTarget).GetMethod(nameof(InstanceClassTarget.AddToBase))!;
         MethodBase aroundMethod = typeof(InstanceInjectionMethods).GetMethod(nameof(InstanceInjectionMethods.AroundAddToBase))!;
         Injection around = new Injection(aroundMethod, new InjectAt.Around(), "spike", 0);
@@ -41,7 +41,7 @@ public sealed class InstanceRoundTripTests {
     }
 
     [Fact]
-    public void ReturnInjection_OnStructInstanceMethod_RoundTripsThroughNeutralBody() {
+    public void ReturnInjection_OnStructInstanceMethod_RoundTripsThroughStream() {
         MethodBase target = typeof(InstanceStructTarget).GetMethod(nameof(InstanceStructTarget.AddToBase))!;
         MethodBase returnMethod = typeof(InstanceInjectionMethods).GetMethod(nameof(InstanceInjectionMethods.Return))!;
         Injection returnInjection = new Injection(returnMethod, new InjectAt.Return(), "spike", 0);
@@ -57,7 +57,7 @@ public sealed class InstanceRoundTripTests {
     }
 
     [Fact]
-    public void AroundInjection_OnStructInstanceMethod_RoundTripsThroughNeutralBody() {
+    public void AroundInjection_OnStructInstanceMethod_RoundTripsThroughStream() {
         MethodBase target = typeof(InstanceStructTarget).GetMethod(nameof(InstanceStructTarget.AddToBase))!;
         MethodBase aroundMethod = typeof(InstanceInjectionMethods).GetMethod(nameof(InstanceInjectionMethods.AroundAddToBase))!;
         Injection around = new Injection(aroundMethod, new InjectAt.Around(), "spike", 0);

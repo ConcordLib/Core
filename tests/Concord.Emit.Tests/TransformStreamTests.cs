@@ -7,7 +7,7 @@ namespace Concord.Emit.Tests;
 public sealed class TransformStreamTests {
     [Fact]
     public void TransformStream_ComposesHeadInjectionOntoSuppliedStream() {
-        MethodBase target = typeof(BodyTransformerTargets).GetMethod(nameof(BodyTransformerTargets.Target))!;
+        MethodBase target = typeof(StreamTargets).GetMethod(nameof(StreamTargets.Target))!;
         List<CodeInstruction> source = [
             new CodeInstruction(OpCodes.Ldarg_0),
             new CodeInstruction(OpCodes.Ldc_I4_1),
@@ -15,7 +15,7 @@ public sealed class TransformStreamTests {
             new CodeInstruction(OpCodes.Ret),
         ];
         Injection head = new Injection(
-            typeof(BodyTransformerTargets).GetMethod(nameof(BodyTransformerTargets.HeadInjection))!,
+            typeof(StreamTargets).GetMethod(nameof(StreamTargets.HeadInjection))!,
             new InjectAt.Head(),
             "test",
             0);
@@ -24,10 +24,10 @@ public sealed class TransformStreamTests {
         List<CodeInstruction> composed = WrapperComposer.TransformStream(target, source, [head], context);
 
         MethodInfo generated = StreamRoundTrip.Generate(composed, target);
-        BodyTransformerTargets.HeadObserved = 0;
+        StreamTargets.HeadObserved = 0;
         object? result = generated.Invoke(null, [41]);
         Assert.Equal(42, result);
-        Assert.Equal(1, BodyTransformerTargets.HeadObserved);
+        Assert.Equal(1, StreamTargets.HeadObserved);
     }
 
     [Fact]
@@ -63,7 +63,7 @@ public sealed class TransformStreamTests {
             "test-transpiler",
             0);
         Injection head = new Injection(
-            typeof(BodyTransformerTargets).GetMethod(nameof(BodyTransformerTargets.HeadInjection))!,
+            typeof(StreamTargets).GetMethod(nameof(StreamTargets.HeadInjection))!,
             new InjectAt.Head(),
             "test-head",
             0);
@@ -72,9 +72,9 @@ public sealed class TransformStreamTests {
         List<CodeInstruction> composed = WrapperComposer.TransformStream(target, source, [transpiler, head], context);
 
         MethodInfo generated = StreamRoundTrip.Generate(composed, target);
-        BodyTransformerTargets.HeadObserved = 0;
+        StreamTargets.HeadObserved = 0;
         Assert.Equal(10, generated.Invoke(null, null));
-        Assert.Equal(1, BodyTransformerTargets.HeadObserved);
+        Assert.Equal(1, StreamTargets.HeadObserved);
     }
 
     [Fact]
@@ -175,7 +175,7 @@ public sealed class TransformStreamTests {
 
     [Fact]
     public void TransformStream_PreservesCallerLabelId_DirectBranch() {
-        MethodBase target = typeof(BodyTransformerTargets).GetMethod(nameof(BodyTransformerTargets.Target))!;
+        MethodBase target = typeof(StreamTargets).GetMethod(nameof(StreamTargets.Target))!;
         ITranspilerContext context = WrapperComposer.CreateStreamContext(target);
 
         // Mint and discard one id first so skip is NOT id 0. A context-fresh read that assigns ids
@@ -213,7 +213,7 @@ public sealed class TransformStreamTests {
 
     [Fact]
     public void TransformStream_PreservesCallerLabelId_WhenCompositionInsertsBetweenBranchAndTarget() {
-        MethodBase target = typeof(BodyTransformerTargets).GetMethod(nameof(BodyTransformerTargets.Target))!;
+        MethodBase target = typeof(StreamTargets).GetMethod(nameof(StreamTargets.Target))!;
         ITranspilerContext context = WrapperComposer.CreateStreamContext(target);
 
         // See TransformStream_PreservesCallerLabelId_DirectBranch for why this burns id 0 first.
@@ -257,7 +257,7 @@ public sealed class TransformStreamTests {
 
     [Fact]
     public void TransformStream_NewLabelsIntroducedByCompositionDoNotCollideWithCallerIds() {
-        MethodBase target = typeof(BodyTransformerTargets).GetMethod(nameof(BodyTransformerTargets.Target))!;
+        MethodBase target = typeof(StreamTargets).GetMethod(nameof(StreamTargets.Target))!;
         ITranspilerContext context = WrapperComposer.CreateStreamContext(target);
         Label skip = context.DefineLabel();
 
@@ -273,7 +273,7 @@ public sealed class TransformStreamTests {
             new CodeInstruction(OpCodes.Ret),
         ];
         Injection head = new Injection(
-            typeof(BodyTransformerTargets).GetMethod(nameof(BodyTransformerTargets.HeadInjection))!,
+            typeof(StreamTargets).GetMethod(nameof(StreamTargets.HeadInjection))!,
             new InjectAt.Head(),
             "test",
             0);
@@ -297,10 +297,10 @@ public sealed class TransformStreamTests {
 
         Assert.True(foundOtherLabel, "Expected the Head injection's guard branch to introduce a fresh label distinct from the caller's.");
 
-        BodyTransformerTargets.HeadObserved = 0;
+        StreamTargets.HeadObserved = 0;
         MethodInfo generated = StreamRoundTrip.Generate(composed, target);
         Assert.Equal(0, generated.Invoke(null, [0]));
-        Assert.Equal(1, BodyTransformerTargets.HeadObserved);
+        Assert.Equal(1, StreamTargets.HeadObserved);
     }
 
     // Contract: a caller label whose target instruction did not survive composition is dropped -

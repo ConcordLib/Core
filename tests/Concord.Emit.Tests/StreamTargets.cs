@@ -2,7 +2,7 @@ using System.Reflection.Emit;
 
 namespace Concord.Emit.Tests;
 
-public static class BodyTransformerTargets {
+public static class StreamTargets {
     public static int HeadObserved;
 
     public static int Target(int value) {

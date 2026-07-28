@@ -5,7 +5,7 @@ namespace Concord.Emit.Tests.SuppliedStreamRoundTrip;
 
 public sealed class StraightLineRoundTripTests {
     [Fact]
-    public void HeadInjection_RoundTripsThroughNeutralBody() {
+    public void HeadInjection_RoundTripsThroughStream() {
         MethodBase target = typeof(StraightLineTargets).GetMethod(nameof(StraightLineTargets.Add))!;
         MethodBase headMethod = typeof(StraightLineInjectionMethods).GetMethod(nameof(StraightLineInjectionMethods.Head))!;
         Injection head = new Injection(headMethod, new InjectAt.Head(), "spike", 0);
@@ -19,7 +19,7 @@ public sealed class StraightLineRoundTripTests {
     }
 
     [Fact]
-    public void ReturnInjection_RoundTripsThroughNeutralBody() {
+    public void ReturnInjection_RoundTripsThroughStream() {
         MethodBase target = typeof(StraightLineTargets).GetMethod(nameof(StraightLineTargets.Add))!;
         MethodBase returnMethod = typeof(StraightLineInjectionMethods).GetMethod(nameof(StraightLineInjectionMethods.Return))!;
         Injection returnInjection = new Injection(returnMethod, new InjectAt.Return(), "spike", 0);
@@ -33,7 +33,7 @@ public sealed class StraightLineRoundTripTests {
     }
 
     [Fact]
-    public void AroundInjection_RoundTripsThroughNeutralBody() {
+    public void AroundInjection_RoundTripsThroughStream() {
         MethodBase target = typeof(StraightLineTargets).GetMethod(nameof(StraightLineTargets.Add))!;
         MethodBase aroundMethod = typeof(StraightLineInjectionMethods).GetMethod(nameof(StraightLineInjectionMethods.Around))!;
         Injection around = new Injection(aroundMethod, new InjectAt.Around(), "spike", 0);

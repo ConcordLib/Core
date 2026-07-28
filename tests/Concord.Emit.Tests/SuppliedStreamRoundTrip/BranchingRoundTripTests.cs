@@ -8,7 +8,7 @@ public sealed class BranchingRoundTripTests {
     [InlineData(-5, -2)]
     [InlineData(0, 0)]
     [InlineData(7, 2)]
-    public void HeadInjection_OnIfElseChain_RoundTripsThroughNeutralBody(int input, int expected) {
+    public void HeadInjection_OnIfElseChain_RoundTripsThroughStream(int input, int expected) {
         MethodBase target = typeof(BranchingTargets).GetMethod(nameof(BranchingTargets.ClassifyAndDouble))!;
         MethodBase headMethod = typeof(BranchingInjectionMethods).GetMethod(nameof(BranchingInjectionMethods.Head))!;
         Injection head = new Injection(headMethod, new InjectAt.Head(), "spike", 0);
@@ -25,7 +25,7 @@ public sealed class BranchingRoundTripTests {
     [InlineData(-5, -2)]
     [InlineData(0, 0)]
     [InlineData(7, 2)]
-    public void AroundInjection_OnIfElseChain_RoundTripsThroughNeutralBody(int input, int expected) {
+    public void AroundInjection_OnIfElseChain_RoundTripsThroughStream(int input, int expected) {
         MethodBase target = typeof(BranchingTargets).GetMethod(nameof(BranchingTargets.ClassifyAndDouble))!;
         MethodBase aroundMethod = typeof(BranchingInjectionMethods).GetMethod(nameof(BranchingInjectionMethods.AroundClassify))!;
         Injection around = new Injection(aroundMethod, new InjectAt.Around(), "spike", 0);
@@ -44,7 +44,7 @@ public sealed class BranchingRoundTripTests {
     [InlineData(2, 30)]
     [InlineData(3, 40)]
     [InlineData(99, -1)]
-    public void ReturnInjection_OnSwitch_RoundTripsThroughNeutralBody(int which, int expected) {
+    public void ReturnInjection_OnSwitch_RoundTripsThroughStream(int which, int expected) {
         MethodBase target = typeof(BranchingTargets).GetMethod(nameof(BranchingTargets.SwitchOnValue))!;
         MethodBase returnMethod = typeof(BranchingInjectionMethods).GetMethod(nameof(BranchingInjectionMethods.Return))!;
         Injection returnInjection = new Injection(returnMethod, new InjectAt.Return(), "spike", 0);
@@ -63,7 +63,7 @@ public sealed class BranchingRoundTripTests {
     [InlineData(2, 30)]
     [InlineData(3, 40)]
     [InlineData(99, -1)]
-    public void AroundInjection_OnSwitch_RoundTripsThroughNeutralBody(int which, int expected) {
+    public void AroundInjection_OnSwitch_RoundTripsThroughStream(int which, int expected) {
         MethodBase target = typeof(BranchingTargets).GetMethod(nameof(BranchingTargets.SwitchOnValue))!;
         MethodBase aroundMethod = typeof(BranchingInjectionMethods).GetMethod(nameof(BranchingInjectionMethods.AroundSwitch))!;
         Injection around = new Injection(aroundMethod, new InjectAt.Around(), "spike", 0);

@@ -8,7 +8,7 @@ public sealed class ExceptionRegionRoundTripTests {
     [Theory]
     [InlineData(0, -1)]
     [InlineData(5, 10)]
-    public void HeadInjection_OnTryCatch_RoundTripsThroughNeutralBody(int input, int expected) {
+    public void HeadInjection_OnTryCatch_RoundTripsThroughStream(int input, int expected) {
         MethodBase target = typeof(ExceptionRegionTargets).GetMethod(nameof(ExceptionRegionTargets.TryCatch))!;
         MethodBase headMethod = typeof(ExceptionRegionInjectionMethods).GetMethod(nameof(ExceptionRegionInjectionMethods.Head))!;
         Injection head = new Injection(headMethod, new InjectAt.Head(), "spike", 0);
@@ -25,7 +25,7 @@ public sealed class ExceptionRegionRoundTripTests {
     [Theory]
     [InlineData(0, -1)]
     [InlineData(5, 10)]
-    public void AroundInjection_OnTryCatch_RoundTripsThroughNeutralBody(int input, int expected) {
+    public void AroundInjection_OnTryCatch_RoundTripsThroughStream(int input, int expected) {
         MethodBase target = typeof(ExceptionRegionTargets).GetMethod(nameof(ExceptionRegionTargets.TryCatch))!;
         MethodBase aroundMethod = typeof(ExceptionRegionInjectionMethods).GetMethod(nameof(ExceptionRegionInjectionMethods.Around))!;
         Injection around = new Injection(aroundMethod, new InjectAt.Around(), "spike", 0);
@@ -40,7 +40,7 @@ public sealed class ExceptionRegionRoundTripTests {
     }
 
     [Fact]
-    public void ReturnInjection_OnTryFinally_RoundTripsThroughNeutralBody() {
+    public void ReturnInjection_OnTryFinally_RoundTripsThroughStream() {
         MethodBase target = typeof(ExceptionRegionTargets).GetMethod(nameof(ExceptionRegionTargets.TryFinally))!;
         MethodBase returnMethod = typeof(ExceptionRegionInjectionMethods).GetMethod(nameof(ExceptionRegionInjectionMethods.Return))!;
         Injection returnInjection = new Injection(returnMethod, new InjectAt.Return(), "spike", 0);
@@ -56,7 +56,7 @@ public sealed class ExceptionRegionRoundTripTests {
     }
 
     [Fact]
-    public void TailInjection_OnTryFinally_RoundTripsThroughNeutralBody() {
+    public void TailInjection_OnTryFinally_RoundTripsThroughStream() {
         MethodBase target = typeof(ExceptionRegionTargets).GetMethod(nameof(ExceptionRegionTargets.TryFinally))!;
         MethodBase tailMethod = typeof(ExceptionRegionInjectionMethods).GetMethod(nameof(ExceptionRegionInjectionMethods.Tail))!;
         Injection tail = new Injection(tailMethod, new InjectAt.Tail(), "spike", 0);
@@ -72,7 +72,7 @@ public sealed class ExceptionRegionRoundTripTests {
     }
 
     [Fact]
-    public void AroundInjection_OnTryFinally_RoundTripsThroughNeutralBody() {
+    public void AroundInjection_OnTryFinally_RoundTripsThroughStream() {
         MethodBase target = typeof(ExceptionRegionTargets).GetMethod(nameof(ExceptionRegionTargets.TryFinally))!;
         MethodBase aroundMethod = typeof(ExceptionRegionInjectionMethods).GetMethod(nameof(ExceptionRegionInjectionMethods.Around))!;
         Injection around = new Injection(aroundMethod, new InjectAt.Around(), "spike", 0);
@@ -90,7 +90,7 @@ public sealed class ExceptionRegionRoundTripTests {
     [Theory]
     [InlineData(0, -2)]
     [InlineData(4, 12)]
-    public void HeadInjection_OnNestedTryCatchFinally_RoundTripsThroughNeutralBody(int input, int expected) {
+    public void HeadInjection_OnNestedTryCatchFinally_RoundTripsThroughStream(int input, int expected) {
         MethodBase target = typeof(ExceptionRegionTargets).GetMethod(nameof(ExceptionRegionTargets.NestedTryCatchFinally))!;
         MethodBase headMethod = typeof(ExceptionRegionInjectionMethods).GetMethod(nameof(ExceptionRegionInjectionMethods.Head))!;
         Injection head = new Injection(headMethod, new InjectAt.Head(), "spike", 0);
@@ -107,7 +107,7 @@ public sealed class ExceptionRegionRoundTripTests {
     [Theory]
     [InlineData(0, -2)]
     [InlineData(4, 12)]
-    public void AroundInjection_OnNestedTryCatchFinally_RoundTripsThroughNeutralBody(int input, int expected) {
+    public void AroundInjection_OnNestedTryCatchFinally_RoundTripsThroughStream(int input, int expected) {
         MethodBase target = typeof(ExceptionRegionTargets).GetMethod(nameof(ExceptionRegionTargets.NestedTryCatchFinally))!;
         MethodBase aroundMethod = typeof(ExceptionRegionInjectionMethods).GetMethod(nameof(ExceptionRegionInjectionMethods.Around))!;
         Injection around = new Injection(aroundMethod, new InjectAt.Around(), "spike", 0);
