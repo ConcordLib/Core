@@ -57,7 +57,8 @@ public static class Patcher {
 
     /// <summary>
     ///     Applies a single explicit patch without scanning for attributes: composes
-    ///     <paramref name="injectionMethod" /> onto <paramref name="target" /> at the given position.
+    ///     <paramref name="injectionMethod" /> onto <paramref name="target" /> at the given position
+    ///     (Head, Return, Tail, Around, Transpiler, or TranspilerFinal).
     /// </summary>
     /// <remarks>
     ///     The returned handle is retained in a static registry, so the detour stays applied even when the
@@ -65,8 +66,18 @@ public static class Patcher {
     /// </remarks>
     /// <param name="target">The method to patch.</param>
     /// <param name="injectionMethod">The injection method supplying the injected body.</param>
-    /// <param name="at">The injection position where the injection method runs relative to the target.</param>
+    /// <param name="at">
+    ///     The injection position where the injection method runs relative to the target.
+    ///     <see cref="At.Constant" /> and <see cref="At.Argument" /> are not reachable through this method:
+    ///     use <see cref="InjectAttribute" /> for <see cref="At.Constant" />, or build an <see cref="Injection" />
+    ///     with an <see cref="InjectAt.Invoke" /> shifted <see cref="At.Argument" /> and apply it via
+    ///     <see cref="PatchInjection" /> for <see cref="At.Argument" />.
+    /// </param>
     /// <returns>A handle that reverts the applied detour when disposed.</returns>
+    /// <exception cref="ConcordEmitException">
+    ///     Thrown with code <c>CONC116</c> when <paramref name="at" /> is <see cref="At.Constant" /> or
+    ///     <see cref="At.Argument" />, neither of which this method can express.
+    /// </exception>
     public static IPatchHandle Patch(MethodBase target, MethodBase injectionMethod, At at) {
         if (injectionMethod.DeclaringType is null) {
             throw new ConcordDeclarationException("Injection method '" + injectionMethod.Name + "' has no declaring type; only methods declared on a type can be used as injections.");
