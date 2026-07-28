@@ -264,7 +264,12 @@ public sealed class CodeMatcher {
     }
 
     /// <summary>The working list of instructions, including every edit made so far.</summary>
-    /// <returns>The working list. A transpiler returns this to hand its rewritten body back to Concord.</returns>
+    /// <returns>
+    ///     The working list, returned by reference rather than a copy: mutating it (including
+    ///     appending past the last instruction, the cursor's own editing methods cannot do this)
+    ///     mutates this matcher directly. A transpiler returns this to hand its rewritten body back
+    ///     to Concord.
+    /// </returns>
     public List<CodeInstruction> InstructionEnumeration() {
         return codes;
     }
@@ -352,7 +357,12 @@ public sealed class CodeMatch {
     /// <summary>Matches any instruction that satisfies an arbitrary predicate.</summary>
     /// <param name="predicate">The test a candidate instruction must satisfy.</param>
     /// <param name="name">Reserved for a future named-capture lookup. Not read by any member in this version.</param>
+    /// <exception cref="ConcordEmitException">Thrown with code <c>CONC120</c> when <paramref name="predicate" /> is <see langword="null" />.</exception>
     public CodeMatch(Predicate<CodeInstruction> predicate, string? name = null) {
+        if (predicate is null) {
+            throw new ConcordEmitException("CONC120", "CodeMatch was constructed with a null predicate; a predicate-based match requires a non-null test.");
+        }
+
         this.predicate = predicate;
     }
 
