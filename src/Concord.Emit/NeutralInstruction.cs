@@ -1,0 +1,32 @@
+namespace Concord.Emit;
+
+/// <summary>
+/// An IL instruction in language-neutral form.
+/// </summary>
+public sealed class NeutralInstruction {
+    /// <summary>
+    /// Creates a neutral instruction.
+    /// </summary>
+    /// <param name="opcodeName">The name of the opcode (e.g., "nop", "ldarg.0").</param>
+    /// <param name="operand">The instruction operand.</param>
+    public NeutralInstruction(string opcodeName, NeutralOperand operand) {
+        OpcodeName = opcodeName;
+        Operand = operand;
+        Labels = new List<int>();
+    }
+
+    /// <summary>
+    /// The opcode name.
+    /// </summary>
+    public string OpcodeName { get; }
+
+    /// <summary>
+    /// The instruction operand.
+    /// </summary>
+    public NeutralOperand Operand { get; }
+
+    /// <summary>
+    /// The list of label ids that precede this instruction.
+    /// </summary>
+    public List<int> Labels { get; }
+}
