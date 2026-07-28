@@ -16,6 +16,22 @@ public readonly struct LocalRef : IEquatable<LocalRef> {
     internal int Index { get; }
 
     /// <summary>Compares two local references for equality.</summary>
+    /// <param name="left">The first local reference.</param>
+    /// <param name="right">The second local reference.</param>
+    /// <returns><see langword="true" /> when both refer to the same local slot.</returns>
+    public static bool operator ==(LocalRef left, LocalRef right) {
+        return left.Equals(right);
+    }
+
+    /// <summary>Compares two local references for inequality.</summary>
+    /// <param name="left">The first local reference.</param>
+    /// <param name="right">The second local reference.</param>
+    /// <returns><see langword="true" /> when they refer to different local slots.</returns>
+    public static bool operator !=(LocalRef left, LocalRef right) {
+        return !left.Equals(right);
+    }
+
+    /// <summary>Compares two local references for equality.</summary>
     /// <param name="other">The local reference to compare against.</param>
     /// <returns><see langword="true" /> when both refer to the same local slot.</returns>
     public bool Equals(LocalRef other) {

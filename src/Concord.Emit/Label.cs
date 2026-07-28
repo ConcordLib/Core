@@ -12,6 +12,22 @@ public readonly struct Label : IEquatable<Label> {
     internal int Id { get; }
 
     /// <summary>Compares two labels for equality.</summary>
+    /// <param name="left">The first label.</param>
+    /// <param name="right">The second label.</param>
+    /// <returns><see langword="true" /> when both labels refer to the same target.</returns>
+    public static bool operator ==(Label left, Label right) {
+        return left.Equals(right);
+    }
+
+    /// <summary>Compares two labels for inequality.</summary>
+    /// <param name="left">The first label.</param>
+    /// <param name="right">The second label.</param>
+    /// <returns><see langword="true" /> when the labels refer to different targets.</returns>
+    public static bool operator !=(Label left, Label right) {
+        return !left.Equals(right);
+    }
+
+    /// <summary>Compares two labels for equality.</summary>
     /// <param name="other">The label to compare against.</param>
     /// <returns><see langword="true" /> when both labels refer to the same target.</returns>
     public bool Equals(Label other) {
