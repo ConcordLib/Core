@@ -20,7 +20,7 @@ cd "$(dirname "$0")/.."
 command -v mono >/dev/null || { echo "mono is not installed" >&2; exit 1; }
 
 RUNNER=$(find ~/.nuget/packages/xunit.runner.console -path '*net4*' -name 'xunit.console.exe' 2>/dev/null | sort | tail -1)
-[ -n "$RUNNER" ] || { echo "xunit.runner.console net4x runner not restored; run a net472 build first" >&2; exit 1; }
+[[ -n "$RUNNER" ]] || { echo "xunit.runner.console net4x runner not restored; run a net472 build first" >&2; exit 1; }
 
 filter="${1:-}"
 total=0
@@ -31,13 +31,13 @@ ran=0
 # and silently runs the same assembly twice with different results.
 for dir in tests/*/bin/"$CONFIG"/net472; do
     dll=$(ls "$dir"/*.Tests.dll 2>/dev/null | head -1) || continue
-    [ -n "$dll" ] || continue
+    [[ -n "$dll" ]] || continue
     name=$(basename "$dll")
-    [ -n "$filter" ] && [[ "$name" != *"$filter"* ]] && continue
+    [[ -n "$filter" ]] && [[ "$name" != *"$filter"* ]] && continue
 
     line=$( (cd "$dir" && mono "$RUNNER" "$name" -parallel none 2>&1) | grep -oE "Total: [0-9]+, Errors: [0-9]+, Failed: [0-9]+" | tail -1)
 
-    if [ -z "$line" ]; then
+    if [[ -z "$line" ]]; then
         echo "FAIL  $name (runner produced no summary)"
         failed=$((failed + 1))
         continue
@@ -50,9 +50,9 @@ for dir in tests/*/bin/"$CONFIG"/net472; do
     total=$((total + t))
     failed=$((failed + f + e))
 
-    printf '%-6s %-42s %s\n' "$([ "$((f + e))" -eq 0 ] && echo ok || echo FAIL)" "$name" "$line"
+    printf '%-6s %-42s %s\n' "$([[ "$((f + e))" -eq 0 ]] && echo ok || echo FAIL)" "$name" "$line"
 done
 
 echo
 echo "net472: $total tests across $ran assemblies, $failed failed"
-[ "$failed" -eq 0 ]
+[[ "$failed" -eq 0 ]]
