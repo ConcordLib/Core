@@ -137,8 +137,12 @@ public static class InjectionOrderer {
 
             List<int>? cycle = FindCycle(i, outgoing, emitted, state, path);
             if (cycle != null) {
-                string owners = string.Join(" -> ", cycle.Select(node => live[node].Injection.Owner));
-                return new ConcordEmitException("CONC052", "Patch ordering cycle: " + owners + ".");
+                string[] owners = new string[cycle.Count];
+                for (int node = 0; node < cycle.Count; node++) {
+                    owners[node] = live[cycle[node]].Injection.Owner;
+                }
+
+                return new ConcordEmitException("CONC052", "Patch ordering cycle: " + string.Join(" -> ", owners) + ".");
             }
         }
 

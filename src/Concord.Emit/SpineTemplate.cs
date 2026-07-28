@@ -26,7 +26,12 @@ internal sealed class SpineTemplate {
         }
 
         HashSet<Instruction> instructionSet = [.. instructions];
-        List<ExceptionHandler> ownedHandlers = [.. handlers.Where(h => h.TryStart is not null && instructionSet.Contains(h.TryStart))];
+        List<ExceptionHandler> ownedHandlers = new List<ExceptionHandler>();
+        foreach (ExceptionHandler handler in handlers) {
+            if (handler.TryStart is not null && instructionSet.Contains(handler.TryStart)) {
+                ownedHandlers.Add(handler);
+            }
+        }
 
         return new SpineTemplate(new List<Instruction>(instructions), ownedHandlers, locals);
     }

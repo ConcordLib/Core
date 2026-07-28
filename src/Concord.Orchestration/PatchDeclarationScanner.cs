@@ -95,14 +95,18 @@ public static class PatchDeclarationScanner {
 
         Type baseType = ResolveBaseType(declaration, explicitTarget);
         bool debug = declaration.GetCustomAttribute<PatchDebugAttribute>() is not null;
-        string[] beforeOwners = ReadOrderOwners(
-            declaration,
-            declaration.GetCustomAttributes<PatchBeforeAttribute>().Select(static order => order.Owner),
-            "[PatchBefore]");
-        string[] afterOwners = ReadOrderOwners(
-            declaration,
-            declaration.GetCustomAttributes<PatchAfterAttribute>().Select(static order => order.Owner),
-            "[PatchAfter]");
+        List<string> beforeSource = new List<string>();
+        foreach (PatchBeforeAttribute order in declaration.GetCustomAttributes<PatchBeforeAttribute>()) {
+            beforeSource.Add(order.Owner);
+        }
+
+        List<string> afterSource = new List<string>();
+        foreach (PatchAfterAttribute order in declaration.GetCustomAttributes<PatchAfterAttribute>()) {
+            afterSource.Add(order.Owner);
+        }
+
+        string[] beforeOwners = ReadOrderOwners(declaration, beforeSource, "[PatchBefore]");
+        string[] afterOwners = ReadOrderOwners(declaration, afterSource, "[PatchAfter]");
 
         List<(MethodBase Target, Injection Injection)> resolved =
             ResolveInjections(declaration, baseType, debug, beforeOwners, afterOwners);

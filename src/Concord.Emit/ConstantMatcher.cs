@@ -13,7 +13,14 @@ internal static class ConstantMatcher {
     /// <param name="value">The literal to match. Supported kinds: int, long, float, double, string.</param>
     /// <remarks>Float and double comparisons use exact <see cref="object.Equals(object)" /> representation; NaN is unsupported.</remarks>
     internal static List<Instruction> FindMatches(IReadOnlyList<Instruction> spine, object value) {
-        return spine.Where(i => Matches(i, value)).ToList();
+        List<Instruction> matches = new List<Instruction>();
+        for (int i = 0; i < spine.Count; i++) {
+            if (Matches(spine[i], value)) {
+                matches.Add(spine[i]);
+            }
+        }
+
+        return matches;
     }
 
     private static bool Matches(Instruction instruction, object value) {

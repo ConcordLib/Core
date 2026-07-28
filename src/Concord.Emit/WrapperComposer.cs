@@ -282,10 +282,16 @@ public static class WrapperComposer {
     }
 
     internal static bool IsInsideProtectedRegion(Instruction instruction, IList<ExceptionHandler> handlers) {
-        return handlers.Any(handler =>
-            SpansInstruction(handler.TryStart, handler.TryEnd, instruction) ||
-            SpansInstruction(handler.HandlerStart, handler.HandlerEnd, instruction) ||
-            SpansInstruction(handler.FilterStart, handler.HandlerStart, instruction));
+        for (int i = 0; i < handlers.Count; i++) {
+            ExceptionHandler handler = handlers[i];
+            if (SpansInstruction(handler.TryStart, handler.TryEnd, instruction) ||
+                SpansInstruction(handler.HandlerStart, handler.HandlerEnd, instruction) ||
+                SpansInstruction(handler.FilterStart, handler.HandlerStart, instruction)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     internal static Type ResolveReturnType(MethodBase target) {
@@ -761,8 +767,10 @@ public static class WrapperComposer {
         for (int i = 0; i < bodies.Count - 1; i++) {
             List<Instruction> body = bodies[i];
             Instruction nextStart = bodies[i + 1][0];
-            foreach (Instruction instruction in body.Where(instruction => ReferenceEquals(instruction.Operand, sharedTarget))) {
-                instruction.Operand = nextStart;
+            foreach (Instruction instruction in body) {
+                if (ReferenceEquals(instruction.Operand, sharedTarget)) {
+                    instruction.Operand = nextStart;
+                }
             }
         }
 
@@ -943,8 +951,10 @@ public static class WrapperComposer {
     /// <param name="originalTarget">The exit instruction that previously-spliced code may branch to directly.</param>
     /// <param name="newTarget">The first instruction of the newly-spliced body, which now sits before <paramref name="originalTarget" />.</param>
     private static void RedirectIntermediateBranches(List<Instruction> instructions, Instruction originalTarget, Instruction newTarget) {
-        foreach (Instruction instruction in instructions.Where(instruction => !ReferenceEquals(instruction, originalTarget) && ReferenceEquals(instruction.Operand, originalTarget))) {
-            instruction.Operand = newTarget;
+        foreach (Instruction instruction in instructions) {
+            if (!ReferenceEquals(instruction, originalTarget) && ReferenceEquals(instruction.Operand, originalTarget)) {
+                instruction.Operand = newTarget;
+            }
         }
     }
 
@@ -1320,8 +1330,10 @@ public static class WrapperComposer {
     }
 
     private static void EnsureConstructorHasInvokeSite(MethodBody injectionBody, MethodBase injectionMethod, MethodBase target) {
-        if (injectionBody.Instructions.Any(ControlHandleLowering.IsOperationInvoke)) {
-            return;
+        foreach (Instruction instruction in injectionBody.Instructions) {
+            if (ControlHandleLowering.IsOperationInvoke(instruction)) {
+                return;
+            }
         }
 
         throw new ConcordEmitException(
@@ -1847,8 +1859,10 @@ public static class WrapperComposer {
             }
         }
 
-        foreach (Instruction instruction in spine.Where(instruction => ReferenceEquals(instruction.Operand, afterSpine))) {
-            instruction.Operand = spliceJoin;
+        foreach (Instruction instruction in spine) {
+            if (ReferenceEquals(instruction.Operand, afterSpine)) {
+                instruction.Operand = spliceJoin;
+            }
         }
     }
 
