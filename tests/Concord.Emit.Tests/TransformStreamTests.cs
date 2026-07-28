@@ -172,4 +172,217 @@ public sealed class TransformStreamTests {
             return default;
         }
     }
+
+    [Fact]
+    public void TransformStream_PreservesCallerLabelId_DirectBranch() {
+        MethodBase target = typeof(BodyTransformerTargets).GetMethod(nameof(BodyTransformerTargets.Target))!;
+        ITranspilerContext context = WrapperComposer.CreateStreamContext(target);
+
+        // Mint and discard one id first so skip is NOT id 0. A context-fresh read that assigns ids
+        // purely by encounter order (the bug) would still hand back id 0 for the first branch target
+        // it sees - which, with only one label in play, is skip's own target - masking the bug by
+        // coincidence. Burning id 0 here makes a wrong, order-derived id observably differ from skip.
+        _ = context.DefineLabel();
+        Label skip = context.DefineLabel();
+
+        CodeInstruction skipTarget = new CodeInstruction(OpCodes.Ldarg_0);
+        skipTarget.labels.Add(skip);
+
+        List<CodeInstruction> source = [
+            new CodeInstruction(OpCodes.Ldarg_0),
+            new CodeInstruction(OpCodes.Brtrue_S, skip),
+            new CodeInstruction(OpCodes.Ldc_I4_0),
+            new CodeInstruction(OpCodes.Ret),
+            skipTarget,
+            new CodeInstruction(OpCodes.Ret),
+        ];
+
+        List<CodeInstruction> composed = WrapperComposer.TransformStream(target, source, [], context);
+
+        AssertEachLabelAttachedToExactlyOneInstruction(composed);
+
+        CodeInstruction branch = FindOpcode(composed, OpCodes.Brtrue_S);
+        Label resolved = Assert.IsType<Label>(branch.operand);
+        Assert.Equal(skip, resolved);
+        Assert.Equal(OpCodes.Ldarg_0, FindLabeled(composed, resolved).opcode);
+
+        MethodInfo generated = StreamRoundTrip.Generate(composed, target);
+        Assert.Equal(7, generated.Invoke(null, [7]));
+        Assert.Equal(0, generated.Invoke(null, [0]));
+    }
+
+    [Fact]
+    public void TransformStream_PreservesCallerLabelId_WhenCompositionInsertsBetweenBranchAndTarget() {
+        MethodBase target = typeof(BodyTransformerTargets).GetMethod(nameof(BodyTransformerTargets.Target))!;
+        ITranspilerContext context = WrapperComposer.CreateStreamContext(target);
+
+        // See TransformStream_PreservesCallerLabelId_DirectBranch for why this burns id 0 first.
+        _ = context.DefineLabel();
+        Label skip = context.DefineLabel();
+
+        CodeInstruction skipTarget = new CodeInstruction(OpCodes.Ldarg_0);
+        skipTarget.labels.Add(skip);
+
+        List<CodeInstruction> source = [
+            new CodeInstruction(OpCodes.Ldarg_0),
+            new CodeInstruction(OpCodes.Brtrue_S, skip),
+            new CodeInstruction(OpCodes.Ldc_I4, 55),
+            new CodeInstruction(OpCodes.Pop),
+            new CodeInstruction(OpCodes.Ldc_I4_0),
+            new CodeInstruction(OpCodes.Ret),
+            skipTarget,
+            new CodeInstruction(OpCodes.Ret),
+        ];
+        Injection marker = new Injection(
+            typeof(LabelProvenanceInjections).GetMethod(nameof(LabelProvenanceInjections.Passthrough))!,
+            new InjectAt.Constant(55, 0),
+            "marker",
+            0);
+
+        List<CodeInstruction> composed = WrapperComposer.TransformStream(target, source, [marker], context);
+
+        AssertEachLabelAttachedToExactlyOneInstruction(composed);
+
+        CodeInstruction branch = FindOpcode(composed, OpCodes.Brtrue_S);
+        Label resolved = Assert.IsType<Label>(branch.operand);
+        Assert.Equal(skip, resolved);
+        Assert.Equal(OpCodes.Ldarg_0, FindLabeled(composed, resolved).opcode);
+
+        LabelProvenanceInjections.MarkerCalls = 0;
+        MethodInfo generated = StreamRoundTrip.Generate(composed, target);
+        Assert.Equal(0, generated.Invoke(null, [0]));
+        Assert.Equal(1, LabelProvenanceInjections.MarkerCalls);
+        Assert.Equal(7, generated.Invoke(null, [7]));
+    }
+
+    [Fact]
+    public void TransformStream_NewLabelsIntroducedByCompositionDoNotCollideWithCallerIds() {
+        MethodBase target = typeof(BodyTransformerTargets).GetMethod(nameof(BodyTransformerTargets.Target))!;
+        ITranspilerContext context = WrapperComposer.CreateStreamContext(target);
+        Label skip = context.DefineLabel();
+
+        CodeInstruction skipTarget = new CodeInstruction(OpCodes.Ldarg_0);
+        skipTarget.labels.Add(skip);
+
+        List<CodeInstruction> source = [
+            new CodeInstruction(OpCodes.Ldarg_0),
+            new CodeInstruction(OpCodes.Brtrue_S, skip),
+            new CodeInstruction(OpCodes.Ldc_I4_0),
+            new CodeInstruction(OpCodes.Ret),
+            skipTarget,
+            new CodeInstruction(OpCodes.Ret),
+        ];
+        Injection head = new Injection(
+            typeof(BodyTransformerTargets).GetMethod(nameof(BodyTransformerTargets.HeadInjection))!,
+            new InjectAt.Head(),
+            "test",
+            0);
+
+        List<CodeInstruction> composed = WrapperComposer.TransformStream(target, source, [head], context);
+
+        AssertEachLabelAttachedToExactlyOneInstruction(composed);
+
+        CodeInstruction branch = FindOpcode(composed, OpCodes.Brtrue_S);
+        Label resolvedSkip = Assert.IsType<Label>(branch.operand);
+        Assert.Equal(skip, resolvedSkip);
+
+        bool foundOtherLabel = false;
+        foreach (CodeInstruction instruction in composed) {
+            foreach (Label label in instruction.labels) {
+                if (!label.Equals(skip)) {
+                    foundOtherLabel = true;
+                }
+            }
+        }
+
+        Assert.True(foundOtherLabel, "Expected the Head injection's guard branch to introduce a fresh label distinct from the caller's.");
+
+        BodyTransformerTargets.HeadObserved = 0;
+        MethodInfo generated = StreamRoundTrip.Generate(composed, target);
+        Assert.Equal(0, generated.Invoke(null, [0]));
+        Assert.Equal(1, BodyTransformerTargets.HeadObserved);
+    }
+
+    // Contract: a caller label whose target instruction did not survive composition is dropped -
+    // it appears on no instruction in the output - rather than throwing or silently resolving to
+    // the wrong target. A whole-method Around injection is the cleanest way to force this: it
+    // clones the original spine into per-copy bodies and never places the original instructions
+    // (including anything the caller labeled) into the composed result.
+    [Fact]
+    public void TransformStream_CallerLabelWhoseTargetDidNotSurviveComposition_IsDropped() {
+        MethodBase target = typeof(TranspilerTargets).GetMethod(nameof(TranspilerTargets.Priced))!;
+        ITranspilerContext context = WrapperComposer.CreateStreamContext(target);
+        Label orphan = context.DefineLabel();
+
+        CodeInstruction orphanTarget = new CodeInstruction(OpCodes.Nop);
+        orphanTarget.labels.Add(orphan);
+
+        List<CodeInstruction> source = [
+            new CodeInstruction(OpCodes.Ldc_I4_5),
+            orphanTarget,
+            new CodeInstruction(OpCodes.Ret),
+        ];
+        Injection around = new Injection(
+            typeof(OrphanedLabelAroundInjection).GetMethod(nameof(OrphanedLabelAroundInjection.Around))!,
+            new InjectAt.Around(),
+            "around",
+            0);
+
+        List<CodeInstruction> composed = WrapperComposer.TransformStream(target, source, [around], context);
+
+        foreach (CodeInstruction instruction in composed) {
+            Assert.DoesNotContain(orphan, instruction.labels);
+        }
+
+        MethodInfo generated = StreamRoundTrip.Generate(composed, target);
+        Assert.Equal(5, generated.Invoke(null, null));
+    }
+
+    private static CodeInstruction FindOpcode(List<CodeInstruction> instructions, OpCode opcode) {
+        foreach (CodeInstruction instruction in instructions) {
+            if (instruction.opcode == opcode) {
+                return instruction;
+            }
+        }
+
+        throw new InvalidOperationException($"No instruction with opcode '{opcode}' found in the composed stream.");
+    }
+
+    private static CodeInstruction FindLabeled(List<CodeInstruction> instructions, Label label) {
+        foreach (CodeInstruction instruction in instructions) {
+            if (instruction.labels.Contains(label)) {
+                return instruction;
+            }
+        }
+
+        throw new InvalidOperationException($"No instruction in the composed stream carries label '{label}'.");
+    }
+
+    private static void AssertEachLabelAttachedToExactlyOneInstruction(List<CodeInstruction> instructions) {
+        Dictionary<Label, CodeInstruction> owners = new Dictionary<Label, CodeInstruction>();
+        foreach (CodeInstruction instruction in instructions) {
+            foreach (Label label in instruction.labels) {
+                if (owners.TryGetValue(label, out CodeInstruction? existing) && !ReferenceEquals(existing, instruction)) {
+                    Assert.Fail($"Label '{label}' is attached to more than one instruction in the composed stream.");
+                }
+
+                owners[label] = instruction;
+            }
+        }
+    }
+
+    private static class LabelProvenanceInjections {
+        public static int MarkerCalls;
+
+        public static int Passthrough(int original) {
+            MarkerCalls++;
+            return original;
+        }
+    }
+
+    private static class OrphanedLabelAroundInjection {
+        public static int Around(Operation<int> original) {
+            return original.Invoke();
+        }
+    }
 }

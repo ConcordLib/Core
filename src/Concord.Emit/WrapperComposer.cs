@@ -123,9 +123,9 @@ public static class WrapperComposer {
         Type[] parameterTypes = ResolveParameterTypes(resolved);
 
         using DynamicMethodDefinition wrapper = new DynamicMethodDefinition(WrapperName(resolved), returnType, parameterTypes);
-        wrapper.Definition.Body.InitLocals = ReadOriginalInitLocals(resolved);
 
-        CecilCodeConverter.WriteBack(wrapper.Definition, source, writeContext);
+        Dictionary<Instruction, List<int>> provenance = CecilCodeConverter.WriteBack(wrapper.Definition, source, writeContext);
+        int firstFreshLabelId = writeContext.NextLabelId;
 
         PartitionTranspilers(ordered, out List<Injection> preTranspilers, out List<Injection> finalTranspilers, out List<Injection> declarative);
 
@@ -134,7 +134,7 @@ public static class WrapperComposer {
         RunTranspilers(wrapper.Definition, resolved, finalTranspilers);
 
         TranspilerContext readContext = new TranspilerContext(resolved);
-        return CecilCodeConverter.ToInstructions(wrapper.Definition, readContext);
+        return CecilCodeConverter.ToInstructions(wrapper.Definition, readContext, provenance, firstFreshLabelId);
     }
 
     /// <summary>
@@ -300,11 +300,6 @@ public static class WrapperComposer {
         throw new ConcordEmitException(
             "CONC116",
             "The supplied ITranspilerContext was not obtained from WrapperComposer.CreateStreamContext.");
-    }
-
-    private static bool ReadOriginalInitLocals(MethodBase resolved) {
-        using DynamicMethodDefinition original = new DynamicMethodDefinition(resolved);
-        return original.Definition.Body.InitLocals;
     }
 
     private static bool HasWholeMethodAround(IReadOnlyList<Injection> ordered) {

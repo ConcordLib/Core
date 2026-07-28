@@ -15,10 +15,19 @@ internal static class CecilCodeConverter {
     private static readonly Dictionary<string, Mono.Cecil.Cil.OpCode> CecilOpCodesByName = BuildCecilOpCodeTable();
 
     public static List<CodeInstruction> ToInstructions(MethodDefinition definition, TranspilerContext context) {
+        return ToInstructions(definition, context, null, 0);
+    }
+
+    // preservedLabels/firstFreshLabelId let a caller correlate labels it already knows about (e.g.
+    // ids it minted on the same context before composing) with whatever instruction they land on
+    // after composition, instead of every branch target getting a brand-new context-local id. See
+    // WrapperComposer.TransformStream, the sole caller that passes non-default values here.
+    public static List<CodeInstruction> ToInstructions(MethodDefinition definition, TranspilerContext context, Dictionary<Instruction, List<int>>? preservedLabels, int firstFreshLabelId) {
         MethodBody body = definition.Body;
         context.ExistingLocalCount = body.Variables.Count;
+        context.NextLabelId = Math.Max(context.NextLabelId, firstFreshLabelId);
 
-        AssignLabels(body, context);
+        AssignLabels(body, context, preservedLabels);
 
         List<CodeInstruction> instructions = new List<CodeInstruction>(body.Instructions.Count);
         Dictionary<Instruction, CodeInstruction> byInstruction = new Dictionary<Instruction, CodeInstruction>(body.Instructions.Count);
@@ -38,7 +47,11 @@ internal static class CecilCodeConverter {
         return instructions;
     }
 
-    public static void WriteBack(MethodDefinition definition, IReadOnlyList<CodeInstruction> instructions, TranspilerContext context) {
+    // Returns the caller-known label ids each newly created instruction carries, keyed by the fresh
+    // Instruction object written into the body - the provenance a subsequent ToInstructions read can
+    // use to hand a caller back a Label with the same Id it supplied, instead of a fresh one. Empty
+    // for any instruction the caller did not attach a label to.
+    public static Dictionary<Instruction, List<int>> WriteBack(MethodDefinition definition, IReadOnlyList<CodeInstruction> instructions, TranspilerContext context) {
         ModuleDefinition module = definition.Module;
         MethodBody body = definition.Body;
 
@@ -74,6 +87,26 @@ internal static class CecilCodeConverter {
         } catch (Exception ex) {
             throw new ConcordEmitException("CONC119", $"Write-back produced a method body Cecil rejected: {ex.Message}");
         }
+
+        return BuildLabelProvenance(instructions, emitted);
+    }
+
+    private static Dictionary<Instruction, List<int>> BuildLabelProvenance(IReadOnlyList<CodeInstruction> instructions, List<Instruction> emitted) {
+        Dictionary<Instruction, List<int>> provenance = new Dictionary<Instruction, List<int>>();
+        for (int i = 0; i < instructions.Count; i++) {
+            if (instructions[i].labels.Count == 0) {
+                continue;
+            }
+
+            List<int> ids = new List<int>(instructions[i].labels.Count);
+            foreach (Label label in instructions[i].labels) {
+                ids.Add(label.Id);
+            }
+
+            provenance[emitted[i]] = ids;
+        }
+
+        return provenance;
     }
 
     private static Dictionary<string, OpCode> BuildOpCodeTable() {
@@ -132,44 +165,55 @@ internal static class CecilCodeConverter {
         throw new ConcordEmitException("CONC118", $"Unknown opcode '{source.Name}'.");
     }
 
-    private static void AssignLabels(MethodBody body, TranspilerContext context) {
+    private static void AssignLabels(MethodBody body, TranspilerContext context, Dictionary<Instruction, List<int>>? preservedLabels) {
         foreach (Instruction instruction in body.Instructions) {
             if (instruction.Operand is Instruction branchTarget) {
-                EnsureLabel(branchTarget, context);
+                EnsureLabel(branchTarget, context, preservedLabels);
             } else if (instruction.Operand is Instruction[] switchTargets) {
                 foreach (Instruction switchTarget in switchTargets) {
-                    EnsureLabel(switchTarget, context);
+                    EnsureLabel(switchTarget, context, preservedLabels);
                 }
             }
         }
 
         foreach (ExceptionHandler handler in body.ExceptionHandlers) {
             if (handler.TryStart is not null) {
-                EnsureLabel(handler.TryStart, context);
+                EnsureLabel(handler.TryStart, context, preservedLabels);
             }
 
             if (handler.TryEnd is not null) {
-                EnsureLabel(handler.TryEnd, context);
+                EnsureLabel(handler.TryEnd, context, preservedLabels);
             }
 
             if (handler.HandlerStart is not null) {
-                EnsureLabel(handler.HandlerStart, context);
+                EnsureLabel(handler.HandlerStart, context, preservedLabels);
             }
 
             if (handler.HandlerEnd is not null) {
-                EnsureLabel(handler.HandlerEnd, context);
+                EnsureLabel(handler.HandlerEnd, context, preservedLabels);
             }
 
             if (handler.FilterStart is not null) {
-                EnsureLabel(handler.FilterStart, context);
+                EnsureLabel(handler.FilterStart, context, preservedLabels);
             }
         }
     }
 
-    private static void EnsureLabel(Instruction target, TranspilerContext context) {
-        if (!context.LabelsByInstruction.ContainsKey(target)) {
-            context.LabelsByInstruction[target] = context.DefineLabel();
+    // Reuses the caller's own id for a target this context already knows about (from preservedLabels,
+    // built by WriteBack from the labels the caller attached before composing) instead of always
+    // minting a fresh context-local one. Falls through to a fresh id, seeded past firstFreshLabelId by
+    // the caller in ToInstructions, for any target with no such provenance.
+    private static void EnsureLabel(Instruction target, TranspilerContext context, Dictionary<Instruction, List<int>>? preservedLabels) {
+        if (context.LabelsByInstruction.ContainsKey(target)) {
+            return;
         }
+
+        if (preservedLabels is not null && preservedLabels.TryGetValue(target, out List<int>? ids) && ids.Count > 0) {
+            context.LabelsByInstruction[target] = LabelFactory.Create(ids[0]);
+            return;
+        }
+
+        context.LabelsByInstruction[target] = context.DefineLabel();
     }
 
     private static object? MapOperandToClr(Instruction instruction, TranspilerContext context) {
