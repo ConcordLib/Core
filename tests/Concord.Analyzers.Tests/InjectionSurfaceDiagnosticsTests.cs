@@ -313,6 +313,63 @@ public sealed class InjectionSurfaceDiagnosticsTests {
     }
 
     [Fact]
+    public async Task Capture_OnDisambiguatedCallSite_ReportsDiagnostic() {
+        ImmutableArray<Diagnostic> diagnostics = await InjectedMemberAnalyzerTests.GetAnalyzerDiagnosticsAsync(
+            InjectedMemberAnalyzerTests.AttributeSource +
+            """
+
+            public class Widget {
+                public Widget(int size) { }
+
+                public Widget(int size, int weight) { }
+            }
+
+            public class Shop {
+                public Widget Build(int size) { return new Widget(size); }
+            }
+
+            [Concord.Patch]
+            public abstract class ShopPatch : Shop {
+                [Concord.InjectNew(nameof(Build), typeof(Widget), Concord.At.Head, invokeParameterTypes: new System.Type[] { typeof(int) })]
+                private void Peek([Concord.Capture(2)] int size) { }
+            }
+            """);
+
+        Diagnostic diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(InjectedMemberAnalyzer.InvalidCaptureArgumentDiagnosticId, diagnostic.Id);
+        Assert.Contains("takes 1 argument", diagnostic.GetMessage());
+    }
+
+    [Fact]
+    public async Task State_ConstructorTargetWithAndWithoutParameterTypes_ShareOneSlot() {
+        ImmutableArray<Diagnostic> diagnostics = await InjectedMemberAnalyzerTests.GetAnalyzerDiagnosticsAsync(
+            InjectedMemberAnalyzerTests.AttributeSource +
+            """
+
+            public class Shop {
+                public Shop() { }
+
+                public Shop(int listed) { }
+            }
+
+            [Concord.Patch]
+            public abstract class ShopPatch : Shop {
+                [Concord.Inject(Concord.At.Head, new System.Type[0])]
+                private void Begin(Concord.ControlHandle control) {
+                    control.SetState<int>(1);
+                }
+
+                [Concord.Inject(Concord.At.Tail)]
+                private void Finish(Concord.ControlHandle control) {
+                    int carried = control.GetState<int>();
+                }
+            }
+            """);
+
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
     public async Task State_ConflictingTypesOnSameTarget_ReportsDiagnostic() {
         ImmutableArray<Diagnostic> diagnostics = await InjectedMemberAnalyzerTests.GetAnalyzerDiagnosticsAsync(
             InjectedMemberAnalyzerTests.AttributeSource +

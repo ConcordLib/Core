@@ -604,6 +604,8 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
 
     // Returns the matched call's argument count, or null when the call site does not resolve to a
     // single member from source. An unresolved call site is validated at compose time instead.
+    // Unlike TargetIdentity, an absent invokeParameterTypes means "any constructor of this type"
+    // rather than the parameterless one, so this branch keeps ParameterTypesMatch.
     private static int? ResolveCallSiteArity(InjectionDeclaration declaration) {
         if (declaration.CallSiteType is not INamedTypeSymbol callSiteType) {
             return null;
@@ -726,10 +728,13 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
 
     // A state slot is scoped per patch declaration per target method, matching how
     // AllocateStateLocals keys its declared-type map inside a single target's injection list.
+    // The constructor branch matches parameter types the way ResolveInjectionTarget does, so an
+    // absent parameterTypes selects the parameterless constructor rather than every constructor;
+    // otherwise two injections that name the same constructor land in two slots.
     private static InjectionTargetIdentity TargetIdentity(InjectionDeclaration declaration, INamedTypeSymbol targetType) {
         ImmutableArray<IMethodSymbol> candidates = declaration.TargetsConstructor
             ? targetType.InstanceConstructors
-                .Where(constructor => ParameterTypesMatch(declaration.ParameterTypes, constructor.Parameters))
+                .Where(constructor => ConstructorParameterTypesMatch(declaration.ParameterTypes, constructor.Parameters))
                 .ToImmutableArray()
             : FindMethodCandidates(targetType, declaration.TargetMemberName)
                 .Where(candidate => ParameterTypesMatch(declaration.ParameterTypes, candidate.Parameters))
