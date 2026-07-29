@@ -128,6 +128,39 @@ public class BuilderInvokeTarget2 {
     }
 }
 
+public static class BuilderSliceAnchors2 {
+    public static void Begin() { }
+
+    public static void End() { }
+}
+
+internal class BuilderSliceTarget2 {
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public void Run() {
+        BuilderInvokeHelper2.Step();
+        BuilderSliceAnchors2.Begin();
+        BuilderInvokeHelper2.Step();
+        BuilderSliceAnchors2.End();
+        BuilderInvokeHelper2.Step();
+    }
+}
+
+public sealed class BuilderNewObjValue2 {
+    public BuilderNewObjValue2(int value) {
+        Value = value;
+    }
+
+    public int Value { get; }
+}
+
+public class BuilderNewObjTarget2 {
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public int Run(int value) {
+        BuilderNewObjValue2 created = new BuilderNewObjValue2(value);
+        return created.Value;
+    }
+}
+
 public static class BuilderHeadInjectionMethod2 {
     public static void OnCompute(ControlHandle<int> ch) {
         ch.ReturnValue = 99;
@@ -159,6 +192,12 @@ public static class BuilderAroundInjectionMethod2 {
 public static class BuilderInvokeInjectionMethod2 {
     public static void BeforeStep(ControlHandle ch) {
         BuilderLog.Entries.Add("injected");
+    }
+}
+
+public static class BuilderNewObjInjectionMethod2 {
+    public static int Bump(int original) {
+        return original + 1;
     }
 }
 
@@ -365,6 +404,52 @@ public sealed class PatchBuilderTests {
         BuilderInvokeTarget2 instance2 = new BuilderInvokeTarget2();
         instance2.Run();
         Assert.Equal(["before", "step", "after"], BuilderLog.Entries);
+    }
+
+    [Fact]
+    public void NewObj_Builder_RewritesConstructorArgument() {
+        Assert.Equal(3, new BuilderNewObjTarget2().Run(3));
+
+        MethodBase targetMethod = typeof(BuilderNewObjTarget2).GetMethod(nameof(BuilderNewObjTarget2.Run))!;
+        MethodInfo injectionMethod = typeof(BuilderNewObjInjectionMethod2).GetMethod(nameof(BuilderNewObjInjectionMethod2.Bump))!;
+
+        IPatchHandle handle = Patcher.For(targetMethod)
+            .NewObj(typeof(BuilderNewObjValue2), [typeof(int)], injectionMethod, At.Argument)
+            .Slice(new SliceRange(null, null, 1, null, null, 1))
+            .Apply();
+        try {
+            Assert.Equal(4, new BuilderNewObjTarget2().Run(3));
+        } finally {
+            handle.Dispose();
+        }
+
+        Assert.Equal(3, new BuilderNewObjTarget2().Run(3));
+    }
+
+    [Fact]
+    public void Slice_Builder_BoundsMostRecentInvokeInjection() {
+        BuilderLog.Clear();
+
+        MethodBase targetMethod = typeof(BuilderSliceTarget2).GetMethod(nameof(BuilderSliceTarget2.Run))!;
+        MethodInfo injectionMethod = typeof(BuilderInvokeInjectionMethod2).GetMethod(nameof(BuilderInvokeInjectionMethod2.BeforeStep))!;
+        SliceRange range = new SliceRange(
+            typeof(BuilderSliceAnchors2),
+            nameof(BuilderSliceAnchors2.Begin),
+            1,
+            typeof(BuilderSliceAnchors2),
+            nameof(BuilderSliceAnchors2.End),
+            1);
+
+        IPatchHandle handle = Patcher.For(targetMethod)
+            .Invoke(typeof(BuilderInvokeHelper2), nameof(BuilderInvokeHelper2.Step), injectionMethod, At.Head)
+            .Slice(range)
+            .Apply();
+        try {
+            new BuilderSliceTarget2().Run();
+            Assert.Equal(["step", "injected", "step", "step"], BuilderLog.Entries);
+        } finally {
+            handle.Dispose();
+        }
     }
 
     [Fact]

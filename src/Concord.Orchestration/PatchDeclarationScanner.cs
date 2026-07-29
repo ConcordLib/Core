@@ -161,16 +161,39 @@ public static class PatchDeclarationScanner {
         List<(MethodBase Target, Injection Injection)> resolved = [];
         foreach (MethodInfo method in declaration.GetMethods(declared)) {
             InjectAttribute? inject = method.GetCustomAttribute<InjectAttribute>();
-            if (inject == null) {
+            InjectNewAttribute? injectNew = method.GetCustomAttribute<InjectNewAttribute>();
+            if (inject is not null && injectNew is not null) {
+                throw new ConcordDeclarationException(
+                    InjectOnPrefix + declaration.FullName + " cannot apply both [Inject] and [InjectNew] to method '" + method.Name + "'.");
+            }
+
+            if (inject is not null) {
+                ValidateInjectAttribute(declaration, inject);
+            }
+
+            if (inject is null && injectNew is null) {
                 continue;
             }
 
-            ValidateInjectAttribute(declaration, inject);
+            string? targetMethod = inject?.Method ?? injectNew?.Method;
+            Type[]? targetParameterTypes = inject?.ParameterTypes ?? injectNew?.ParameterTypes;
+            bool targetsConstructor = inject?.TargetsConstructor ?? injectNew!.TargetsConstructor;
+            MethodBase resolvedTarget = ResolveInjectionTarget(declaration, baseType, targetMethod, targetParameterTypes, targetsConstructor);
+            InjectAt at = inject?.ResolvedAt ?? injectNew!.ResolvedAt;
+            SliceAttribute? slice = method.GetCustomAttribute<SliceAttribute>();
+            if (slice is not null) {
+                at = at switch {
+                    InjectAt.Invoke invoke => invoke with { Slice = slice.ResolvedRange },
+                    InjectAt.NewObj newObj => newObj with { Slice = slice.ResolvedRange },
+                    _ => at,
+                };
+            }
 
-            MethodBase resolvedTarget = ResolveInjectionTarget(declaration, baseType, inject);
-            resolved.Add((resolvedTarget, new Injection(method, inject.ResolvedAt, declaration.FullName!, inject.ResolvedPriority) {
+            int priority = inject?.ResolvedPriority ?? injectNew!.ResolvedPriority;
+            PatchBody body = inject?.Body ?? injectNew!.Body;
+            resolved.Add((resolvedTarget, new Injection(method, at, declaration.FullName!, priority) {
                 Debug = debug,
-                Body = inject.Body,
+                Body = body,
                 BeforeOwners = beforeOwners,
                 AfterOwners = afterOwners
             }));
@@ -230,9 +253,14 @@ public static class PatchDeclarationScanner {
         return resolved.ToArray();
     }
 
-    private static MethodBase ResolveInjectionTarget(Type declaration, Type baseType, InjectAttribute inject) {
-        if (inject.TargetsConstructor) {
-            Type[] ctorParams = inject.ParameterTypes ?? Type.EmptyTypes;
+    private static MethodBase ResolveInjectionTarget(
+        Type declaration,
+        Type baseType,
+        string? targetMethod,
+        Type[]? targetParameterTypes,
+        bool targetsConstructor) {
+        if (targetsConstructor) {
+            Type[] ctorParams = targetParameterTypes ?? Type.EmptyTypes;
             ConstructorInfo? ctor = baseType.GetConstructor(
                 BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, // NOSONAR concord reaches private target members by design; validated at resolve time
                 null,
@@ -252,24 +280,24 @@ public static class PatchDeclarationScanner {
 
         string methodName;
         try {
-            methodName = AccessorNameResolver.ResolveAccessorName(baseType, inject.Method!, null, false);
+            methodName = AccessorNameResolver.ResolveAccessorName(baseType, targetMethod!, null, false);
         } catch (ConcordEmitException ex) {
             throw new ConcordDeclarationException(InjectOnPrefix + declaration.FullName + ": " + ex.Message);
         }
 
-        if (inject.ParameterTypes != null) {
+        if (targetParameterTypes is not null) {
             MethodInfo? baseMethod = baseType.GetMethod(
                 methodName,
                 BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static, // NOSONAR concord reaches private target members by design; validated at resolve time
                 null,
-                inject.ParameterTypes,
+                targetParameterTypes,
                 null);
             if (baseMethod == null) {
                 throw new ConcordDeclarationException(
                     InjectOnPrefix +
                     declaration.FullName +
                     " target '" +
-                    inject.Method +
+                    targetMethod +
                     "' with specified parameter types not found on " +
                     baseType.FullName +
                     ".");
@@ -288,7 +316,7 @@ public static class PatchDeclarationScanner {
                 InjectOnPrefix +
                 declaration.FullName +
                 " target '" +
-                inject.Method +
+                targetMethod +
                 "' is ambiguous (multiple overloads); use the parameterTypes overload to disambiguate.");
         }
 
@@ -297,7 +325,7 @@ public static class PatchDeclarationScanner {
                 InjectOnPrefix +
                 declaration.FullName +
                 " names method '" +
-                inject.Method +
+                targetMethod +
                 "' which does not exist on " +
                 baseType.FullName +
                 ".");
