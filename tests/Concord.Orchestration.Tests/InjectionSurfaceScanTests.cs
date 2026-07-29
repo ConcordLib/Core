@@ -167,6 +167,10 @@ public sealed class InjectionSurfaceScanTests {
         }
     }
 
+    // Every [Patch] type here is live for the whole assembly, private and nested included:
+    // ScanAssembly walks assembly.GetTypes(), so the five other tests that call Patcher.Apply on
+    // this assembly apply this declaration too. Keep any declaration added here composable, or it
+    // throws out of their Patcher.Apply rather than out of the test that owns it.
     [Patch(typeof(SurfaceRunTarget))]
     private static class SurfaceRunDeclaration {
         [InjectNew(nameof(SurfaceRunTarget.Run), typeof(SurfaceOrder), At.Tail, 1)]
