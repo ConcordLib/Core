@@ -28,8 +28,12 @@ public static class SlotRecorder {
 }
 
 public static class SlotDeclarationA {
+    // The write is conditional so an invocation that skips it observes whatever the slot holds on
+    // entry. That is what makes the cross-invocation leak test able to fail.
     public static void Head(ControlHandle<int> ch, int seed) {
-        ch.SetState(seed + 100L);
+        if (seed > 0) {
+            ch.SetState(seed + 100L);
+        }
     }
 
     public static void Tail(ControlHandle<int> ch) {
@@ -201,7 +205,9 @@ public sealed class StateSlotTests {
         invoke(host, 5);
         Assert.Equal(105L, SlotRecorder.SeenA);
 
-        invoke(host, 7);
-        Assert.Equal(107L, SlotRecorder.SeenA);
+        // seed <= 0 skips the Head write, so the Tail reads the slot as the wrapper entered it.
+        // A slot that survived the previous call would read back 105L here.
+        invoke(host, -1);
+        Assert.Equal(0L, SlotRecorder.SeenA);
     }
 }
