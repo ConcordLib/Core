@@ -36,15 +36,16 @@ public sealed class ForeignTypeTarget {
 }
 
 /// <summary>
-///     A constructible type in a separate assembly from the composed target, for Task 6's
-///     newobj-on-a-foreign-type coverage.
+///     A constructible type in a separate assembly from the composed target, so newobj injection
+///     can be exercised across an assembly boundary.
 /// </summary>
 public class ForeignOrder {
-    /// <summary>Initializes a new instance of the <see cref="ForeignOrder" /> class.</summary>
+    /// <summary>Stores <paramref name="id" /> so a rewritten ctor argument is observable.</summary>
+    /// <param name="id">The order id.</param>
     public ForeignOrder(int id) {
         Id = id;
     }
 
-    /// <summary>Gets the constructed id.</summary>
+    /// <summary>The constructed id.</summary>
     public int Id { get; }
 }
