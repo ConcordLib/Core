@@ -161,22 +161,7 @@ internal static class ControlHandleLowering {
         string methodName,
         Type[]? parameterTypes = null,
         bool includeFieldReads = false) {
-        List<Instruction> matches = new List<Instruction>();
-
-        foreach (Instruction instruction in spine) {
-            if (includeFieldReads &&
-                (parameterTypes is null || parameterTypes.Length == 0) &&
-                IsMatchingFieldRead(instruction, declaringType, methodName)) {
-                matches.Add(instruction);
-                continue;
-            }
-
-            if (IsMatchingCall(instruction, declaringType, methodName, parameterTypes)) {
-                matches.Add(instruction);
-            }
-        }
-
-        return matches;
+        return CallSiteQuery.Match(spine, declaringType, methodName, parameterTypes, includeFieldReads, false);
     }
 
     internal static bool InjectionMethodCancels(MethodBody injectionBody) {
@@ -229,54 +214,6 @@ internal static class ControlHandleLowering {
         }
 
         return -1;
-    }
-
-    // A call site matches when it is a direct or virtual call to the named member on the given
-    // declaring type. parameterTypes narrows it further when the caller needs one specific overload;
-    // passing null means any overload of that name qualifies.
-    private static bool IsMatchingCall(Instruction instruction, Type declaringType, string methodName, Type[]? parameterTypes) {
-        if (instruction.OpCode != OpCodes.Call && instruction.OpCode != OpCodes.Callvirt) {
-            return false;
-        }
-
-        if (instruction.Operand is not MethodReference reference) {
-            return false;
-        }
-
-        MethodBase resolved = reference.ResolveReflection();
-        if (resolved.Name != methodName || resolved.DeclaringType != declaringType) {
-            return false;
-        }
-
-        return parameterTypes == null || ParameterTypesMatch(resolved, parameterTypes);
-    }
-
-    private static bool IsMatchingFieldRead(Instruction instruction, Type declaringType, string fieldName) {
-        if (instruction.OpCode != OpCodes.Ldfld && instruction.OpCode != OpCodes.Ldsfld) {
-            return false;
-        }
-
-        if (instruction.Operand is not FieldReference reference) {
-            return false;
-        }
-
-        FieldInfo resolved = reference.ResolveReflection();
-        return resolved.Name == fieldName && resolved.DeclaringType == declaringType;
-    }
-
-    private static bool ParameterTypesMatch(MethodBase method, Type[] parameterTypes) {
-        ParameterInfo[] parameters = method.GetParameters();
-        if (parameters.Length != parameterTypes.Length) {
-            return false;
-        }
-
-        for (int i = 0; i < parameters.Length; i++) {
-            if (parameters[i].ParameterType.FullName != parameterTypes[i].FullName) {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     private static int ArgIndexOperand(object? operand) {

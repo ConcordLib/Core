@@ -1530,17 +1530,7 @@ public static class WrapperComposer {
     }
 
     private static List<Instruction> SelectInvokeSites(List<Instruction> allSites, uint by, MethodBase target, InjectAt.Invoke invoke) {
-        if (by == 0) {
-            return allSites;
-        }
-
-        if (by > allSites.Count) {
-            throw new ConcordEmitException(
-                "CONC033",
-                $"Injection on '{target.DeclaringType?.Name}.{target.Name}' targets occurrence {by} of invoke site '{invoke.DeclaringType.Name}.{invoke.Method}', but only {allSites.Count} occurrence(s) exist in the method body.");
-        }
-
-        return [allSites[(int)(by - 1)]];
+        return CallSiteQuery.Select(allSites, by, target, $"{invoke.DeclaringType.Name}.{invoke.Method}");
     }
 
     private static List<Instruction> FindReturnExits(List<Instruction> spine, Instruction afterSpine) {
