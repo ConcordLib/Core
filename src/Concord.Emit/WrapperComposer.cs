@@ -246,6 +246,8 @@ public static class WrapperComposer {
     }
 
     internal static void ValidateComposition(MethodBase target, IReadOnlyList<Injection> ordered) {
+        RejectMisplacedCaptures(ordered, target);
+
         if (HasWholeMethodAround(ordered)) {
             ValidateWholeMethodAroundEligible(target);
             RejectCallSiteInjectionsWithWholeMethodAround(ordered, target);
@@ -375,6 +377,50 @@ public static class WrapperComposer {
     private static bool HasWholeMethodAround(IReadOnlyList<Injection> ordered) {
         for (int i = 0; i < ordered.Count; i++) {
             if (ordered[i].At is InjectAt.Around) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    ///     Rejects <see cref="CaptureAttribute" /> anywhere there is no matched call to capture an argument
+    ///     from: any position other than <see cref="InjectAt.Invoke" /> and <see cref="InjectAt.NewObj" />, and
+    ///     any shift of those other than <see cref="At.Head" /> and <see cref="At.Tail" />.
+    /// </summary>
+    /// <param name="ordered">The full injection list being composed for <paramref name="target" />.</param>
+    /// <param name="target">The original method being patched, used for the diagnostic message.</param>
+    private static void RejectMisplacedCaptures(IReadOnlyList<Injection> ordered, MethodBase target) {
+        for (int i = 0; i < ordered.Count; i++) {
+            Injection injection = ordered[i];
+            if (!DeclaresCapture(injection.InjectionMethod)) {
+                continue;
+            }
+
+            At? shift = injection.At switch {
+                InjectAt.Invoke invoke => invoke.Shift,
+                InjectAt.NewObj newObj => newObj.Shift,
+                _ => null,
+            };
+
+            if (shift is At.Head or At.Tail) {
+                continue;
+            }
+
+            throw new ConcordEmitException(
+                "CONC128",
+                $"Injection '{injection.InjectionMethod.DeclaringType?.Name}.{injection.InjectionMethod.Name}' on " +
+                $"'{target.DeclaringType?.Name}.{target.Name}' uses [Capture] at {PositionName(injection.At)}. " +
+                "[Capture] binds an argument of a matched call, so it is valid only on the At.Head and At.Tail shifts of " +
+                "an Invoke or NewObj injection; At.Around and At.Argument already receive the call's arguments.");
+        }
+    }
+
+    private static bool DeclaresCapture(MethodBase injectionMethod) {
+        ParameterInfo[] parameters = injectionMethod.GetParameters();
+        for (int i = 0; i < parameters.Length; i++) {
+            if (parameters[i].GetCustomAttribute<CaptureAttribute>() is not null) {
                 return true;
             }
         }
@@ -1067,14 +1113,124 @@ public static class WrapperComposer {
 
         bool after = shift is At.Tail;
         foreach (Instruction match in sites) {
+            Dictionary<int, VariableDefinition>? captureBinding = EmitCaptureSpills(site, match, newObj, spine);
             int siteIndex = spine.IndexOf(match);
             Instruction continuation = after ? spine[siteIndex + 1] : match;
             List<Instruction> invokeBody = BodyCopier.CopyInjection(
                 new InjectionCopyRequest(injectionMethodDefinition.Definition, site.WrapperDefinition, site.Target, injection.InjectionMethod, injectedMembers),
                 site.Locals,
-                continuation);
+                continuation,
+                captureBinding: captureBinding);
             spine.InsertRange(after ? siteIndex + 1 : siteIndex, invokeBody);
         }
+    }
+
+    /// <summary>
+    ///     Spills each <see cref="CaptureAttribute" /> parameter's matched-call argument into a fresh wrapper
+    ///     local, by duplicating the value at the point the argument finished pushing.
+    /// </summary>
+    /// <param name="site">The injection, wrapper, target, and protocol locals being composed.</param>
+    /// <param name="match">The matched call or construction instruction.</param>
+    /// <param name="newObj">Whether <paramref name="match" /> is a <c>newobj</c> instruction.</param>
+    /// <param name="spine">The copied target body the match lives in; spills are inserted into it.</param>
+    /// <returns>Maps an injection argument index to the local holding its captured value, or null when nothing is captured.</returns>
+    private static Dictionary<int, VariableDefinition>? EmitCaptureSpills(
+        InjectionSiteContext site,
+        Instruction match,
+        bool newObj,
+        List<Instruction> spine) {
+        MethodBase injectionMethod = site.Injection.InjectionMethod;
+        if (!DeclaresCapture(injectionMethod)) {
+            return null;
+        }
+
+        if (match.Operand is not MethodReference reference) {
+            throw new ConcordEmitException(
+                "CONC130",
+                $"Injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' on '{site.Target.DeclaringType?.Name}.{site.Target.Name}' " +
+                "uses [Capture], but the matched site is a field read, which takes no arguments.");
+        }
+
+        CallSiteShape shape = ResolveSiteShape(reference.ResolveReflection(), newObj);
+        ParameterInfo[] parameters = injectionMethod.GetParameters();
+        int argOffset = injectionMethod.IsStatic ? 0 : 1;
+
+        Dictionary<int, VariableDefinition> binding = new Dictionary<int, VariableDefinition>();
+        Dictionary<uint, VariableDefinition> spilled = new Dictionary<uint, VariableDefinition>();
+
+        for (int i = 0; i < parameters.Length; i++) {
+            CaptureAttribute? capture = parameters[i].GetCustomAttribute<CaptureAttribute>();
+            if (capture is null) {
+                continue;
+            }
+
+            if (capture.Arg == 0 || capture.Arg > shape.ParameterTypes.Length) {
+                throw new ConcordEmitException(
+                    "CONC130",
+                    $"Injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' on '{site.Target.DeclaringType?.Name}.{site.Target.Name}' " +
+                    $"captures argument {capture.Arg}, but the matched call takes {shape.ParameterTypes.Length} argument(s).");
+            }
+
+            if (!spilled.TryGetValue(capture.Arg, out VariableDefinition? spill)) {
+                spill = SpillCaptureSlot(site, match, shape, capture.Arg, parameters[i], spine);
+                spilled[capture.Arg] = spill;
+            }
+
+            binding[i + argOffset] = spill;
+        }
+
+        return binding;
+    }
+
+    private static VariableDefinition SpillCaptureSlot(
+        InjectionSiteContext site,
+        Instruction match,
+        CallSiteShape shape,
+        uint arg,
+        ParameterInfo parameter,
+        List<Instruction> spine) {
+        MethodBase injectionMethod = site.Injection.InjectionMethod;
+        int boundary = CallSiteProvenance.FindArgumentPushEnd(
+            spine,
+            spine.IndexOf(match),
+            (int)(arg - 1),
+            shape.ParameterTypes.Length,
+            shape.HasThis,
+            site.WrapperDefinition);
+
+        // A prefix carries the stack depth of the instruction before it, so the backward walk can land on
+        // one. Inserting there would split it from the instruction it modifies; the value is already on
+        // top at the last non-prefix instruction, so step back to that.
+        while (boundary >= 0 && spine[boundary].OpCode.OpCodeType == OpCodeType.Prefix) {
+            boundary--;
+        }
+
+        if (boundary < 0) {
+            throw new ConcordEmitException(
+                "CONC129",
+                $"Injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' on '{site.Target.DeclaringType?.Name}.{site.Target.Name}' " +
+                $"cannot capture argument {arg}: its push boundary is not determinable at the matched call site. This happens when the " +
+                "compiler evaluates an argument across a branch, which a conditional expression (?:, ??, ?., && or ||) in any argument of " +
+                "that call produces. Rewrite the argument into a local before the call, or read the value the injection needs another way.");
+        }
+
+        Type slotType = shape.ParameterTypes[arg - 1];
+        bool dereference = slotType.IsByRef && !parameter.ParameterType.IsByRef;
+        Type storedType = dereference ? slotType.GetElementType()! : slotType;
+
+        ModuleDefinition module = site.WrapperDefinition.Module;
+        VariableDefinition spill = new VariableDefinition(module.ImportReference(storedType));
+        site.WrapperDefinition.Body.Variables.Add(spill);
+
+        List<Instruction> emitted = [Instruction.Create(OpCodes.Dup)];
+        if (dereference) {
+            emitted.Add(Instruction.Create(OpCodes.Ldobj, module.ImportReference(storedType)));
+        }
+
+        emitted.Add(Instruction.Create(OpCodes.Stloc, spill));
+        spine.InsertRange(boundary + 1, emitted);
+
+        return spill;
     }
 
     private static void RewriteCallSiteArguments(

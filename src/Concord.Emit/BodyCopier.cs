@@ -59,6 +59,7 @@ internal static class BodyCopier {
     ///     <see cref="SpineCopy" />, so its <c>ControlHandle</c> return-value protocol reads/writes
     ///     <see cref="ProtocolLocals.SpliceValue" /> instead of <see cref="ProtocolLocals.ReturnValue" />.
     /// </param>
+    /// <param name="captureBinding">Maps an injection argument index to the call-site spill local it reads, if any.</param>
     /// <returns>The copied and lowered instruction sequence.</returns>
     public static List<Instruction> CopyInjection(
         InjectionCopyRequest request,
@@ -66,11 +67,18 @@ internal static class BodyCopier {
         Instruction returnBranchTarget,
         SpineTemplate? spineTemplate = null,
         List<SpineCopy>? spineCopies = null,
-        bool insideAround = false) {
+        bool insideAround = false,
+        IReadOnlyDictionary<int, VariableDefinition>? captureBinding = null) {
         MethodBody injectionBody = request.InjectionDefinition.Body;
         ModuleDefinition module = request.Destination.Module;
 
         Dictionary<int, int> argRemap = BuildArgRemap(request.Target, request.InjectionMethod);
+        if (captureBinding is not null) {
+            foreach (int captured in captureBinding.Keys) {
+                argRemap.Remove(captured);
+            }
+        }
+
         int controlHandleArgIndex = ControlHandleLowering.FindControlHandleArgIndex(request.InjectionMethod);
         int operationArgIndex = ControlHandleLowering.FindOperationArgIndex(request.InjectionMethod);
 
@@ -87,7 +95,8 @@ internal static class BodyCopier {
             spineTemplate,
             request.Destination,
             spineCopies,
-            insideAround);
+            insideAround,
+            captureBinding);
 
         List<(Instruction Source, List<Instruction> Emitted)> entries =
             new List<(Instruction Source, List<Instruction> Emitted)>(injectionBody.Instructions.Count);
@@ -293,7 +302,7 @@ internal static class BodyCopier {
             return new List<Instruction> { Instruction.Create(OpCodes.Br, site.WrapEnd) };
         }
 
-        if (TryLowerWrapArgBinding(source, site.WrapArgBinding, out Instruction? bound)) {
+        if (TryLowerArgBinding(source, site.WrapArgBinding, out Instruction? bound)) {
             return new List<Instruction> { bound! };
         }
 
@@ -314,7 +323,7 @@ internal static class BodyCopier {
         return new List<Instruction> { copy };
     }
 
-    private static bool TryLowerWrapArgBinding(Instruction source, Dictionary<int, VariableDefinition> wrapArgBinding, out Instruction? lowered) {
+    private static bool TryLowerArgBinding(Instruction source, IReadOnlyDictionary<int, VariableDefinition> argBinding, out Instruction? lowered) {
         lowered = null;
 
         bool isAddress = source.OpCode == OpCodes.Ldarga || source.OpCode == OpCodes.Ldarga_S;
@@ -324,7 +333,7 @@ internal static class BodyCopier {
         }
 
         int argIndex = GetArgIndex(source);
-        if (argIndex < 0 || !wrapArgBinding.TryGetValue(argIndex, out VariableDefinition? local)) {
+        if (argIndex < 0 || !argBinding.TryGetValue(argIndex, out VariableDefinition? local)) {
             return false;
         }
 
@@ -411,6 +420,10 @@ internal static class BodyCopier {
 
         if (source.OpCode == OpCodes.Ret) {
             return LowerReturn(site);
+        }
+
+        if (site.CaptureBinding is not null && TryLowerArgBinding(source, site.CaptureBinding, out Instruction? captured)) {
+            return new List<Instruction> { captured! };
         }
 
         if (TryLowerProjectedMethodCall(source, ctx, out List<Instruction>? projectedCall)) {
