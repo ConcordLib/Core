@@ -1975,6 +1975,27 @@ public sealed class InjectedMemberAnalyzerTests {
             }
         }
 
+        [AttributeUsage(AttributeTargets.Method)]
+        public sealed class InjectNewAttribute : Attribute {
+            public InjectNewAttribute(string method, Type constructedType, At shift, uint by = 0, Type[] targetParameterTypes = null, Type[] invokeParameterTypes = null, uint arg = 0) {
+            }
+
+            public InjectNewAttribute(Type constructedType, At shift, uint by = 0, Type[] targetParameterTypes = null, Type[] invokeParameterTypes = null, uint arg = 0) {
+            }
+        }
+
+        [AttributeUsage(AttributeTargets.Parameter)]
+        public sealed class CaptureAttribute : Attribute {
+            public CaptureAttribute(uint arg) {
+            }
+        }
+
+        [AttributeUsage(AttributeTargets.Method)]
+        public sealed class SliceAttribute : Attribute {
+            public SliceAttribute(Type fromType = null, string fromMember = null, uint fromBy = 1, Type toType = null, string toMember = null, uint toBy = 1) {
+            }
+        }
+
         public sealed class CodeInstruction {
         }
 
@@ -1982,9 +2003,17 @@ public sealed class InjectedMemberAnalyzerTests {
         }
 
         public sealed class ControlHandle {
+            public void SetState<TState>(TState value) {
+            }
+
+            public TState GetState<TState>() => default;
         }
 
         public sealed class ControlHandle<T> {
+            public void SetState<TState>(TState value) {
+            }
+
+            public TState GetState<TState>() => default;
         }
 
         public enum Control {
