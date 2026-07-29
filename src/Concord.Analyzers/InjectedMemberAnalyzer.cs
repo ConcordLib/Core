@@ -138,6 +138,31 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     /// </summary>
     public const string InjectedMemberOutsideInjectionDiagnosticId = "CONCORD025";
 
+    /// <summary>
+    ///     Diagnostic id for a patch declaration whose injections carry two state types for one target.
+    /// </summary>
+    public const string ConflictingStateTypeDiagnosticId = "CONCORD026";
+
+    /// <summary>
+    ///     Diagnostic id for a state slot a declaration reads but never writes.
+    /// </summary>
+    public const string UnwrittenStateSlotDiagnosticId = "CONCORD027";
+
+    /// <summary>
+    ///     Diagnostic id for a [Capture] parameter on an injection position that matches no call.
+    /// </summary>
+    public const string MisplacedCaptureDiagnosticId = "CONCORD028";
+
+    /// <summary>
+    ///     Diagnostic id for [Slice] on an injection position that is neither invoke nor construction.
+    /// </summary>
+    public const string MisplacedSliceDiagnosticId = "CONCORD029";
+
+    /// <summary>
+    ///     Diagnostic id for a [Capture] ordinal the matched call cannot supply.
+    /// </summary>
+    public const string InvalidCaptureArgumentDiagnosticId = "CONCORD030";
+
     private const string ConcordPatchesNamespace = "Concord.Patches";
     private const string ConcordNamespace = "Concord";
     private const string OperationTypeName = "Operation";
@@ -360,6 +385,51 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         true,
         "Concord rewrites injected member accesses only inside the bodies it copies into the generated wrapper. A helper, constructor or ordinary property on the patch type is called normally, so it sees the declaration's own member - whatever its initializer left there - with no error at build or patch time. Pass the value in as a parameter from the injection method, or read the target member by reflection.");
 
+    private static readonly DiagnosticDescriptor ConflictingStateTypeRule = new(
+        ConflictingStateTypeDiagnosticId,
+        "Patch declaration uses two state types for one target",
+        "Patch declaration '{0}' uses state type '{1}' and '{2}' for the same slot on '{3}'; one declaration must use one state type per target",
+        ConcordPatchesNamespace,
+        DiagnosticSeverity.Error,
+        true,
+        "A patch declaration gets one control-handle state slot per target method, so every SetState and GetState in that declaration must name the same type for a given target.");
+
+    private static readonly DiagnosticDescriptor UnwrittenStateSlotRule = new(
+        UnwrittenStateSlotDiagnosticId,
+        "State slot is read but never written",
+        "Patch declaration '{0}' reads state as '{1}' on '{2}', but no injection in the declaration calls SetState<{1}>; the read yields default({1})",
+        ConcordPatchesNamespace,
+        DiagnosticSeverity.Warning,
+        true,
+        "An unwritten state slot reads back as the default value, so a GetState with no matching SetState anywhere in the declaration is usually a missing write rather than an intended default.");
+
+    private static readonly DiagnosticDescriptor MisplacedCaptureRule = new(
+        MisplacedCaptureDiagnosticId,
+        "Capture parameter is not at a matched call",
+        "Injection method '{0}' declares a [Capture] parameter, but its position {1}",
+        ConcordPatchesNamespace,
+        DiagnosticSeverity.Error,
+        true,
+        "[Capture] binds an argument of a call matched inside the target body, so it needs an invoke or construction injection shifted to At.Head or At.Tail. At.Around and At.Argument already receive the call's arguments.");
+
+    private static readonly DiagnosticDescriptor MisplacedSliceRule = new(
+        MisplacedSliceDiagnosticId,
+        "Slice is only valid on invoke and construction positions",
+        "Injection method '{0}' carries [Slice] at position '{1}'; [Slice] applies to invoke and construction positions only",
+        ConcordPatchesNamespace,
+        DiagnosticSeverity.Error,
+        true,
+        "[Slice] bounds the call search an invoke or construction injection performs, so it has no meaning on a position that matches no call.");
+
+    private static readonly DiagnosticDescriptor InvalidCaptureArgumentRule = new(
+        InvalidCaptureArgumentDiagnosticId,
+        "Capture argument is out of range",
+        "[Capture] on parameter '{0}' of '{1}' {2}",
+        ConcordPatchesNamespace,
+        DiagnosticSeverity.Error,
+        true,
+        "[Capture] names a 1-based argument of the matched call, so the ordinal must be at least 1 and no greater than the number of arguments the matched call takes.");
+
     private enum MetadataMemberKind {
         Field,
         Property,
@@ -392,13 +462,19 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             TranspilerMustBeStaticRule,
             InvalidTranspilerSignatureRule,
             TranspilerInjectedMemberAccessRule,
-            InjectedMemberOutsideInjectionRule);
+            InjectedMemberOutsideInjectionRule,
+            ConflictingStateTypeRule,
+            UnwrittenStateSlotRule,
+            MisplacedCaptureRule,
+            MisplacedSliceRule,
+            InvalidCaptureArgumentRule);
 
     /// <inheritdoc />
     public override void Initialize(AnalysisContext context) {
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
         context.RegisterSymbolAction(AnalyzeNamedType, SymbolKind.NamedType);
+        context.RegisterSymbolStartAction(AnalyzeStateSlots, SymbolKind.NamedType);
     }
 
     private static void AnalyzeNamedType(SymbolAnalysisContext context) {
@@ -440,6 +516,242 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         AnalyzeAttachedFields(context, patchType, targetType);
         AnalyzeUnsupportedInjectionMembers(context, patchType, targetType);
         AnalyzeInjectedMemberScope(context, patchType, targetType);
+        AnalyzeInjectionSurface(context, patchType);
+    }
+
+    private static void AnalyzeInjectionSurface(SymbolAnalysisContext context, INamedTypeSymbol patchType) {
+        foreach (IMethodSymbol method in patchType.GetMembers().OfType<IMethodSymbol>()) {
+            if (method.MethodKind != MethodKind.Ordinary) {
+                continue;
+            }
+
+            InjectionDeclaration? declaration = TryGetInjectionDeclaration(method);
+            if (declaration is null) {
+                continue;
+            }
+
+            ValidateSlicePosition(context, declaration);
+            ValidateCaptureParameters(context, declaration);
+        }
+    }
+
+    private static void ValidateSlicePosition(SymbolAnalysisContext context, InjectionDeclaration declaration) {
+        AttributeData? slice = declaration.Method.GetAttributes().FirstOrDefault(IsSliceAttribute);
+        if (slice is null || declaration.TargetsCallSite) {
+            return;
+        }
+
+        context.ReportDiagnostic(Diagnostic.Create(
+            MisplacedSliceRule,
+            LocationOf(slice, declaration.Method, context.CancellationToken),
+            declaration.Method.Name,
+            "At." + declaration.PositionName));
+    }
+
+    // Mirrors RejectMisplacedCaptures: a capture needs a matched call, so only the Head and Tail
+    // shifts of the invoke and construction forms can supply one. Whole-method positions match no
+    // call at all, and the remaining shifts already hand the call's arguments to the injection.
+    private static void ValidateCaptureParameters(SymbolAnalysisContext context, InjectionDeclaration declaration) {
+        IParameterSymbol? captured = declaration.Method.Parameters
+            .FirstOrDefault(parameter => parameter.GetAttributes().Any(IsCaptureAttribute));
+        if (captured is null) {
+            return;
+        }
+
+        if (!declaration.TargetsCallSite || declaration.PositionName is not ("Head" or "Tail")) {
+            string reason = declaration.TargetsCallSite
+                ? $"uses the shift At.{declaration.PositionName}, which does not name a point where the call's arguments are still on the stack"
+                : $"is a whole-method position (At.{declaration.PositionName}), which matches no call";
+            context.ReportDiagnostic(Diagnostic.Create(
+                MisplacedCaptureRule,
+                LocationOf(captured),
+                declaration.Method.Name,
+                reason));
+            return;
+        }
+
+        ValidateCaptureArguments(context, declaration);
+    }
+
+    private static void ValidateCaptureArguments(SymbolAnalysisContext context, InjectionDeclaration declaration) {
+        int? arity = ResolveCallSiteArity(declaration);
+
+        foreach (IParameterSymbol parameter in declaration.Method.Parameters) {
+            AttributeData? capture = parameter.GetAttributes().FirstOrDefault(IsCaptureAttribute);
+            if (capture is null || !TryGetUIntConstructorArgument(capture, "arg", out uint arg)) {
+                continue;
+            }
+
+            string? reason = null;
+            if (arg == 0) {
+                reason = "captures argument 0; [Capture] is 1-based, so the first argument is 1";
+            } else if (arity.HasValue && arg > arity.Value) {
+                reason = $"captures argument {arg}, but the matched call takes {arity.Value} argument(s)";
+            }
+
+            if (reason is null) {
+                continue;
+            }
+
+            context.ReportDiagnostic(Diagnostic.Create(
+                InvalidCaptureArgumentRule,
+                LocationOf(capture, parameter, context.CancellationToken),
+                parameter.Name,
+                declaration.Method.Name,
+                reason));
+        }
+    }
+
+    // Returns the matched call's argument count, or null when the call site does not resolve to a
+    // single member from source. An unresolved call site is validated at compose time instead.
+    // Unlike TargetIdentity, an absent invokeParameterTypes means "any constructor of this type"
+    // rather than the parameterless one, so this branch keeps ParameterTypesMatch.
+    private static int? ResolveCallSiteArity(InjectionDeclaration declaration) {
+        if (declaration.CallSiteType is not INamedTypeSymbol callSiteType) {
+            return null;
+        }
+
+        if (declaration.TargetsNewObj) {
+            ImmutableArray<IMethodSymbol> constructors = callSiteType.InstanceConstructors
+                .Where(constructor => ParameterTypesMatch(declaration.CallSiteParameterTypes, constructor.Parameters))
+                .ToImmutableArray();
+            return constructors.Length == 1 ? constructors[0].Parameters.Length : null;
+        }
+
+        if (declaration.CallSiteMember is null) {
+            return null;
+        }
+
+        string? effectiveName = ResolveAccessorName(callSiteType, declaration.CallSiteMember, declaration.Method, false, out bool ambiguous);
+        if (ambiguous || effectiveName is null) {
+            return null;
+        }
+
+        ImmutableArray<IMethodSymbol> candidates = FindMethodCandidates(callSiteType, effectiveName)
+            .Where(candidate => ParameterTypesMatch(declaration.CallSiteParameterTypes, candidate.Parameters))
+            .ToImmutableArray();
+        return candidates.Length == 1 ? candidates[0].Parameters.Length : null;
+    }
+
+    private static void AnalyzeStateSlots(SymbolStartAnalysisContext context) {
+        if (context.Symbol is not INamedTypeSymbol patchType || patchType.TypeKind != TypeKind.Class) {
+            return;
+        }
+
+        PatchTargetResult? patchTarget = GetPatchTarget(context.Compilation, patchType);
+        if (patchTarget?.TargetType is null ||
+            patchTarget.UnresolvedTarget is not null ||
+            patchTarget.FailureReason is not null) {
+            return;
+        }
+
+        StateSlotCollector collector = new StateSlotCollector(patchType, patchTarget.TargetType);
+        context.RegisterSyntaxNodeAction(collector.Collect, SyntaxKind.InvocationExpression);
+        context.RegisterSymbolEndAction(collector.Report);
+    }
+
+    private static InjectionDeclaration? TryGetInjectionDeclaration(IMethodSymbol method) {
+        AttributeData? attribute = method.GetAttributes().FirstOrDefault(IsInjectAttribute);
+        bool targetsNewObj = false;
+        if (attribute is null) {
+            attribute = method.GetAttributes().FirstOrDefault(IsInjectNewAttribute);
+            targetsNewObj = attribute is not null;
+        }
+
+        if (attribute is null) {
+            return null;
+        }
+
+        bool targetsInvoke = !targetsNewObj && ConstructorHasParameter(attribute, "invokeDeclaringType");
+        bool targetsCallSite = targetsInvoke || targetsNewObj;
+        string? positionName = AtMemberName(attribute, targetsCallSite ? "shift" : "at");
+        if (positionName is null) {
+            return null;
+        }
+
+        bool targetsConstructor = !ConstructorHasParameter(attribute, "method");
+        string targetMemberName = ConstructorName;
+        if (!targetsConstructor) {
+            if (!TryGetStringConstructorArgument(attribute, "method", out string? methodName) || string.IsNullOrWhiteSpace(methodName)) {
+                return null;
+            }
+
+            targetMemberName = methodName!;
+        }
+
+        ITypeSymbol? callSiteType = null;
+        string? callSiteMember = null;
+        ImmutableArray<ITypeSymbol>? callSiteParameterTypes = null;
+        if (targetsCallSite) {
+            if (TryGetConstructorArgument(attribute, targetsNewObj ? "constructedType" : "invokeDeclaringType", out TypedConstant callSiteTypeArgument) &&
+                callSiteTypeArgument.Value is ITypeSymbol resolvedCallSiteType) {
+                callSiteType = resolvedCallSiteType;
+            }
+
+            if (targetsInvoke) {
+                TryGetStringConstructorArgument(attribute, "invokeDeclaringMethod", out callSiteMember);
+            }
+
+            callSiteParameterTypes = TryGetTypeArrayConstructorArgument(attribute, "invokeParameterTypes");
+        }
+
+        return new InjectionDeclaration(
+            method,
+            targetsCallSite,
+            targetsNewObj,
+            positionName,
+            targetsConstructor,
+            targetMemberName,
+            TryGetTypeArrayConstructorArgument(attribute, targetsCallSite ? "targetParameterTypes" : "parameterTypes"),
+            callSiteType,
+            callSiteMember,
+            callSiteParameterTypes);
+    }
+
+    // Names the At value through the enum's own fields rather than its ordinal, so the new rules do
+    // not join AtValue in depending on the append-only ordering of Concord.At.
+    private static string? AtMemberName(AttributeData attribute, string parameterName) {
+        if (!TryGetConstructorArgument(attribute, parameterName, out TypedConstant argument) ||
+            argument.Kind != TypedConstantKind.Enum ||
+            argument.Type is not INamedTypeSymbol enumType) {
+            return null;
+        }
+
+        foreach (IFieldSymbol field in enumType.GetMembers().OfType<IFieldSymbol>()) {
+            if (field.HasConstantValue && Equals(field.ConstantValue, argument.Value)) {
+                return field.Name;
+            }
+        }
+
+        return null;
+    }
+
+    // A state slot is scoped per patch declaration per target method, matching how
+    // AllocateStateLocals keys its declared-type map inside a single target's injection list.
+    // The constructor branch matches parameter types the way ResolveInjectionTarget does, so an
+    // absent parameterTypes selects the parameterless constructor rather than every constructor;
+    // otherwise two injections that name the same constructor land in two slots.
+    private static InjectionTargetIdentity TargetIdentity(InjectionDeclaration declaration, INamedTypeSymbol targetType) {
+        ImmutableArray<IMethodSymbol> candidates = declaration.TargetsConstructor
+            ? targetType.InstanceConstructors
+                .Where(constructor => ConstructorParameterTypesMatch(declaration.ParameterTypes, constructor.Parameters))
+                .ToImmutableArray()
+            : FindMethodCandidates(targetType, declaration.TargetMemberName)
+                .Where(candidate => ParameterTypesMatch(declaration.ParameterTypes, candidate.Parameters))
+                .ToImmutableArray();
+
+        if (candidates.Length == 1) {
+            return new InjectionTargetIdentity(
+                candidates[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                candidates[0].ToDisplayString());
+        }
+
+        string parameters = declaration.ParameterTypes.HasValue
+            ? string.Join(",", declaration.ParameterTypes.Value.Select(type => type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)))
+            : "*";
+        return new InjectionTargetIdentity(
+            declaration.TargetMemberName + "|" + parameters,
+            targetType.ToDisplayString() + "." + declaration.TargetMemberName);
     }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Minor Code Smell", "S4158", Justification = "False positive: beforeOwners/afterOwners accumulate across loop iterations via owners.Add, so oppositeOwners is not empty on later iterations; the Contains check detects owners declared in both [PatchBefore] and [PatchAfter].")]
@@ -1300,6 +1612,12 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
 
         if (IsOperationType(parameter.Type)) {
             ValidateOperationParameter(context, injection, target, targetType, parameter, isWholeMethodAround, state);
+            return;
+        }
+
+        // A [Capture] parameter binds an argument of the matched call, not a target parameter, so
+        // the name and type checks below do not apply to it. CONCORD030 validates it instead.
+        if (parameter.GetAttributes().Any(IsCaptureAttribute)) {
             return;
         }
 
@@ -2727,6 +3045,22 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         return IsConcordAttribute(attribute, "InjectAttribute");
     }
 
+    private static bool IsInjectNewAttribute(AttributeData attribute) {
+        return IsConcordAttribute(attribute, "InjectNewAttribute");
+    }
+
+    private static bool IsInjectionAttribute(AttributeData attribute) {
+        return IsInjectAttribute(attribute) || IsInjectNewAttribute(attribute);
+    }
+
+    private static bool IsCaptureAttribute(AttributeData attribute) {
+        return IsConcordAttribute(attribute, "CaptureAttribute");
+    }
+
+    private static bool IsSliceAttribute(AttributeData attribute) {
+        return IsConcordAttribute(attribute, "SliceAttribute");
+    }
+
     private static bool IsInjectInstanceAttribute(AttributeData attribute) {
         return IsConcordAttribute(attribute, "InjectInstanceAttribute");
     }
@@ -2989,5 +3323,204 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         public int OperationCount { get; set; }
 
         public IParameterSymbol? OperationParameter { get; set; }
+    }
+
+    private sealed class InjectionDeclaration {
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S107", Justification = "Immutable data carrier for a resolved injection position; every parameter maps to a distinct read-only property, so bundling would only add indirection.")]
+        public InjectionDeclaration(
+            IMethodSymbol method,
+            bool targetsCallSite,
+            bool targetsNewObj,
+            string positionName,
+            bool targetsConstructor,
+            string targetMemberName,
+            ImmutableArray<ITypeSymbol>? parameterTypes,
+            ITypeSymbol? callSiteType,
+            string? callSiteMember,
+            ImmutableArray<ITypeSymbol>? callSiteParameterTypes) {
+            Method = method;
+            TargetsCallSite = targetsCallSite;
+            TargetsNewObj = targetsNewObj;
+            PositionName = positionName;
+            TargetsConstructor = targetsConstructor;
+            TargetMemberName = targetMemberName;
+            ParameterTypes = parameterTypes;
+            CallSiteType = callSiteType;
+            CallSiteMember = callSiteMember;
+            CallSiteParameterTypes = callSiteParameterTypes;
+        }
+
+        public IMethodSymbol Method { get; }
+
+        public bool TargetsCallSite { get; }
+
+        public bool TargetsNewObj { get; }
+
+        public string PositionName { get; }
+
+        public bool TargetsConstructor { get; }
+
+        public string TargetMemberName { get; }
+
+        public ImmutableArray<ITypeSymbol>? ParameterTypes { get; }
+
+        public ITypeSymbol? CallSiteType { get; }
+
+        public string? CallSiteMember { get; }
+
+        public ImmutableArray<ITypeSymbol>? CallSiteParameterTypes { get; }
+    }
+
+    private sealed class InjectionTargetIdentity {
+        public InjectionTargetIdentity(string key, string display) {
+            Key = key;
+            Display = display;
+        }
+
+        public string Key { get; }
+
+        public string Display { get; }
+    }
+
+    private sealed class StateCall {
+        public StateCall(IMethodSymbol method, bool isWrite, ITypeSymbol stateType, Location location) {
+            Method = method;
+            IsWrite = isWrite;
+            StateType = stateType;
+            Location = location;
+        }
+
+        public IMethodSymbol Method { get; }
+
+        public bool IsWrite { get; }
+
+        public ITypeSymbol StateType { get; }
+
+        public Location Location { get; }
+    }
+
+    private sealed class StateSlot {
+        private readonly string targetDisplay;
+        private ITypeSymbol? stateType;
+        private StateCall? firstRead;
+        private bool written;
+
+        public StateSlot(string targetDisplay) {
+            this.targetDisplay = targetDisplay;
+        }
+
+        public void Observe(SymbolAnalysisContext context, INamedTypeSymbol patchType, StateCall call) {
+            if (stateType is null) {
+                stateType = call.StateType;
+            } else if (!SymbolEqualityComparer.Default.Equals(stateType, call.StateType)) {
+                context.ReportDiagnostic(Diagnostic.Create(
+                    ConflictingStateTypeRule,
+                    call.Location,
+                    patchType.Name,
+                    stateType.ToDisplayString(),
+                    call.StateType.ToDisplayString(),
+                    targetDisplay));
+            }
+
+            if (call.IsWrite) {
+                written = true;
+            } else if (firstRead is null) {
+                firstRead = call;
+            }
+        }
+
+        public void ReportUnwritten(SymbolAnalysisContext context, INamedTypeSymbol patchType) {
+            if (written || firstRead is null) {
+                return;
+            }
+
+            context.ReportDiagnostic(Diagnostic.Create(
+                UnwrittenStateSlotRule,
+                firstRead.Location,
+                patchType.Name,
+                firstRead.StateType.ToDisplayString(),
+                targetDisplay));
+        }
+    }
+
+    // Gathers every ControlHandle state call across one patch declaration's injection methods, then
+    // reports once the whole type has been analyzed. Collection order follows Roslyn's scheduling,
+    // so the calls are sorted by source position before the slot rules run.
+    private sealed class StateSlotCollector {
+        private readonly INamedTypeSymbol patchType;
+        private readonly INamedTypeSymbol targetType;
+        private readonly List<StateCall> calls = new List<StateCall>();
+
+        public StateSlotCollector(INamedTypeSymbol patchType, INamedTypeSymbol targetType) {
+            this.patchType = patchType;
+            this.targetType = targetType;
+        }
+
+        public void Collect(SyntaxNodeAnalysisContext context) {
+            if (context.ContainingSymbol is not IMethodSymbol method ||
+                method.MethodKind != MethodKind.Ordinary ||
+                !SymbolEqualityComparer.Default.Equals(method.ContainingType, patchType) ||
+                !method.GetAttributes().Any(IsInjectionAttribute)) {
+                return;
+            }
+
+            if (context.SemanticModel.GetSymbolInfo(context.Node, context.CancellationToken).Symbol is not IMethodSymbol call ||
+                call.TypeArguments.Length != 1 ||
+                !IsControlHandleType(call.ContainingType, out _)) {
+                return;
+            }
+
+            bool isWrite = call.Name == "SetState";
+            if (!isWrite && call.Name != "GetState") {
+                return;
+            }
+
+            StateCall state = new StateCall(method, isWrite, call.TypeArguments[0], context.Node.GetLocation());
+            lock (calls) {
+                calls.Add(state);
+            }
+        }
+
+        public void Report(SymbolAnalysisContext context) {
+            List<StateCall> ordered;
+            lock (calls) {
+                if (calls.Count == 0) {
+                    return;
+                }
+
+                ordered = new List<StateCall>(calls);
+            }
+
+            ordered.Sort(CompareBySourcePosition);
+
+            Dictionary<string, StateSlot> slots = new Dictionary<string, StateSlot>(StringComparer.Ordinal);
+            List<StateSlot> order = new List<StateSlot>();
+            foreach (StateCall call in ordered) {
+                InjectionDeclaration? declaration = TryGetInjectionDeclaration(call.Method);
+                if (declaration is null) {
+                    continue;
+                }
+
+                InjectionTargetIdentity identity = TargetIdentity(declaration, targetType);
+                if (!slots.TryGetValue(identity.Key, out StateSlot? slot)) {
+                    slot = new StateSlot(identity.Display);
+                    slots[identity.Key] = slot;
+                    order.Add(slot);
+                }
+
+                slot.Observe(context, patchType, call);
+            }
+
+            foreach (StateSlot slot in order) {
+                slot.ReportUnwritten(context, patchType);
+            }
+        }
+
+        private static int CompareBySourcePosition(StateCall left, StateCall right) {
+            int byPath = string.CompareOrdinal(
+                left.Location.SourceTree?.FilePath ?? string.Empty,
+                right.Location.SourceTree?.FilePath ?? string.Empty);
+            return byPath != 0 ? byPath : left.Location.SourceSpan.Start.CompareTo(right.Location.SourceSpan.Start);
+        }
     }
 }

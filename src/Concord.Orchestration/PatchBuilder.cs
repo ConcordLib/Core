@@ -297,6 +297,88 @@ public sealed class PatchBuilder {
     }
 
     /// <summary>
+    ///     Records a construction-site injection on the supplied constructed type, using the supplied injection method.
+    /// </summary>
+    /// <param name="constructedType">The type whose construction to splice.</param>
+    /// <param name="injectionMethod">The method that supplies the injected body.</param>
+    /// <param name="shift">Where the injection method runs relative to the construction.</param>
+    /// <param name="by">The 1-based occurrence to target, or <c>0</c> for every matching construction.</param>
+    /// <returns>This builder, for chaining.</returns>
+    public PatchBuilder NewObj(Type constructedType, MethodInfo injectionMethod, At shift, uint by = 0) {
+        return Inject(new InjectAt.NewObj(constructedType, shift, by), injectionMethod);
+    }
+
+    /// <summary>
+    ///     Records a construction-site injection on the supplied constructed type, using the supplied injection method
+    ///     and disambiguating the constructor by parameter types.
+    /// </summary>
+    /// <param name="constructedType">The type whose construction to splice.</param>
+    /// <param name="constructorParameterTypes">The parameter types of the constructor overload to target.</param>
+    /// <param name="injectionMethod">The method that supplies the injected body.</param>
+    /// <param name="shift">Where the injection method runs relative to the construction.</param>
+    /// <param name="by">The 1-based occurrence to target, or <c>0</c> for every matching construction.</param>
+    /// <returns>This builder, for chaining.</returns>
+    public PatchBuilder NewObj(Type constructedType, Type[] constructorParameterTypes, MethodInfo injectionMethod, At shift, uint by = 0) {
+        return Inject(new InjectAt.NewObj(constructedType, shift, by, constructorParameterTypes), injectionMethod);
+    }
+
+    /// <summary>
+    ///     Records a construction-site injection on the supplied constructed type, resolving the injection method by
+    ///     name.
+    /// </summary>
+    /// <param name="constructedType">The type whose construction to splice.</param>
+    /// <param name="injectionMethodType">The type that declares the injection method.</param>
+    /// <param name="injectionMethodName">The name of the injection method.</param>
+    /// <param name="shift">Where the injection method runs relative to the construction.</param>
+    /// <param name="by">The 1-based occurrence to target, or <c>0</c> for every matching construction.</param>
+    /// <returns>This builder, for chaining.</returns>
+    public PatchBuilder NewObj(Type constructedType, Type injectionMethodType, string injectionMethodName, At shift, uint by = 0) {
+        return Inject(new InjectAt.NewObj(constructedType, shift, by), ResolveInjectionMethod(injectionMethodType, injectionMethodName));
+    }
+
+    /// <summary>
+    ///     Records a construction-site injection on the supplied constructed type, resolving the injection method by
+    ///     name and disambiguating the constructor by parameter types.
+    /// </summary>
+    /// <param name="constructedType">The type whose construction to splice.</param>
+    /// <param name="constructorParameterTypes">The parameter types of the constructor overload to target.</param>
+    /// <param name="injectionMethodType">The type that declares the injection method.</param>
+    /// <param name="injectionMethodName">The name of the injection method.</param>
+    /// <param name="shift">Where the injection method runs relative to the construction.</param>
+    /// <param name="by">The 1-based occurrence to target, or <c>0</c> for every matching construction.</param>
+    /// <returns>This builder, for chaining.</returns>
+    public PatchBuilder NewObj(Type constructedType, Type[] constructorParameterTypes, Type injectionMethodType, string injectionMethodName, At shift, uint by = 0) {
+        return Inject(
+            new InjectAt.NewObj(constructedType, shift, by, constructorParameterTypes),
+            ResolveInjectionMethod(injectionMethodType, injectionMethodName));
+    }
+
+    /// <summary>
+    ///     Bounds the most recently recorded invoke or construction injection to the supplied range.
+    /// </summary>
+    /// <param name="range">The range that limits call-site matching and occurrence counting.</param>
+    /// <returns>This builder, for chaining.</returns>
+    /// <exception cref="ConcordDeclarationException">
+    ///     Thrown when no injection has been recorded, or the most recently recorded injection is not an invoke or
+    ///     construction injection.
+    /// </exception>
+    public PatchBuilder Slice(SliceRange range) {
+        if (injections.Count == 0) {
+            throw new ConcordDeclarationException("Slice requires a preceding invoke or construction injection.");
+        }
+
+        int index = injections.Count - 1;
+        Injection latest = injections[index];
+        InjectAt sliced = latest.At switch {
+            InjectAt.Invoke invoke => invoke with { Slice = range },
+            InjectAt.NewObj newObj => newObj with { Slice = range },
+            _ => throw new ConcordDeclarationException("Slice requires the most recently recorded injection to target an invoke or construction site."),
+        };
+        injections[index] = latest with { At = sliced };
+        return this;
+    }
+
+    /// <summary>
     ///     Composes and applies all recorded injections onto the target method in a single operation,
     ///     returning a handle that reverts them all when disposed.
     /// </summary>

@@ -34,3 +34,18 @@ public sealed class ForeignTypeTarget {
         Constructed++;
     }
 }
+
+/// <summary>
+///     A constructible type in a separate assembly from the composed target, so newobj injection
+///     can be exercised across an assembly boundary.
+/// </summary>
+public class ForeignOrder {
+    /// <summary>Stores <paramref name="id" /> so a rewritten ctor argument is observable.</summary>
+    /// <param name="id">The order id.</param>
+    public ForeignOrder(int id) {
+        Id = id;
+    }
+
+    /// <summary>The constructed id.</summary>
+    public int Id { get; }
+}

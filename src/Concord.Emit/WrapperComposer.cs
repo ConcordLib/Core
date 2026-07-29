@@ -246,6 +246,9 @@ public static class WrapperComposer {
     }
 
     internal static void ValidateComposition(MethodBase target, IReadOnlyList<Injection> ordered) {
+        RejectMisplacedCaptures(ordered, target);
+        RejectMisplacedSlices(ordered, target);
+
         if (HasWholeMethodAround(ordered)) {
             ValidateWholeMethodAroundEligible(target);
             RejectCallSiteInjectionsWithWholeMethodAround(ordered, target);
@@ -383,20 +386,94 @@ public static class WrapperComposer {
     }
 
     /// <summary>
-    ///     Rejects call-site injection positions (<see cref="InjectAt.Invoke" /> in any shift, including its
-    ///     <c>At.Argument</c> variant, and <see cref="InjectAt.Constant" />) when combined with a whole-method
-    ///     <see cref="InjectAt.Around" /> on the same target.
+    ///     Rejects <see cref="CaptureAttribute" /> anywhere there is no matched call to capture an argument
+    ///     from: any position other than <see cref="InjectAt.Invoke" /> and <see cref="InjectAt.NewObj" />, and
+    ///     any shift of those other than <see cref="At.Head" /> and <see cref="At.Tail" />.
+    /// </summary>
+    /// <param name="ordered">The full injection list being composed for <paramref name="target" />.</param>
+    /// <param name="target">The original method being patched, used for the diagnostic message.</param>
+    private static void RejectMisplacedCaptures(IReadOnlyList<Injection> ordered, MethodBase target) {
+        for (int i = 0; i < ordered.Count; i++) {
+            Injection injection = ordered[i];
+            if (!DeclaresCapture(injection.InjectionMethod)) {
+                continue;
+            }
+
+            At? shift = injection.At switch {
+                InjectAt.Invoke invoke => invoke.Shift,
+                InjectAt.NewObj newObj => newObj.Shift,
+                _ => null,
+            };
+
+            if (shift is At.Head or At.Tail) {
+                continue;
+            }
+
+            string reason = shift is null
+                ? $"is a whole-method position ({PositionName(injection.At)}), which matches no call"
+                : $"uses the shift At.{shift}, which does not name a point where the call's arguments are still on the stack";
+
+            throw new ConcordEmitException(
+                "CONC128",
+                $"Injection '{injection.InjectionMethod.DeclaringType?.Name}.{injection.InjectionMethod.Name}' on " +
+                $"'{target.DeclaringType?.Name}.{target.Name}' declares a [Capture] parameter, but its position {reason}. " +
+                "[Capture] binds an argument of a call matched inside the target body, so it needs an Invoke or NewObj " +
+                "injection shifted to At.Head or At.Tail; At.Around and At.Argument already receive the call's arguments.");
+        }
+    }
+
+    /// <summary>
+    ///     Rejects <see cref="SliceAttribute" /> on any position that matches no call site, since a range
+    ///     only bounds the search that <see cref="InjectAt.Invoke" /> and <see cref="InjectAt.NewObj" /> perform.
+    /// </summary>
+    /// <param name="ordered">The full injection list being composed for <paramref name="target" />.</param>
+    /// <param name="target">The original method being patched, used for the diagnostic message.</param>
+    private static void RejectMisplacedSlices(IReadOnlyList<Injection> ordered, MethodBase target) {
+        for (int i = 0; i < ordered.Count; i++) {
+            Injection injection = ordered[i];
+            if (injection.At is InjectAt.Invoke or InjectAt.NewObj) {
+                continue;
+            }
+
+            if (injection.InjectionMethod.GetCustomAttribute<SliceAttribute>() is null) {
+                continue;
+            }
+
+            throw new ConcordEmitException(
+                "CONC134",
+                $"Injection '{injection.InjectionMethod.DeclaringType?.Name}.{injection.InjectionMethod.Name}' on " +
+                $"'{target.DeclaringType?.Name}.{target.Name}' carries [Slice] at position '{PositionName(injection.At)}'. " +
+                "[Slice] applies to invoke and construction positions only.");
+        }
+    }
+
+    private static bool DeclaresCapture(MethodBase injectionMethod) {
+        ParameterInfo[] parameters = injectionMethod.GetParameters();
+        for (int i = 0; i < parameters.Length; i++) {
+            if (parameters[i].GetCustomAttribute<CaptureAttribute>() is not null) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    ///     Rejects call-site injection positions (<see cref="InjectAt.Invoke" /> and
+    ///     <see cref="InjectAt.NewObj" /> in any shift, including their <c>At.Argument</c> variant, and
+    ///     <see cref="InjectAt.Constant" />) when combined with a whole-method <see cref="InjectAt.Around" />
+    ///     on the same target.
     /// </summary>
     /// <param name="ordered">The full injection list being composed for <paramref name="target" />.</param>
     /// <param name="target">The original method being patched, used for the diagnostic message.</param>
     private static void RejectCallSiteInjectionsWithWholeMethodAround(IReadOnlyList<Injection> ordered, MethodBase target) {
         for (int i = 0; i < ordered.Count; i++) {
             InjectAt at = ordered[i].At;
-            if (at is InjectAt.Invoke or InjectAt.Constant) {
+            if (at is InjectAt.Invoke or InjectAt.NewObj or InjectAt.Constant) {
                 throw new ConcordEmitException(
                     "CONC115",
                     $"Whole-method Around on '{target.DeclaringType?.Name}.{target.Name}' cannot be combined with call-site " +
-                    "(Invoke/Argument/Constant) injections on the same target. Call-site positions mutate the pre-Around spine, " +
+                    "(Invoke/NewObj/Argument/Constant) injections on the same target. Call-site positions mutate the pre-Around spine, " +
                     "which does not compose with the per-copy splicing a whole-method Around performs.");
             }
         }
@@ -421,9 +498,13 @@ public static class WrapperComposer {
 
     private static string PositionName(InjectAt at) {
         return at switch {
+            InjectAt.Head => "At.Head",
+            InjectAt.Return => "At.Return",
+            InjectAt.Tail => "At.Tail",
             InjectAt.Around => "At.Around",
             InjectAt.Constant => "At.Constant",
             InjectAt.Invoke invoke => $"At.{invoke.Shift}",
+            InjectAt.NewObj newObj => $"At.{newObj.Shift}",
             InjectAt.Transpiler { Final: true } => "At.TranspilerFinal",
             InjectAt.Transpiler => "At.Transpiler",
             _ => at.GetType().Name,
@@ -548,7 +629,8 @@ public static class WrapperComposer {
         bool hasAround = HasWholeMethodAround(ordered);
 
         bool needsCtorGuard = hasAround && target.IsConstructor;
-        ProtocolLocals locals = DeclareLocals(body, module, returnType, isVoid, hasAround && !isVoid, needsCtorGuard);
+        Dictionary<Type, VariableDefinition> stateLocals = AllocateStateLocals(ordered, wrapperDefinition, target);
+        ProtocolLocals locals = DeclareLocals(body, module, returnType, isVoid, hasAround && !isVoid, needsCtorGuard, stateLocals);
 
         List<Instruction> spine = new List<Instruction>(body.Instructions);
         Instruction afterSpine = Instruction.Create(OpCodes.Nop);
@@ -674,6 +756,11 @@ public static class WrapperComposer {
 
             if (injection.At is InjectAt.Invoke invoke) {
                 ProcessInvokeInjection(injection, invoke, context.WrapperDefinition, context.Target, context.Locals, anchors.Spine);
+                continue;
+            }
+
+            if (injection.At is InjectAt.NewObj newObj) {
+                ProcessNewObjInjection(injection, newObj, context.WrapperDefinition, context.Target, context.Locals, anchors.Spine);
                 continue;
             }
 
@@ -974,11 +1061,6 @@ public static class WrapperComposer {
         MethodBase target,
         ProtocolLocals locals,
         List<Instruction> spine) {
-        if (invoke.Shift is At.Argument) {
-            ProcessArgumentInjection(injection, invoke, wrapperDefinition, target, spine);
-            return;
-        }
-
         string effectiveName = AccessorNameResolver.ResolveAccessorName(
             invoke.DeclaringType,
             invoke.Method,
@@ -986,69 +1068,240 @@ public static class WrapperComposer {
             invoke.Shift is At.Around);
 
         bool includeFieldReads = invoke.Shift is At.Head or At.Tail;
+        IReadOnlyList<Instruction> searchable = CallSiteQuery.Narrow(spine, invoke.Slice, target);
         List<Instruction> allSites = ControlHandleLowering.FindInvokeCallSites(
-            spine,
+            searchable,
             invoke.DeclaringType,
             effectiveName,
             invoke.ParameterTypes,
             includeFieldReads);
-        if (allSites.Count == 0) {
-            throw new ConcordEmitException(
-                "CONC031",
-                $"Injection on '{target.DeclaringType?.Name}.{target.Name}' targets invoke site '{invoke.DeclaringType.Name}.{invoke.Method}' which does not occur in the method body.");
-        }
 
-        List<Instruction> sites = SelectInvokeSites(allSites, invoke.By, target, invoke);
+        List<Instruction> sites = SelectCallSites(allSites, invoke.By, target, $"{invoke.DeclaringType.Name}.{invoke.Method}", invoke.Slice is not null);
+        SpliceCallSiteInjection(
+            new InjectionSiteContext(injection, wrapperDefinition, target, locals),
+            invoke.Shift,
+            invoke.Arg,
+            newObj: false,
+            sites,
+            spine);
+    }
 
-        InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
+    private static void ProcessNewObjInjection(
+        Injection injection,
+        InjectAt.NewObj newObj,
+        MethodDefinition wrapperDefinition,
+        MethodBase target,
+        ProtocolLocals locals,
+        List<Instruction> spine) {
+        IReadOnlyList<Instruction> searchable = CallSiteQuery.Narrow(spine, newObj.Slice, target);
+        List<Instruction> allSites = CallSiteQuery.Match(
+            searchable,
+            newObj.ConstructedType,
+            ".ctor",
+            newObj.ParameterTypes,
+            includeFieldReads: false,
+            matchNewObj: true);
+        List<Instruction> sites = SelectCallSites(allSites, newObj.By, target, $"new {newObj.ConstructedType.Name}", newObj.Slice is not null);
+        SpliceCallSiteInjection(
+            new InjectionSiteContext(injection, wrapperDefinition, target, locals),
+            newObj.Shift,
+            newObj.Arg,
+            newObj: true,
+            sites,
+            spine);
+    }
+
+    /// <summary>
+    ///     Splices an injection onto an already-selected set of call sites. Shared by
+    ///     <see cref="InjectAt.Invoke" /> and <see cref="InjectAt.NewObj" />, which differ only in how their
+    ///     sites are matched and how the site's shape is resolved.
+    /// </summary>
+    /// <param name="site">The injection, wrapper, target, and protocol locals being composed.</param>
+    /// <param name="shift">Where the injection runs relative to the matched sites.</param>
+    /// <param name="arg">For <see cref="At.Argument" />, the 1-based argument to rewrite, or 0 to infer.</param>
+    /// <param name="newObj">Whether the matched sites are <c>newobj</c> instructions.</param>
+    /// <param name="sites">The matched sites, in body order.</param>
+    /// <param name="spine">
+    ///     The copied target body the sites live in. This must be the complete body, never a slice-narrowed
+    ///     view of it: argument capture reads branch targets and stack depth out of it, and a subset makes
+    ///     it report a plausible but wrong boundary.
+    /// </param>
+    private static void SpliceCallSiteInjection(
+        InjectionSiteContext site,
+        At shift,
+        uint arg,
+        bool newObj,
+        List<Instruction> sites,
+        List<Instruction> spine) {
+        Injection injection = site.Injection;
+        InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, site.Target);
         using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
 
-        if (invoke.Shift is At.Around) {
-            foreach (Instruction site in sites) {
-                WrapCallSite(spine, site, injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers);
+        if (shift is At.Argument) {
+            RewriteCallSiteArguments(site, arg, newObj, sites, injectionMethodDefinition.Definition, injectedMembers, spine);
+            return;
+        }
+
+        if (shift is At.Around) {
+            foreach (Instruction match in sites) {
+                WrapCallSite(spine, match, injectionMethodDefinition.Definition, site.WrapperDefinition, site.Target, injection.InjectionMethod, injectedMembers, newObj);
             }
 
             return;
         }
 
-        bool after = invoke.Shift is At.Tail;
-        foreach (Instruction site in sites) {
-            int siteIndex = spine.IndexOf(site);
-            Instruction continuation = after ? spine[siteIndex + 1] : site;
+        bool after = shift is At.Tail;
+        foreach (Instruction match in sites) {
+            Dictionary<int, VariableDefinition>? captureBinding = EmitCaptureSpills(site, match, newObj, spine);
+            int siteIndex = spine.IndexOf(match);
+            Instruction continuation = after ? spine[siteIndex + 1] : match;
             List<Instruction> invokeBody = BodyCopier.CopyInjection(
-                new InjectionCopyRequest(injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers),
-                locals,
-                continuation);
+                new InjectionCopyRequest(injectionMethodDefinition.Definition, site.WrapperDefinition, site.Target, injection.InjectionMethod, injectedMembers),
+                site.Locals,
+                continuation,
+                captureBinding: captureBinding);
             spine.InsertRange(after ? siteIndex + 1 : siteIndex, invokeBody);
         }
     }
 
-    private static void ProcessArgumentInjection(
-        Injection injection,
-        InjectAt.Invoke invoke,
-        MethodDefinition wrapperDefinition,
-        MethodBase target,
+    /// <summary>
+    ///     Spills each <see cref="CaptureAttribute" /> parameter's matched-call argument into a fresh wrapper
+    ///     local, by duplicating the value at the point the argument finished pushing.
+    /// </summary>
+    /// <param name="site">The injection, wrapper, target, and protocol locals being composed.</param>
+    /// <param name="match">The matched call or construction instruction.</param>
+    /// <param name="newObj">Whether <paramref name="match" /> is a <c>newobj</c> instruction.</param>
+    /// <param name="spine">The copied target body the match lives in; spills are inserted into it.</param>
+    /// <returns>Maps an injection argument index to the local holding its captured value, or null when nothing is captured.</returns>
+    private static Dictionary<int, VariableDefinition>? EmitCaptureSpills(
+        InjectionSiteContext site,
+        Instruction match,
+        bool newObj,
         List<Instruction> spine) {
-        string effectiveName = AccessorNameResolver.ResolveAccessorName(invoke.DeclaringType, invoke.Method, injection.InjectionMethod, false);
-        List<Instruction> allSites = ControlHandleLowering.FindInvokeCallSites(spine, invoke.DeclaringType, effectiveName, invoke.ParameterTypes);
-        if (allSites.Count == 0) {
-            throw new ConcordEmitException(
-                "CONC031",
-                $"Injection on '{target.DeclaringType?.Name}.{target.Name}' targets call site '{invoke.DeclaringType.Name}.{invoke.Method}' which does not occur in the method body.");
+        MethodBase injectionMethod = site.Injection.InjectionMethod;
+        if (!DeclaresCapture(injectionMethod)) {
+            return null;
         }
 
-        List<Instruction> sites = SelectInvokeSites(allSites, invoke.By, target, invoke);
-        InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
-        using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
+        if (match.Operand is not MethodReference reference) {
+            throw new ConcordEmitException(
+                "CONC130",
+                $"Injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' on '{site.Target.DeclaringType?.Name}.{site.Target.Name}' " +
+                "uses [Capture], but the matched site is a field read, which takes no arguments.");
+        }
 
+        CallSiteShape shape = ResolveSiteShape(reference.ResolveReflection(), newObj);
+        ParameterInfo[] parameters = injectionMethod.GetParameters();
+        int argOffset = injectionMethod.IsStatic ? 0 : 1;
+
+        Dictionary<int, VariableDefinition> binding = new Dictionary<int, VariableDefinition>();
+        Dictionary<(uint Arg, bool Dereference), VariableDefinition> spilled =
+            new Dictionary<(uint Arg, bool Dereference), VariableDefinition>();
+
+        for (int i = 0; i < parameters.Length; i++) {
+            CaptureAttribute? capture = parameters[i].GetCustomAttribute<CaptureAttribute>();
+            if (capture is null) {
+                continue;
+            }
+
+            if (capture.Arg == 0 || capture.Arg > shape.ParameterTypes.Length) {
+                throw new ConcordEmitException(
+                    "CONC130",
+                    $"Injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' on '{site.Target.DeclaringType?.Name}.{site.Target.Name}' " +
+                    $"captures argument {capture.Arg}, but the matched call takes {shape.ParameterTypes.Length} argument(s).");
+            }
+
+            Type slotType = shape.ParameterTypes[capture.Arg - 1];
+            bool dereference = slotType.IsByRef && !parameters[i].ParameterType.IsByRef;
+            Type storedType = dereference ? slotType.GetElementType()! : slotType;
+
+            if (storedType != parameters[i].ParameterType) {
+                throw new ConcordEmitException(
+                    "CONC130",
+                    $"Injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' on '{site.Target.DeclaringType?.Name}.{site.Target.Name}' " +
+                    $"declares captured parameter '{parameters[i].Name}' as '{parameters[i].ParameterType}', but argument {capture.Arg} of the " +
+                    $"matched call is '{slotType}'. A captured parameter must declare the argument's own type, or its element type to read a " +
+                    "by-ref argument by value.");
+            }
+
+            (uint Arg, bool Dereference) slot = (capture.Arg, dereference);
+            if (!spilled.TryGetValue(slot, out VariableDefinition? spill)) {
+                spill = SpillCaptureSlot(site, match, shape, capture.Arg, storedType, dereference, spine);
+                spilled[slot] = spill;
+            }
+
+            binding[i + argOffset] = spill;
+        }
+
+        return binding;
+    }
+
+    private static VariableDefinition SpillCaptureSlot(
+        InjectionSiteContext site,
+        Instruction match,
+        CallSiteShape shape,
+        uint arg,
+        Type storedType,
+        bool dereference,
+        List<Instruction> spine) {
+        MethodBase injectionMethod = site.Injection.InjectionMethod;
+        int boundary = CallSiteProvenance.FindArgumentPushEnd(
+            spine,
+            spine.IndexOf(match),
+            (int)(arg - 1),
+            shape.ParameterTypes.Length,
+            shape.HasThis,
+            site.WrapperDefinition);
+
+        // A prefix carries the stack depth of the instruction before it, so the backward walk can land on
+        // one. Inserting there would split it from the instruction it modifies; the value is already on
+        // top at the last non-prefix instruction, so step back to that.
+        while (boundary >= 0 && spine[boundary].OpCode.OpCodeType == OpCodeType.Prefix) {
+            boundary--;
+        }
+
+        if (boundary < 0) {
+            throw new ConcordEmitException(
+                "CONC129",
+                $"Injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' on '{site.Target.DeclaringType?.Name}.{site.Target.Name}' " +
+                $"cannot capture argument {arg}: its push boundary is not determinable at the matched call site. This happens when the " +
+                "compiler evaluates an argument across a branch, which a conditional expression (?:, ??, ?., && or ||) in any argument of " +
+                "that call produces. Rewrite the argument into a local before the call, or read the value the injection needs another way.");
+        }
+
+        ModuleDefinition module = site.WrapperDefinition.Module;
+        VariableDefinition spill = new VariableDefinition(module.ImportReference(storedType));
+        site.WrapperDefinition.Body.Variables.Add(spill);
+
+        List<Instruction> emitted = [Instruction.Create(OpCodes.Dup)];
+        if (dereference) {
+            emitted.Add(Instruction.Create(OpCodes.Ldobj, module.ImportReference(storedType)));
+        }
+
+        emitted.Add(Instruction.Create(OpCodes.Stloc, spill));
+        spine.InsertRange(boundary + 1, emitted);
+
+        return spill;
+    }
+
+    private static void RewriteCallSiteArguments(
+        InjectionSiteContext site,
+        uint arg,
+        bool newObj,
+        List<Instruction> sites,
+        MethodDefinition injectionMethodDefinition,
+        InjectedMemberMap injectedMembers,
+        List<Instruction> spine) {
+        MethodDefinition wrapperDefinition = site.WrapperDefinition;
+        MethodBase target = site.Target;
         ModuleDefinition module = wrapperDefinition.Module;
         MethodBody body = wrapperDefinition.Body;
 
-        foreach (Instruction site in sites) {
-            MethodBase resolvedOriginal = ((MethodReference)site.Operand).ResolveReflection();
-            CallSiteShape shape = CallSiteShape.Resolve(resolvedOriginal);
-            int argIndex = ResolveArgumentIndex(invoke, injection.InjectionMethod, shape, target);
-            ValidateValueInjectionShape(injection.InjectionMethod, shape.ParameterTypes[argIndex], target);
+        foreach (Instruction match in sites) {
+            MethodBase resolvedOriginal = ((MethodReference)match.Operand).ResolveReflection();
+            CallSiteShape shape = ResolveSiteShape(resolvedOriginal, newObj);
+            int argIndex = ResolveArgumentIndex(arg, site.Injection.InjectionMethod, shape, target);
+            ValidateValueInjectionShape(site.Injection.InjectionMethod, shape.ParameterTypes[argIndex], target);
 
             List<VariableDefinition> argLocals = new List<VariableDefinition>(shape.ParameterTypes.Length);
             for (int i = 0; i < shape.ParameterTypes.Length; i++) {
@@ -1073,10 +1326,10 @@ public static class WrapperComposer {
             }
 
             block.AddRange(BodyCopier.CopyValueInjection(
-                injectionMethodDefinition.Definition,
+                injectionMethodDefinition,
                 wrapperDefinition,
                 target,
-                injection.InjectionMethod,
+                site.Injection.InjectionMethod,
                 injectedMembers,
                 argLocals[argIndex]));
             block.Add(Instruction.Create(OpCodes.Stloc, argLocals[argIndex]));
@@ -1089,20 +1342,24 @@ public static class WrapperComposer {
                 block.Add(Instruction.Create(OpCodes.Ldloc, argLocals[i]));
             }
 
-            int siteIndex = spine.IndexOf(site);
+            int siteIndex = spine.IndexOf(match);
             spine.InsertRange(siteIndex, block);
         }
     }
 
-    private static int ResolveArgumentIndex(InjectAt.Invoke invoke, MethodBase injectionMethod, CallSiteShape shape, MethodBase target) {
-        if (invoke.Arg > 0) {
-            if (invoke.Arg > shape.ParameterTypes.Length) {
+    private static CallSiteShape ResolveSiteShape(MethodBase resolved, bool newObj) {
+        return newObj ? CallSiteShape.ResolveNewObj((ConstructorInfo)resolved) : CallSiteShape.Resolve(resolved);
+    }
+
+    private static int ResolveArgumentIndex(uint arg, MethodBase injectionMethod, CallSiteShape shape, MethodBase target) {
+        if (arg > 0) {
+            if (arg > shape.ParameterTypes.Length) {
                 throw new ConcordEmitException(
                     CodeCONC039,
-                    $"Argument injection on '{target.DeclaringType?.Name}.{target.Name}' selects arg {invoke.Arg}, but the call has {shape.ParameterTypes.Length} argument(s).");
+                    $"Argument injection on '{target.DeclaringType?.Name}.{target.Name}' selects arg {arg}, but the call has {shape.ParameterTypes.Length} argument(s).");
             }
 
-            return (int)(invoke.Arg - 1);
+            return (int)(arg - 1);
         }
 
         ParameterInfo[] parameters = injectionMethod.GetParameters();
@@ -1262,6 +1519,12 @@ public static class WrapperComposer {
 
         if (locals.SpliceValue is not null) {
             protocolLocals.Add(locals.SpliceValue);
+        }
+
+        if (locals.State is not null) {
+            foreach (KeyValuePair<Type, VariableDefinition> entry in locals.State) {
+                protocolLocals.Add(entry.Value);
+            }
         }
 
         return protocolLocals;
@@ -1478,10 +1741,11 @@ public static class WrapperComposer {
         MethodDefinition wrapperDefinition,
         MethodBase target,
         MethodBase injectionMethod,
-        InjectedMemberMap injectedMembers) {
+        InjectedMemberMap injectedMembers,
+        bool newObj) {
         MethodReference originalCall = (MethodReference)site.Operand;
         MethodBase resolvedOriginal = originalCall.ResolveReflection();
-        CallSiteShape shape = CallSiteShape.Resolve(resolvedOriginal);
+        CallSiteShape shape = ResolveSiteShape(resolvedOriginal, newObj);
         ValidateOperationShape(injectionMethod, shape, target);
 
         ModuleDefinition module = wrapperDefinition.Module;
@@ -1529,18 +1793,15 @@ public static class WrapperComposer {
         spine.InsertRange(siteIndex, replacement);
     }
 
-    private static List<Instruction> SelectInvokeSites(List<Instruction> allSites, uint by, MethodBase target, InjectAt.Invoke invoke) {
-        if (by == 0) {
-            return allSites;
-        }
-
-        if (by > allSites.Count) {
+    private static List<Instruction> SelectCallSites(List<Instruction> allSites, uint by, MethodBase target, string siteDescription, bool sliced) {
+        if (allSites.Count == 0) {
             throw new ConcordEmitException(
-                "CONC033",
-                $"Injection on '{target.DeclaringType?.Name}.{target.Name}' targets occurrence {by} of invoke site '{invoke.DeclaringType.Name}.{invoke.Method}', but only {allSites.Count} occurrence(s) exist in the method body.");
+                "CONC031",
+                $"Injection on '{target.DeclaringType?.Name}.{target.Name}' targets call site '{siteDescription}' " +
+                $"which does not occur {CallSiteQuery.ScopeName(sliced)}.");
         }
 
-        return [allSites[(int)(by - 1)]];
+        return CallSiteQuery.Select(allSites, by, target, siteDescription, sliced);
     }
 
     private static List<Instruction> FindReturnExits(List<Instruction> spine, Instruction afterSpine) {
@@ -1575,7 +1836,8 @@ public static class WrapperComposer {
         Type returnType,
         bool isVoid,
         bool needsSpliceValue,
-        bool needsCtorGuard) {
+        bool needsCtorGuard,
+        IReadOnlyDictionary<Type, VariableDefinition> stateLocals) {
         VariableDefinition cancel = new VariableDefinition(module.ImportReference(typeof(bool)));
         body.Variables.Add(cancel);
         body.InitLocals = true;
@@ -1590,7 +1852,7 @@ public static class WrapperComposer {
         }
 
         if (isVoid) {
-            return new ProtocolLocals(cancel, null, null, null, ctorBodyRan, ctorBodyRanTwice);
+            return new ProtocolLocals(cancel, null, null, null, ctorBodyRan, ctorBodyRanTwice, stateLocals);
         }
 
         VariableDefinition hasReturn = new VariableDefinition(module.ImportReference(typeof(bool)));
@@ -1604,7 +1866,57 @@ public static class WrapperComposer {
             body.Variables.Add(spliceValue);
         }
 
-        return new ProtocolLocals(cancel, hasReturn, returnValue, spliceValue, ctorBodyRan, ctorBodyRanTwice);
+        return new ProtocolLocals(cancel, hasReturn, returnValue, spliceValue, ctorBodyRan, ctorBodyRanTwice, stateLocals);
+    }
+
+    // One state local per patch declaration type, allocated up front so every injection body copied
+    // from that declaration - head, tail, or spliced into an Around - lowers to the same slot.
+    private static Dictionary<Type, VariableDefinition> AllocateStateLocals(
+        IReadOnlyList<Injection> ordered,
+        MethodDefinition wrapperDefinition,
+        MethodBase target) {
+        Dictionary<Type, Type> declared = new Dictionary<Type, Type>();
+        foreach (Injection injection in ordered) {
+            Type? owner = injection.InjectionMethod.DeclaringType;
+            if (owner is null) {
+                continue;
+            }
+
+            using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
+            CollectStateTypes(injectionMethodDefinition.Definition.Body, owner, target, declared);
+        }
+
+        Dictionary<Type, VariableDefinition> locals = new Dictionary<Type, VariableDefinition>(declared.Count);
+        foreach (KeyValuePair<Type, Type> entry in declared) {
+            VariableDefinition local = new VariableDefinition(wrapperDefinition.Module.ImportReference(entry.Value));
+            wrapperDefinition.Body.Variables.Add(local);
+            locals[entry.Key] = local;
+        }
+
+        return locals;
+    }
+
+    private static void CollectStateTypes(MethodBody injectionBody, Type owner, MethodBase target, Dictionary<Type, Type> declared) {
+        foreach (Instruction instruction in injectionBody.Instructions) {
+            ControlHandleLowering.ControlCallKind kind = ControlHandleLowering.ClassifyCall(instruction);
+            if (kind != ControlHandleLowering.ControlCallKind.SetState && kind != ControlHandleLowering.ControlCallKind.GetState) {
+                continue;
+            }
+
+            Type? stateType = ControlHandleLowering.ResolveStateType(instruction);
+            if (stateType is null) {
+                continue;
+            }
+
+            if (declared.TryGetValue(owner, out Type? existing) && existing != stateType) {
+                throw new ConcordEmitException(
+                    "CONC127",
+                    $"Patch declaration '{owner.Name}' uses state type '{existing.Name}' and '{stateType.Name}' " +
+                    $"for the same slot on '{target.DeclaringType?.Name}.{target.Name}'. One declaration must use one state type per target.");
+            }
+
+            declared[owner] = stateType;
+        }
     }
 
     private static List<Instruction> BuildEpilogue(ProtocolLocals locals, bool isVoid) {

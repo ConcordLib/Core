@@ -29,3 +29,8 @@ CONCORD022 | Concord.Patches | Error | At.Transpiler and At.TranspilerFinal inje
 CONCORD023 | Concord.Patches | Error | At.Transpiler and At.TranspilerFinal injection methods must be shaped IEnumerable<CodeInstruction> in and out, with an optional ITranspilerContext second parameter.
 CONCORD024 | Concord.Patches | Error | Transpiler injection methods must not reference [Shadow]/[InjectField]/[InjectProperty]/[InjectMethod] members of the declaring [Patch] type.
 CONCORD025 | Concord.Patches | Error | [Shadow]/[InjectField]/[InjectProperty]/[InjectMethod] members must only be referenced from [Inject] injection methods.
+CONCORD026 | Concord.Patches | Error | A patch declaration must use one control-handle state type per target method.
+CONCORD027 | Concord.Patches | Warning | A control-handle state slot a declaration reads should also be written by an injection in that declaration.
+CONCORD028 | Concord.Patches | Error | [Capture] parameters require an invoke or construction injection shifted to At.Head or At.Tail.
+CONCORD029 | Concord.Patches | Error | [Slice] requires an invoke or construction injection position.
+CONCORD030 | Concord.Patches | Error | [Capture] must name a 1-based argument the matched call supplies.

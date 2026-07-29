@@ -30,6 +30,22 @@ internal sealed record CallSiteShape(bool HasThis, Type? ReceiverType, Type[] Pa
     }
 
     /// <summary>
+    ///     Resolves the shape of a <c>newobj</c> site. A construction consumes no receiver and yields
+    ///     the constructed type.
+    /// </summary>
+    /// <param name="ctor">The constructor the <c>newobj</c> instruction names.</param>
+    /// <returns>The construction's shape.</returns>
+    internal static CallSiteShape ResolveNewObj(ConstructorInfo ctor) {
+        ParameterInfo[] parameters = ctor.GetParameters();
+        Type[] parameterTypes = new Type[parameters.Length];
+        for (int i = 0; i < parameters.Length; i++) {
+            parameterTypes[i] = parameters[i].ParameterType;
+        }
+
+        return new CallSiteShape(false, null, parameterTypes, ctor.DeclaringType!);
+    }
+
+    /// <summary>
     ///     Computes the Operation family type an around-invoke injection must declare for this shape.
     /// </summary>
     /// <returns>The expected Operation or VoidOperation type.</returns>
