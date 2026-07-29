@@ -18,6 +18,8 @@ internal static class ControlHandleLowering {
         Cancel,
         GetReturnValue,
         SetReturnValue,
+        SetState,
+        GetState,
     }
 
     internal static int FindControlHandleArgIndex(MethodBase injectionMethod) {
@@ -138,8 +140,22 @@ internal static class ControlHandleLowering {
             "Cancel" => ControlCallKind.Cancel,
             "get_ReturnValue" => ControlCallKind.GetReturnValue,
             "set_ReturnValue" => ControlCallKind.SetReturnValue,
+            "SetState" => ControlCallKind.SetState,
+            "GetState" => ControlCallKind.GetState,
             _ => ControlCallKind.None,
         };
+    }
+
+    internal static Type? ResolveStateType(Instruction instruction) {
+        if (instruction.Operand is not GenericInstanceMethod generic) {
+            return null;
+        }
+
+        if (generic.GenericArguments.Count != 1) {
+            return null;
+        }
+
+        return generic.GenericArguments[0].ResolveReflection();
     }
 
     internal static bool IsOriginalBodySpliceCall(Instruction instruction, MethodBase target) {
