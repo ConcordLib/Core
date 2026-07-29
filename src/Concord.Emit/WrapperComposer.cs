@@ -408,12 +408,16 @@ public static class WrapperComposer {
                 continue;
             }
 
+            string reason = shift is null
+                ? $"is a whole-method position ({PositionName(injection.At)}), which matches no call"
+                : $"uses the shift At.{shift}, which does not name a point where the call's arguments are still on the stack";
+
             throw new ConcordEmitException(
                 "CONC128",
                 $"Injection '{injection.InjectionMethod.DeclaringType?.Name}.{injection.InjectionMethod.Name}' on " +
-                $"'{target.DeclaringType?.Name}.{target.Name}' uses [Capture] at {PositionName(injection.At)}. " +
-                "[Capture] binds an argument of a matched call, so it is valid only on the At.Head and At.Tail shifts of " +
-                "an Invoke or NewObj injection; At.Around and At.Argument already receive the call's arguments.");
+                $"'{target.DeclaringType?.Name}.{target.Name}' declares a [Capture] parameter, but its position {reason}. " +
+                "[Capture] binds an argument of a call matched inside the target body, so it needs an Invoke or NewObj " +
+                "injection shifted to At.Head or At.Tail; At.Around and At.Argument already receive the call's arguments.");
         }
     }
 
@@ -468,6 +472,9 @@ public static class WrapperComposer {
 
     private static string PositionName(InjectAt at) {
         return at switch {
+            InjectAt.Head => "At.Head",
+            InjectAt.Return => "At.Return",
+            InjectAt.Tail => "At.Tail",
             InjectAt.Around => "At.Around",
             InjectAt.Constant => "At.Constant",
             InjectAt.Invoke invoke => $"At.{invoke.Shift}",
@@ -1156,7 +1163,8 @@ public static class WrapperComposer {
         int argOffset = injectionMethod.IsStatic ? 0 : 1;
 
         Dictionary<int, VariableDefinition> binding = new Dictionary<int, VariableDefinition>();
-        Dictionary<uint, VariableDefinition> spilled = new Dictionary<uint, VariableDefinition>();
+        Dictionary<(uint Arg, bool Dereference), VariableDefinition> spilled =
+            new Dictionary<(uint Arg, bool Dereference), VariableDefinition>();
 
         for (int i = 0; i < parameters.Length; i++) {
             CaptureAttribute? capture = parameters[i].GetCustomAttribute<CaptureAttribute>();
@@ -1171,9 +1179,23 @@ public static class WrapperComposer {
                     $"captures argument {capture.Arg}, but the matched call takes {shape.ParameterTypes.Length} argument(s).");
             }
 
-            if (!spilled.TryGetValue(capture.Arg, out VariableDefinition? spill)) {
-                spill = SpillCaptureSlot(site, match, shape, capture.Arg, parameters[i], spine);
-                spilled[capture.Arg] = spill;
+            Type slotType = shape.ParameterTypes[capture.Arg - 1];
+            bool dereference = slotType.IsByRef && !parameters[i].ParameterType.IsByRef;
+            Type storedType = dereference ? slotType.GetElementType()! : slotType;
+
+            if (storedType != parameters[i].ParameterType) {
+                throw new ConcordEmitException(
+                    "CONC130",
+                    $"Injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' on '{site.Target.DeclaringType?.Name}.{site.Target.Name}' " +
+                    $"declares captured parameter '{parameters[i].Name}' as '{parameters[i].ParameterType}', but argument {capture.Arg} of the " +
+                    $"matched call is '{slotType}'. A captured parameter must declare the argument's own type, or its element type to read a " +
+                    "by-ref argument by value.");
+            }
+
+            (uint Arg, bool Dereference) slot = (capture.Arg, dereference);
+            if (!spilled.TryGetValue(slot, out VariableDefinition? spill)) {
+                spill = SpillCaptureSlot(site, match, shape, capture.Arg, storedType, dereference, spine);
+                spilled[slot] = spill;
             }
 
             binding[i + argOffset] = spill;
@@ -1187,7 +1209,8 @@ public static class WrapperComposer {
         Instruction match,
         CallSiteShape shape,
         uint arg,
-        ParameterInfo parameter,
+        Type storedType,
+        bool dereference,
         List<Instruction> spine) {
         MethodBase injectionMethod = site.Injection.InjectionMethod;
         int boundary = CallSiteProvenance.FindArgumentPushEnd(
@@ -1213,10 +1236,6 @@ public static class WrapperComposer {
                 "compiler evaluates an argument across a branch, which a conditional expression (?:, ??, ?., && or ||) in any argument of " +
                 "that call produces. Rewrite the argument into a local before the call, or read the value the injection needs another way.");
         }
-
-        Type slotType = shape.ParameterTypes[arg - 1];
-        bool dereference = slotType.IsByRef && !parameter.ParameterType.IsByRef;
-        Type storedType = dereference ? slotType.GetElementType()! : slotType;
 
         ModuleDefinition module = site.WrapperDefinition.Module;
         VariableDefinition spill = new VariableDefinition(module.ImportReference(storedType));

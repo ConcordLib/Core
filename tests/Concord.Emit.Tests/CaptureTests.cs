@@ -62,6 +62,7 @@ public static class CaptureRecorder {
     public static int SeenBase;
     public static float SeenRate;
     public static int SeenAmount;
+    public static int SeenSlot;
 }
 
 public class CaptureMethods {
@@ -72,6 +73,11 @@ public class CaptureMethods {
 
     public void AfterMutate([Capture(1)] int amount) {
         CaptureRecorder.SeenAmount = amount;
+    }
+
+    public void AfterMutateBothShapes([Capture(1)] int amount, [Capture(1)] ref int slot) {
+        CaptureRecorder.SeenAmount = amount;
+        CaptureRecorder.SeenSlot = slot;
     }
 }
 
@@ -85,6 +91,14 @@ public class BadCaptureMethods {
     }
 
     public void WrongPosition([Capture(1)] int value) {
+        CaptureRecorder.SeenBase = value;
+    }
+
+    public void WrongType([Capture(1)] string value) {
+        CaptureRecorder.SeenBase = value.Length;
+    }
+
+    public void WrongByRef([Capture(1)] ref int value) {
         CaptureRecorder.SeenBase = value;
     }
 }
@@ -178,6 +192,46 @@ public sealed class CaptureTests {
 
         ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() => WrapperComposer.Compose(target, [capture]));
         Assert.Contains("CONC130", ex.ToString());
+        Assert.Contains("but the matched call takes 2 argument(s)", ex.ToString());
+    }
+
+    [Fact]
+    public void CaptureWithMismatchedType_ThrowsConc130() {
+        MethodBase target = typeof(CaptureHost).GetMethod(nameof(CaptureHost.Priced))!;
+        MethodBase injection = typeof(BadCaptureMethods).GetMethod(nameof(BadCaptureMethods.WrongType))!;
+        Injection capture = new Injection(injection, new InjectAt.Invoke(typeof(CaptureRules), nameof(CaptureRules.Apply), At.Tail), "test", 0);
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() => WrapperComposer.Compose(target, [capture]));
+        Assert.Contains("CONC130", ex.ToString());
+        Assert.Contains("declares captured parameter 'value' as 'System.String'", ex.ToString());
+    }
+
+    [Fact]
+    public void CaptureOfAByValueArgumentByRef_ThrowsConc130() {
+        MethodBase target = typeof(CaptureHost).GetMethod(nameof(CaptureHost.Priced))!;
+        MethodBase injection = typeof(BadCaptureMethods).GetMethod(nameof(BadCaptureMethods.WrongByRef))!;
+        Injection capture = new Injection(injection, new InjectAt.Invoke(typeof(CaptureRules), nameof(CaptureRules.Apply), At.Tail), "test", 0);
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() => WrapperComposer.Compose(target, [capture]));
+        Assert.Contains("CONC130", ex.ToString());
+        Assert.Contains("declares captured parameter 'value' as 'System.Int32&'", ex.ToString());
+    }
+
+    [Fact]
+    public void OneArgumentCapturedByRefAndByValue_SpillsBothShapes() {
+        MethodBase target = typeof(CaptureHost).GetMethod(nameof(CaptureHost.Mutated))!;
+        MethodBase injection = typeof(CaptureMethods).GetMethod(nameof(CaptureMethods.AfterMutateBothShapes))!;
+        Injection capture = new Injection(injection, new InjectAt.Invoke(typeof(CaptureRules), nameof(CaptureRules.Mutate), At.Tail), "test", 0);
+
+        ComposeResult result = WrapperComposer.Compose(target, [capture]);
+        Func<CaptureHost, int, int> run = result.Wrapper.CreateDelegate<Func<CaptureHost, int, int>>();
+
+        CaptureRecorder.SeenAmount = 0;
+        CaptureRecorder.SeenSlot = 0;
+        run(new CaptureHost(), 5);
+
+        Assert.Equal(5, CaptureRecorder.SeenAmount);
+        Assert.Equal(99, CaptureRecorder.SeenSlot);
     }
 
     [Fact]
@@ -188,6 +242,7 @@ public sealed class CaptureTests {
 
         ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() => WrapperComposer.Compose(target, [capture]));
         Assert.Contains("CONC128", ex.ToString());
+        Assert.Contains("uses the shift At.Around", ex.ToString());
     }
 
     [Fact]
@@ -198,6 +253,7 @@ public sealed class CaptureTests {
 
         ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() => WrapperComposer.Compose(target, [capture]));
         Assert.Contains("CONC128", ex.ToString());
+        Assert.Contains("is a whole-method position (At.Head), which matches no call", ex.ToString());
     }
 
     [Fact]
@@ -236,5 +292,6 @@ public sealed class CaptureTests {
 
         ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() => WrapperComposer.Compose(target, [capture]));
         Assert.Contains("CONC130", ex.ToString());
+        Assert.Contains("the matched site is a field read, which takes no arguments", ex.ToString());
     }
 }
