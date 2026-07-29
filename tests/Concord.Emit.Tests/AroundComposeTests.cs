@@ -146,6 +146,14 @@ public static class AroundComposeMultiInvokeTailInjectionMethods {
     }
 }
 
+public sealed class AroundComposeRejectBox {
+    public AroundComposeRejectBox(int value) {
+        Value = value;
+    }
+
+    public int Value { get; }
+}
+
 public static class AroundComposeRejectTarget {
     public static int Helper(int x) {
         return x + 1;
@@ -154,6 +162,11 @@ public static class AroundComposeRejectTarget {
     public static int Step() {
         AroundComposeLog.Entries.Add("body");
         return Helper(6) + 5;
+    }
+
+    public static int StepNew() {
+        AroundComposeLog.Entries.Add("body");
+        return new AroundComposeRejectBox(6).Value + 5;
     }
 }
 
@@ -505,6 +518,25 @@ public sealed class AroundComposeTests {
 
         ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() =>
             WrapperComposer.Compose(target, [around, constant]));
+
+        Assert.Equal("CONC115", ex.Code);
+    }
+
+    [Fact]
+    public void Compose_AroundWithNewObj_ThrowsCONC115() {
+        MethodBase target = typeof(AroundComposeRejectTarget).GetMethod(nameof(AroundComposeRejectTarget.StepNew))!;
+        MethodBase aroundInjectionMethod = typeof(AroundComposeRejectInjectionMethods).GetMethod(nameof(AroundComposeRejectInjectionMethods.WrapWhole))!;
+        MethodBase headInjectionMethod = typeof(AroundComposeRejectInjectionMethods).GetMethod(nameof(AroundComposeRejectInjectionMethods.Head))!;
+
+        Injection around = new Injection(aroundInjectionMethod, new InjectAt.Around(), "test", 0);
+        Injection newObjHead = new Injection(
+            headInjectionMethod,
+            new InjectAt.NewObj(typeof(AroundComposeRejectBox), At.Head, 0, [typeof(int)]),
+            "test",
+            1);
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() =>
+            WrapperComposer.Compose(target, [around, newObjHead]));
 
         Assert.Equal("CONC115", ex.Code);
     }

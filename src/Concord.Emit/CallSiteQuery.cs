@@ -51,7 +51,7 @@ internal static class CallSiteQuery {
         if (by > matches.Count) {
             throw new ConcordEmitException(
                 "CONC033",
-                $"Injection on '{target.DeclaringType?.Name}.{target.Name}' targets occurrence {by} of invoke site '{siteDescription}', but only {matches.Count} occurrence(s) exist in the method body.");
+                $"Injection on '{target.DeclaringType?.Name}.{target.Name}' targets occurrence {by} of call site '{siteDescription}', but only {matches.Count} occurrence(s) exist in the method body.");
         }
 
         return [matches[(int)(by - 1)]];

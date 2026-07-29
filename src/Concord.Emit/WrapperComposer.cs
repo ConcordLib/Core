@@ -383,9 +383,10 @@ public static class WrapperComposer {
     }
 
     /// <summary>
-    ///     Rejects call-site injection positions (<see cref="InjectAt.Invoke" /> in any shift, including its
-    ///     <c>At.Argument</c> variant, and <see cref="InjectAt.Constant" />) when combined with a whole-method
-    ///     <see cref="InjectAt.Around" /> on the same target.
+    ///     Rejects call-site injection positions (<see cref="InjectAt.Invoke" /> and
+    ///     <see cref="InjectAt.NewObj" /> in any shift, including their <c>At.Argument</c> variant, and
+    ///     <see cref="InjectAt.Constant" />) when combined with a whole-method <see cref="InjectAt.Around" />
+    ///     on the same target.
     /// </summary>
     /// <param name="ordered">The full injection list being composed for <paramref name="target" />.</param>
     /// <param name="target">The original method being patched, used for the diagnostic message.</param>
@@ -396,7 +397,7 @@ public static class WrapperComposer {
                 throw new ConcordEmitException(
                     "CONC115",
                     $"Whole-method Around on '{target.DeclaringType?.Name}.{target.Name}' cannot be combined with call-site " +
-                    "(Invoke/Argument/Constant) injections on the same target. Call-site positions mutate the pre-Around spine, " +
+                    "(Invoke/NewObj/Argument/Constant) injections on the same target. Call-site positions mutate the pre-Around spine, " +
                     "which does not compose with the per-copy splicing a whole-method Around performs.");
             }
         }
@@ -1000,7 +1001,7 @@ public static class WrapperComposer {
             new InjectionSiteContext(injection, wrapperDefinition, target, locals),
             invoke.Shift,
             invoke.Arg,
-            false,
+            newObj: false,
             sites,
             spine);
     }
@@ -1012,13 +1013,19 @@ public static class WrapperComposer {
         MethodBase target,
         ProtocolLocals locals,
         List<Instruction> spine) {
-        List<Instruction> allSites = CallSiteQuery.Match(spine, newObj.ConstructedType, ".ctor", newObj.ParameterTypes, false, true);
+        List<Instruction> allSites = CallSiteQuery.Match(
+            spine,
+            newObj.ConstructedType,
+            ".ctor",
+            newObj.ParameterTypes,
+            includeFieldReads: false,
+            matchNewObj: true);
         List<Instruction> sites = SelectCallSites(allSites, newObj.By, target, $"new {newObj.ConstructedType.Name}");
         SpliceCallSiteInjection(
             new InjectionSiteContext(injection, wrapperDefinition, target, locals),
             newObj.Shift,
             newObj.Arg,
-            true,
+            newObj: true,
             sites,
             spine);
     }
@@ -1583,7 +1590,7 @@ public static class WrapperComposer {
         if (allSites.Count == 0) {
             throw new ConcordEmitException(
                 "CONC031",
-                $"Injection on '{target.DeclaringType?.Name}.{target.Name}' targets invoke site '{siteDescription}' which does not occur in the method body.");
+                $"Injection on '{target.DeclaringType?.Name}.{target.Name}' targets call site '{siteDescription}' which does not occur in the method body.");
         }
 
         return CallSiteQuery.Select(allSites, by, target, siteDescription);
