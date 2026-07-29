@@ -169,8 +169,10 @@ public sealed class StateSlotTests {
         Assert.Equal(0L, SlotRecorder.SeenA);
     }
 
-    // Guards the state-local entry in CollectProtocolLocals: without it SpineTemplate.Capture clones
-    // the slot per Around spine copy and the spliced Tail silently reads a fresh zero instead.
+    // Locks the observable behaviour: a Head write is still readable from a Tail spliced into an
+    // Around spine copy. Note this does NOT guard the state entry in CollectProtocolLocals —
+    // deleting that block leaves this green, because SpineTemplate.Capture only clones locals the
+    // SPINE references and the spine is the original target body, which has no state calls.
     [Fact]
     public void Compose_HeadWrite_ReachesTailSplicedIntoAnAroundSpineCopy() {
         MethodBase target = typeof(SlotAroundHost).GetMethod(nameof(SlotAroundHost.Compute))!;
