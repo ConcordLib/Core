@@ -34,3 +34,17 @@ public sealed class ForeignTypeTarget {
         Constructed++;
     }
 }
+
+/// <summary>
+///     A constructible type in a separate assembly from the composed target, for Task 6's
+///     newobj-on-a-foreign-type coverage.
+/// </summary>
+public class ForeignOrder {
+    /// <summary>Initializes a new instance of the <see cref="ForeignOrder" /> class.</summary>
+    public ForeignOrder(int id) {
+        Id = id;
+    }
+
+    /// <summary>Gets the constructed id.</summary>
+    public int Id { get; }
+}
