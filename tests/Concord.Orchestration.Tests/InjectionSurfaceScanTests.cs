@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Runtime.CompilerServices;
 using Concord.Emit;
 using Xunit;
 
@@ -71,6 +72,31 @@ public sealed class InjectionSurfaceScanTests {
         Assert.Equal(3u, range.ToBy);
     }
 
+    // The other tests here stop at the scanner and assert on a FakePatchApplier, and the emit-side
+    // suites build their Injections by hand. This is the only case that carries an [InjectNew] +
+    // [Slice] + [Capture] declaration the whole way a mod author does: attributes, scan, compose,
+    // live detour, call, revert.
+    [Fact]
+    public void ApplyAssembly_InjectNewWithSliceAndCapture_RunsAgainstTheLiveTarget() {
+        SurfaceRunRecorder.Reset();
+        Assert.Equal(11, SurfaceRunTarget.Run(5));
+        Assert.Equal(0, SurfaceRunRecorder.Hits);
+
+        IPatchHandle handle = Patcher.Apply(typeof(SurfaceRunDeclaration).Assembly);
+        try {
+            SurfaceRunRecorder.Reset();
+            Assert.Equal(11, SurfaceRunTarget.Run(5));
+            Assert.Equal(1, SurfaceRunRecorder.Hits);
+            Assert.Equal("inside", SurfaceRunRecorder.SeenTag);
+        } finally {
+            handle.Dispose();
+        }
+
+        SurfaceRunRecorder.Reset();
+        Assert.Equal(11, SurfaceRunTarget.Run(5));
+        Assert.Equal(0, SurfaceRunRecorder.Hits);
+    }
+
     [Fact]
     public void ScanType_InjectAndInjectNewOnSameMethod_Throws() {
         FakePatchApplier patches = new FakePatchApplier();
@@ -105,6 +131,49 @@ public sealed class InjectionSurfaceScanTests {
             InjectionSurfaceTo.End();
             InjectionSurfaceTo.End();
             GC.KeepAlive(constructed);
+        }
+    }
+
+    public sealed class SurfaceOrder {
+        public SurfaceOrder(int id, string tag) {
+            Id = id;
+            Tag = tag;
+        }
+
+        public int Id { get; }
+
+        public string Tag { get; }
+    }
+
+    public static class SurfaceRunTarget {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static int Run(int seed) {
+            SurfaceOrder outside = new SurfaceOrder(seed, "outside");
+            InjectionSurfaceFrom.Start();
+            SurfaceOrder inside = new SurfaceOrder(seed + 1, "inside");
+            InjectionSurfaceTo.End();
+            return outside.Id + inside.Id;
+        }
+    }
+
+    public static class SurfaceRunRecorder {
+        public static int Hits;
+
+        public static string SeenTag = string.Empty;
+
+        public static void Reset() {
+            Hits = 0;
+            SeenTag = string.Empty;
+        }
+    }
+
+    [Patch(typeof(SurfaceRunTarget))]
+    private static class SurfaceRunDeclaration {
+        [InjectNew(nameof(SurfaceRunTarget.Run), typeof(SurfaceOrder), At.Tail, 1)]
+        [Slice(typeof(InjectionSurfaceFrom), nameof(InjectionSurfaceFrom.Start), 1, typeof(InjectionSurfaceTo), nameof(InjectionSurfaceTo.End), 1)]
+        public static void OnConstruct([Capture(2)] string tag) {
+            SurfaceRunRecorder.Hits++;
+            SurfaceRunRecorder.SeenTag = tag;
         }
     }
 
