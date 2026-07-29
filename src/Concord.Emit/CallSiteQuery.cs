@@ -67,6 +67,22 @@ internal static class CallSiteQuery {
         int start = 0;
         int end = spine.Count;
 
+        if (range.FromType is null != range.FromMember is null) {
+            throw new ConcordEmitException(
+                "CONC131",
+                $"Slice on '{target.DeclaringType?.Name}.{target.Name}' opens at a half-specified anchor: " +
+                $"{HalfAnchor(range.FromType, range.FromMember, "fromType", "fromMember")} " +
+                "Supply both to open at that member, or neither to open at the body head.");
+        }
+
+        if (range.ToType is null != range.ToMember is null) {
+            throw new ConcordEmitException(
+                "CONC132",
+                $"Slice on '{target.DeclaringType?.Name}.{target.Name}' closes at a half-specified anchor: " +
+                $"{HalfAnchor(range.ToType, range.ToMember, "toType", "toMember")} " +
+                "Supply both to close at that member, or neither to close at the body tail.");
+        }
+
         if (range.FromType is not null) {
             int anchor = AnchorIndex(spine, range.FromType, range.FromMember, range.FromBy);
             if (anchor < 0) {
@@ -146,6 +162,12 @@ internal static class CallSiteQuery {
     /// <param name="sliced">Whether the search was bounded by a <see cref="SliceRange" />.</param>
     internal static string ScopeName(bool sliced) {
         return sliced ? "inside the declared range" : "in the method body";
+    }
+
+    private static string HalfAnchor(Type? anchorType, string? anchorMember, string typeParameter, string memberParameter) {
+        return anchorType is null
+            ? $"'{anchorMember}' was named without a declaring type, so {typeParameter} is missing."
+            : $"'{anchorType.Name}' was named without a member, so {memberParameter} is missing.";
     }
 
     private static int AnchorIndex(IReadOnlyList<Instruction> spine, Type declaringType, string? memberName, uint by) {

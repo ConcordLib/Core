@@ -143,6 +143,56 @@ public sealed class SliceTests {
     }
 
     [Fact]
+    public void FromMemberWithoutItsType_ThrowsConc131() {
+        MethodBase target = typeof(SliceHost).GetMethod(nameof(SliceHost.Checkout))!;
+        SliceRange range = new SliceRange(null, nameof(SliceLog.Begin), 1, null, null, 1);
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() => WrapperComposer.Compose(target, [Sliced(range, 1)]));
+
+        Assert.Contains("CONC131", ex.ToString());
+        Assert.Contains("opens at a half-specified anchor", ex.ToString());
+        Assert.Contains("'Begin' was named without a declaring type, so fromType is missing.", ex.ToString());
+        Assert.Contains("neither to open at the body head", ex.ToString());
+    }
+
+    [Fact]
+    public void FromTypeWithoutItsMember_ThrowsConc131() {
+        MethodBase target = typeof(SliceHost).GetMethod(nameof(SliceHost.Checkout))!;
+        SliceRange range = new SliceRange(typeof(SliceLog), null, 1, null, null, 1);
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() => WrapperComposer.Compose(target, [Sliced(range, 1)]));
+
+        Assert.Contains("CONC131", ex.ToString());
+        Assert.Contains("opens at a half-specified anchor", ex.ToString());
+        Assert.Contains("'SliceLog' was named without a member, so fromMember is missing.", ex.ToString());
+    }
+
+    [Fact]
+    public void ToMemberWithoutItsType_ThrowsConc132() {
+        MethodBase target = typeof(SliceHost).GetMethod(nameof(SliceHost.Checkout))!;
+        SliceRange range = new SliceRange(null, null, 1, null, nameof(SliceLog.End), 1);
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() => WrapperComposer.Compose(target, [Sliced(range, 1)]));
+
+        Assert.Contains("CONC132", ex.ToString());
+        Assert.Contains("closes at a half-specified anchor", ex.ToString());
+        Assert.Contains("'End' was named without a declaring type, so toType is missing.", ex.ToString());
+        Assert.Contains("neither to close at the body tail", ex.ToString());
+    }
+
+    [Fact]
+    public void ToTypeWithoutItsMember_ThrowsConc132() {
+        MethodBase target = typeof(SliceHost).GetMethod(nameof(SliceHost.Checkout))!;
+        SliceRange range = new SliceRange(null, null, 1, typeof(SliceLog), null, 1);
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() => WrapperComposer.Compose(target, [Sliced(range, 1)]));
+
+        Assert.Contains("CONC132", ex.ToString());
+        Assert.Contains("closes at a half-specified anchor", ex.ToString());
+        Assert.Contains("'SliceLog' was named without a member, so toMember is missing.", ex.ToString());
+    }
+
+    [Fact]
     public void InvertedSlice_ThrowsConc133() {
         MethodBase target = typeof(SliceHost).GetMethod(nameof(SliceHost.Checkout))!;
         SliceRange range = new SliceRange(typeof(SliceLog), nameof(SliceLog.End), 1, typeof(SliceLog), nameof(SliceLog.Begin), 1);
