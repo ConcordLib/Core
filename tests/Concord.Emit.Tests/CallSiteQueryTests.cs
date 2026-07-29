@@ -66,7 +66,7 @@ public sealed class CallSiteQueryTests {
         List<Instruction> matches = CallSiteQuery.Match(
             spine, typeof(QueryRules), nameof(QueryRules.Twice), null, false, false);
 
-        List<Instruction> selected = CallSiteQuery.Select(matches, 2, target, "QueryRules.Twice");
+        List<Instruction> selected = CallSiteQuery.Select(matches, 2, target, "QueryRules.Twice", false);
 
         Assert.Single(selected);
         Assert.Same(matches[1], selected[0]);
@@ -80,7 +80,7 @@ public sealed class CallSiteQueryTests {
             spine, typeof(QueryRules), nameof(QueryRules.Twice), null, false, false);
 
         ConcordEmitException ex = Assert.Throws<ConcordEmitException>(
-            () => CallSiteQuery.Select(matches, 9, target, "QueryRules.Twice"));
+            () => CallSiteQuery.Select(matches, 9, target, "QueryRules.Twice", false));
 
         Assert.Contains("CONC033", ex.ToString());
     }

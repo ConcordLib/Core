@@ -13,6 +13,10 @@ public static class SliceCart {
     public static int Total(int seed) {
         return seed + 1;
     }
+
+    public static int Prep(int seed) {
+        return seed * 2;
+    }
 }
 
 public sealed class SliceTicket {
@@ -37,6 +41,14 @@ public class SliceHost {
         int outside = new SliceTicket(seed).Value;
         SliceLog.Begin();
         int inside = new SliceTicket(outside + 1).Value;
+        SliceLog.End();
+        return inside;
+    }
+
+    public int Audited(int seed) {
+        int prepared = SliceCart.Prep(seed);
+        SliceLog.Begin();
+        int inside = SliceCart.Total(prepared);
         SliceLog.End();
         return inside;
     }
@@ -139,6 +151,58 @@ public sealed class SliceTests {
 
         Assert.Contains("CONC133", ex.ToString());
         Assert.Contains("empty or inverted", ex.ToString());
+        Assert.Contains("just after 'SliceLog.End' occurrence 1", ex.ToString());
+        Assert.Contains("just before 'SliceLog.Begin' occurrence 1", ex.ToString());
+    }
+
+    [Fact]
+    public void SliceWithNoMatchInRange_SaysTheRangeNotTheBody() {
+        MethodBase target = typeof(SliceHost).GetMethod(nameof(SliceHost.Audited))!;
+        MethodBase injection = typeof(SliceMethods).GetMethod(nameof(SliceMethods.Before))!;
+        SliceRange range = new SliceRange(typeof(SliceLog), nameof(SliceLog.Begin), 1, typeof(SliceLog), nameof(SliceLog.End), 1);
+        InjectAt.Invoke at = new InjectAt.Invoke(typeof(SliceCart), nameof(SliceCart.Prep), At.Head, 1) { Slice = range };
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(
+            () => WrapperComposer.Compose(target, [new Injection(injection, at, "test", 0)]));
+
+        Assert.Contains("CONC031", ex.ToString());
+        Assert.Contains("does not occur inside the declared range", ex.ToString());
+        Assert.DoesNotContain("does not occur in the method body", ex.ToString());
+    }
+
+    [Fact]
+    public void NoSliceWithNoMatch_StillSaysTheMethodBody() {
+        MethodBase target = typeof(SliceHost).GetMethod(nameof(SliceHost.Checkout))!;
+        MethodBase injection = typeof(SliceMethods).GetMethod(nameof(SliceMethods.Before))!;
+        InjectAt.Invoke at = new InjectAt.Invoke(typeof(SliceCart), nameof(SliceCart.Prep), At.Head, 1);
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(
+            () => WrapperComposer.Compose(target, [new Injection(injection, at, "test", 0)]));
+
+        Assert.Contains("CONC031", ex.ToString());
+        Assert.Contains("does not occur in the method body", ex.ToString());
+    }
+
+    [Fact]
+    public void ByOvershootsInsideTheRange_CountsTheRangeNotTheBody() {
+        MethodBase target = typeof(SliceHost).GetMethod(nameof(SliceHost.Checkout))!;
+        SliceRange range = new SliceRange(typeof(SliceLog), nameof(SliceLog.Begin), 1, typeof(SliceLog), nameof(SliceLog.End), 1);
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() => WrapperComposer.Compose(target, [Sliced(range, 2)]));
+
+        Assert.Contains("CONC033", ex.ToString());
+        Assert.Contains("but only 1 occurrence(s) exist inside the declared range", ex.ToString());
+        Assert.DoesNotContain("in the method body", ex.ToString());
+    }
+
+    [Fact]
+    public void NoSliceByOvershoot_StillCountsTheMethodBody() {
+        MethodBase target = typeof(SliceHost).GetMethod(nameof(SliceHost.Checkout))!;
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() => WrapperComposer.Compose(target, [Sliced(null, 4)]));
+
+        Assert.Contains("CONC033", ex.ToString());
+        Assert.Contains("but only 3 occurrence(s) exist in the method body", ex.ToString());
     }
 
     [Fact]

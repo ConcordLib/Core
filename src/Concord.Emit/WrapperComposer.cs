@@ -424,7 +424,7 @@ public static class WrapperComposer {
 
     /// <summary>
     ///     Rejects <see cref="SliceAttribute" /> on any position that matches no call site, since a range
-    ///     only bounds the search <see cref="InjectAt.Invoke" /> and <see cref="InjectAt.NewObj" /> perform.
+    ///     only bounds the search that <see cref="InjectAt.Invoke" /> and <see cref="InjectAt.NewObj" /> perform.
     /// </summary>
     /// <param name="ordered">The full injection list being composed for <paramref name="target" />.</param>
     /// <param name="target">The original method being patched, used for the diagnostic message.</param>
@@ -1076,7 +1076,7 @@ public static class WrapperComposer {
             invoke.ParameterTypes,
             includeFieldReads);
 
-        List<Instruction> sites = SelectCallSites(allSites, invoke.By, target, $"{invoke.DeclaringType.Name}.{invoke.Method}");
+        List<Instruction> sites = SelectCallSites(allSites, invoke.By, target, $"{invoke.DeclaringType.Name}.{invoke.Method}", invoke.Slice is not null);
         SpliceCallSiteInjection(
             new InjectionSiteContext(injection, wrapperDefinition, target, locals),
             invoke.Shift,
@@ -1101,7 +1101,7 @@ public static class WrapperComposer {
             newObj.ParameterTypes,
             includeFieldReads: false,
             matchNewObj: true);
-        List<Instruction> sites = SelectCallSites(allSites, newObj.By, target, $"new {newObj.ConstructedType.Name}");
+        List<Instruction> sites = SelectCallSites(allSites, newObj.By, target, $"new {newObj.ConstructedType.Name}", newObj.Slice is not null);
         SpliceCallSiteInjection(
             new InjectionSiteContext(injection, wrapperDefinition, target, locals),
             newObj.Shift,
@@ -1793,14 +1793,15 @@ public static class WrapperComposer {
         spine.InsertRange(siteIndex, replacement);
     }
 
-    private static List<Instruction> SelectCallSites(List<Instruction> allSites, uint by, MethodBase target, string siteDescription) {
+    private static List<Instruction> SelectCallSites(List<Instruction> allSites, uint by, MethodBase target, string siteDescription, bool sliced) {
         if (allSites.Count == 0) {
             throw new ConcordEmitException(
                 "CONC031",
-                $"Injection on '{target.DeclaringType?.Name}.{target.Name}' targets call site '{siteDescription}' which does not occur in the method body.");
+                $"Injection on '{target.DeclaringType?.Name}.{target.Name}' targets call site '{siteDescription}' " +
+                $"which does not occur {CallSiteQuery.ScopeName(sliced)}.");
         }
 
-        return CallSiteQuery.Select(allSites, by, target, siteDescription);
+        return CallSiteQuery.Select(allSites, by, target, siteDescription, sliced);
     }
 
     private static List<Instruction> FindReturnExits(List<Instruction> spine, Instruction afterSpine) {

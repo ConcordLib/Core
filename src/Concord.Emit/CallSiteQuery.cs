@@ -92,9 +92,17 @@ internal static class CallSiteQuery {
         }
 
         if (end <= start) {
+            string opens = range.FromType is null
+                ? "the body head"
+                : $"just after '{range.FromType.Name}.{range.FromMember}' occurrence {range.FromBy}";
+            string closes = range.ToType is null
+                ? "the body tail"
+                : $"just before '{range.ToType.Name}.{range.ToMember}' occurrence {range.ToBy}";
+
             throw new ConcordEmitException(
                 "CONC133",
-                $"Slice on '{target.DeclaringType?.Name}.{target.Name}' is empty or inverted: it closes at or before it opens.");
+                $"Slice on '{target.DeclaringType?.Name}.{target.Name}' is empty or inverted: it closes at or before it opens. " +
+                $"It opens at index {start}, {opens}, and closes at index {end}, {closes}.");
         }
 
         List<Instruction> narrowed = new List<Instruction>(end - start);
@@ -105,7 +113,18 @@ internal static class CallSiteQuery {
         return narrowed;
     }
 
-    internal static List<Instruction> Select(List<Instruction> matches, uint by, MethodBase target, string siteDescription) {
+    /// <summary>
+    ///     Narrows a match set to one occurrence.
+    /// </summary>
+    /// <param name="matches">The matched sites, in body order.</param>
+    /// <param name="by">The 1-based occurrence to select, or 0 to select every match.</param>
+    /// <param name="target">The original method being patched, used for the diagnostic message.</param>
+    /// <param name="siteDescription">The call site as the author named it, used for the diagnostic message.</param>
+    /// <param name="sliced">
+    ///     Whether <paramref name="matches" /> came from a slice-narrowed search. The count reported on
+    ///     failure is then an in-range count, and saying "in the method body" would be false.
+    /// </param>
+    internal static List<Instruction> Select(List<Instruction> matches, uint by, MethodBase target, string siteDescription, bool sliced) {
         if (by == 0) {
             return matches;
         }
@@ -113,10 +132,20 @@ internal static class CallSiteQuery {
         if (by > matches.Count) {
             throw new ConcordEmitException(
                 "CONC033",
-                $"Injection on '{target.DeclaringType?.Name}.{target.Name}' targets occurrence {by} of call site '{siteDescription}', but only {matches.Count} occurrence(s) exist in the method body.");
+                $"Injection on '{target.DeclaringType?.Name}.{target.Name}' targets occurrence {by} of call site '{siteDescription}', " +
+                $"but only {matches.Count} occurrence(s) exist {ScopeName(sliced)}.");
         }
 
         return [matches[(int)(by - 1)]];
+    }
+
+    /// <summary>
+    ///     Names the region a call-site count was taken over, so a diagnostic does not claim a
+    ///     slice-scoped count describes the whole body.
+    /// </summary>
+    /// <param name="sliced">Whether the search was bounded by a <see cref="SliceRange" />.</param>
+    internal static string ScopeName(bool sliced) {
+        return sliced ? "inside the declared range" : "in the method body";
     }
 
     private static int AnchorIndex(IReadOnlyList<Instruction> spine, Type declaringType, string? memberName, uint by) {
