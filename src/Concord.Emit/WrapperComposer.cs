@@ -247,6 +247,7 @@ public static class WrapperComposer {
 
     internal static void ValidateComposition(MethodBase target, IReadOnlyList<Injection> ordered) {
         RejectMisplacedCaptures(ordered, target);
+        RejectMisplacedSlices(ordered, target);
 
         if (HasWholeMethodAround(ordered)) {
             ValidateWholeMethodAroundEligible(target);
@@ -418,6 +419,31 @@ public static class WrapperComposer {
                 $"'{target.DeclaringType?.Name}.{target.Name}' declares a [Capture] parameter, but its position {reason}. " +
                 "[Capture] binds an argument of a call matched inside the target body, so it needs an Invoke or NewObj " +
                 "injection shifted to At.Head or At.Tail; At.Around and At.Argument already receive the call's arguments.");
+        }
+    }
+
+    /// <summary>
+    ///     Rejects <see cref="SliceAttribute" /> on any position that matches no call site, since a range
+    ///     only bounds the search <see cref="InjectAt.Invoke" /> and <see cref="InjectAt.NewObj" /> perform.
+    /// </summary>
+    /// <param name="ordered">The full injection list being composed for <paramref name="target" />.</param>
+    /// <param name="target">The original method being patched, used for the diagnostic message.</param>
+    private static void RejectMisplacedSlices(IReadOnlyList<Injection> ordered, MethodBase target) {
+        for (int i = 0; i < ordered.Count; i++) {
+            Injection injection = ordered[i];
+            if (injection.At is InjectAt.Invoke or InjectAt.NewObj) {
+                continue;
+            }
+
+            if (injection.InjectionMethod.GetCustomAttribute<SliceAttribute>() is null) {
+                continue;
+            }
+
+            throw new ConcordEmitException(
+                "CONC134",
+                $"Injection '{injection.InjectionMethod.DeclaringType?.Name}.{injection.InjectionMethod.Name}' on " +
+                $"'{target.DeclaringType?.Name}.{target.Name}' carries [Slice] at position '{PositionName(injection.At)}'. " +
+                "[Slice] applies to invoke and construction positions only.");
         }
     }
 
@@ -1042,8 +1068,9 @@ public static class WrapperComposer {
             invoke.Shift is At.Around);
 
         bool includeFieldReads = invoke.Shift is At.Head or At.Tail;
+        IReadOnlyList<Instruction> searchable = CallSiteQuery.Narrow(spine, invoke.Slice, target);
         List<Instruction> allSites = ControlHandleLowering.FindInvokeCallSites(
-            spine,
+            searchable,
             invoke.DeclaringType,
             effectiveName,
             invoke.ParameterTypes,
@@ -1066,8 +1093,9 @@ public static class WrapperComposer {
         MethodBase target,
         ProtocolLocals locals,
         List<Instruction> spine) {
+        IReadOnlyList<Instruction> searchable = CallSiteQuery.Narrow(spine, newObj.Slice, target);
         List<Instruction> allSites = CallSiteQuery.Match(
-            spine,
+            searchable,
             newObj.ConstructedType,
             ".ctor",
             newObj.ParameterTypes,
@@ -1093,7 +1121,11 @@ public static class WrapperComposer {
     /// <param name="arg">For <see cref="At.Argument" />, the 1-based argument to rewrite, or 0 to infer.</param>
     /// <param name="newObj">Whether the matched sites are <c>newobj</c> instructions.</param>
     /// <param name="sites">The matched sites, in body order.</param>
-    /// <param name="spine">The copied target body the sites live in.</param>
+    /// <param name="spine">
+    ///     The copied target body the sites live in. This must be the complete body, never a slice-narrowed
+    ///     view of it: argument capture reads branch targets and stack depth out of it, and a subset makes
+    ///     it report a plausible but wrong boundary.
+    /// </param>
     private static void SpliceCallSiteInjection(
         InjectionSiteContext site,
         At shift,
