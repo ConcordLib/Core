@@ -548,7 +548,8 @@ public static class WrapperComposer {
         bool hasAround = HasWholeMethodAround(ordered);
 
         bool needsCtorGuard = hasAround && target.IsConstructor;
-        ProtocolLocals locals = DeclareLocals(body, module, returnType, isVoid, hasAround && !isVoid, needsCtorGuard);
+        Dictionary<Type, VariableDefinition> stateLocals = AllocateStateLocals(ordered, wrapperDefinition, target);
+        ProtocolLocals locals = DeclareLocals(body, module, returnType, isVoid, hasAround && !isVoid, needsCtorGuard, stateLocals);
 
         List<Instruction> spine = new List<Instruction>(body.Instructions);
         Instruction afterSpine = Instruction.Create(OpCodes.Nop);
@@ -1264,6 +1265,12 @@ public static class WrapperComposer {
             protocolLocals.Add(locals.SpliceValue);
         }
 
+        if (locals.State is not null) {
+            foreach (KeyValuePair<Type, VariableDefinition> entry in locals.State) {
+                protocolLocals.Add(entry.Value);
+            }
+        }
+
         return protocolLocals;
     }
 
@@ -1565,7 +1572,8 @@ public static class WrapperComposer {
         Type returnType,
         bool isVoid,
         bool needsSpliceValue,
-        bool needsCtorGuard) {
+        bool needsCtorGuard,
+        IReadOnlyDictionary<Type, VariableDefinition> stateLocals) {
         VariableDefinition cancel = new VariableDefinition(module.ImportReference(typeof(bool)));
         body.Variables.Add(cancel);
         body.InitLocals = true;
@@ -1580,7 +1588,7 @@ public static class WrapperComposer {
         }
 
         if (isVoid) {
-            return new ProtocolLocals(cancel, null, null, null, ctorBodyRan, ctorBodyRanTwice);
+            return new ProtocolLocals(cancel, null, null, null, ctorBodyRan, ctorBodyRanTwice, stateLocals);
         }
 
         VariableDefinition hasReturn = new VariableDefinition(module.ImportReference(typeof(bool)));
@@ -1594,7 +1602,57 @@ public static class WrapperComposer {
             body.Variables.Add(spliceValue);
         }
 
-        return new ProtocolLocals(cancel, hasReturn, returnValue, spliceValue, ctorBodyRan, ctorBodyRanTwice);
+        return new ProtocolLocals(cancel, hasReturn, returnValue, spliceValue, ctorBodyRan, ctorBodyRanTwice, stateLocals);
+    }
+
+    // One state local per patch declaration type, allocated up front so every injection body copied
+    // from that declaration - head, tail, or spliced into an Around - lowers to the same slot.
+    private static Dictionary<Type, VariableDefinition> AllocateStateLocals(
+        IReadOnlyList<Injection> ordered,
+        MethodDefinition wrapperDefinition,
+        MethodBase target) {
+        Dictionary<Type, Type> declared = new Dictionary<Type, Type>();
+        foreach (Injection injection in ordered) {
+            Type? owner = injection.InjectionMethod.DeclaringType;
+            if (owner is null) {
+                continue;
+            }
+
+            using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
+            CollectStateTypes(injectionMethodDefinition.Definition.Body, owner, target, declared);
+        }
+
+        Dictionary<Type, VariableDefinition> locals = new Dictionary<Type, VariableDefinition>(declared.Count);
+        foreach (KeyValuePair<Type, Type> entry in declared) {
+            VariableDefinition local = new VariableDefinition(wrapperDefinition.Module.ImportReference(entry.Value));
+            wrapperDefinition.Body.Variables.Add(local);
+            locals[entry.Key] = local;
+        }
+
+        return locals;
+    }
+
+    private static void CollectStateTypes(MethodBody injectionBody, Type owner, MethodBase target, Dictionary<Type, Type> declared) {
+        foreach (Instruction instruction in injectionBody.Instructions) {
+            ControlHandleLowering.ControlCallKind kind = ControlHandleLowering.ClassifyCall(instruction);
+            if (kind != ControlHandleLowering.ControlCallKind.SetState && kind != ControlHandleLowering.ControlCallKind.GetState) {
+                continue;
+            }
+
+            Type? stateType = ControlHandleLowering.ResolveStateType(instruction);
+            if (stateType is null) {
+                continue;
+            }
+
+            if (declared.TryGetValue(owner, out Type? existing) && existing != stateType) {
+                throw new ConcordEmitException(
+                    "CONC127",
+                    $"Patch declaration '{owner.Name}' uses state type '{existing.Name}' and '{stateType.Name}' " +
+                    $"for the same slot on '{target.DeclaringType?.Name}.{target.Name}'. One declaration must use one state type per target.");
+            }
+
+            declared[owner] = stateType;
+        }
     }
 
     private static List<Instruction> BuildEpilogue(ProtocolLocals locals, bool isVoid) {

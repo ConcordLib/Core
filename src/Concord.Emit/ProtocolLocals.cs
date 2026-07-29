@@ -11,10 +11,12 @@ namespace Concord.Emit;
 /// <param name="SpliceValue">Local that carries the original body's result across an Around splice for non-void targets.</param>
 /// <param name="CtorBodyRan">Boolean local set the first time a constructor Around's spliced body copy runs.</param>
 /// <param name="CtorBodyRanTwice">Boolean local set when a second entry into any constructor Around body copy is blocked.</param>
+/// <param name="State">One state local per patch declaration type that uses a state slot on this target.</param>
 internal sealed record ProtocolLocals(
     VariableDefinition Cancel,
     VariableDefinition? HasReturn,
     VariableDefinition? ReturnValue,
     VariableDefinition? SpliceValue = null,
     VariableDefinition? CtorBodyRan = null,
-    VariableDefinition? CtorBodyRanTwice = null);
+    VariableDefinition? CtorBodyRanTwice = null,
+    IReadOnlyDictionary<Type, VariableDefinition>? State = null);

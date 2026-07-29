@@ -515,7 +515,29 @@ internal static class BodyCopier {
             };
         }
 
+        if (controlCall == ControlHandleLowering.ControlCallKind.SetState) {
+            return new List<Instruction> { Instruction.Create(OpCodes.Stloc, ResolveStateLocal(site)) };
+        }
+
+        if (controlCall == ControlHandleLowering.ControlCallKind.GetState) {
+            return new List<Instruction> { Instruction.Create(OpCodes.Ldloc, ResolveStateLocal(site)) };
+        }
+
         return null;
+    }
+
+    // The slot is keyed on the patch declaration, so every injection copied from the same declaring
+    // type reads and writes the one local allocated for it during composition.
+    private static VariableDefinition ResolveStateLocal(InjectionLoweringSite site) {
+        Type? owner = site.InjectionMethod.DeclaringType;
+        if (owner is not null && site.Locals.State is not null && site.Locals.State.TryGetValue(owner, out VariableDefinition? local)) {
+            return local;
+        }
+
+        throw new ConcordEmitException(
+            "CONC128",
+            "No state slot was allocated for injection '" + site.InjectionMethod.DeclaringType?.Name + "." + site.InjectionMethod.Name +
+            "'; its declaring type was not scanned for state calls during composition.");
     }
 
     private static List<Instruction> LowerReturn(InjectionLoweringSite site) {
