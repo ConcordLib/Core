@@ -19,6 +19,29 @@ public class QueryHost {
     }
 }
 
+public sealed class QueryBox {
+    public QueryBox(int value) {
+        Value = value;
+    }
+
+    public QueryBox(int value, int bonus) {
+        Value = value + bonus;
+    }
+
+    public int Value { get; }
+
+    public static QueryBox Make(int value) => new QueryBox(value);
+}
+
+public class NewObjQueryHost {
+    public int Build(int seed) {
+        QueryBox first = new QueryBox(seed);
+        QueryBox second = new QueryBox(seed, 1);
+        QueryBox third = QueryBox.Make(seed);
+        return first.Value + second.Value + third.Value;
+    }
+}
+
 public sealed class CallSiteQueryTests {
     private static List<Instruction> SpineOf(MethodBase target) {
         using DynamicMethodDefinition source = new DynamicMethodDefinition(target);
@@ -60,5 +83,48 @@ public sealed class CallSiteQueryTests {
             () => CallSiteQuery.Select(matches, 9, target, "QueryRules.Twice"));
 
         Assert.Contains("CONC033", ex.ToString());
+    }
+
+    [Fact]
+    public void Match_NewObj_FindsEveryConstructionSite() {
+        MethodBase target = typeof(NewObjQueryHost).GetMethod(nameof(NewObjQueryHost.Build))!;
+        List<Instruction> spine = SpineOf(target);
+
+        List<Instruction> matches = CallSiteQuery.Match(
+            spine, typeof(QueryBox), ".ctor", null, false, true);
+
+        Assert.Equal(2, matches.Count);
+        Assert.All(matches, instruction => Assert.Equal(OpCodes.Newobj, instruction.OpCode));
+    }
+
+    [Fact]
+    public void Match_NewObj_IgnoresOrdinaryCallsOnTheSameType() {
+        MethodBase target = typeof(NewObjQueryHost).GetMethod(nameof(NewObjQueryHost.Build))!;
+        List<Instruction> spine = SpineOf(target);
+
+        List<Instruction> calls = CallSiteQuery.Match(
+            spine, typeof(QueryBox), nameof(QueryBox.Make), null, false, false);
+        List<Instruction> constructions = CallSiteQuery.Match(
+            spine, typeof(QueryBox), ".ctor", null, false, true);
+
+        Assert.Single(calls);
+        Assert.DoesNotContain(calls[0], constructions);
+
+        List<Instruction> ctorsAsCalls = CallSiteQuery.Match(
+            spine, typeof(QueryBox), ".ctor", null, false, false);
+
+        Assert.Empty(ctorsAsCalls);
+    }
+
+    [Fact]
+    public void Match_NewObj_FiltersByConstructorParameterTypes() {
+        MethodBase target = typeof(NewObjQueryHost).GetMethod(nameof(NewObjQueryHost.Build))!;
+        List<Instruction> spine = SpineOf(target);
+
+        List<Instruction> matches = CallSiteQuery.Match(
+            spine, typeof(QueryBox), ".ctor", [typeof(int), typeof(int)], false, true);
+
+        Assert.Single(matches);
+        Assert.Equal(2, ((Mono.Cecil.MethodReference)matches[0].Operand).Parameters.Count);
     }
 }

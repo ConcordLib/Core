@@ -59,7 +59,27 @@ public abstract record InjectAt {
     ///     or empty when matching a field read.
     /// </param>
     /// <param name="Arg">The 1-based argument to rewrite for At.Argument, or 0 to infer by unique type match.</param>
-    public sealed record Invoke(Type DeclaringType, string Method, At Shift, uint By = 0, Type[]? ParameterTypes = null, uint Arg = 0) : InjectAt;
+    public sealed record Invoke(Type DeclaringType, string Method, At Shift, uint By = 0, Type[]? ParameterTypes = null, uint Arg = 0) : InjectAt {
+        /// <summary>
+        ///     Bounds matching and <c>By</c> counting to a range of the target body.
+        /// </summary>
+        public SliceRange? Slice { get; init; }
+    }
+
+    /// <summary>
+    ///     Targets a <c>newobj</c> instruction inside the target body.
+    /// </summary>
+    /// <param name="ConstructedType">The type being constructed.</param>
+    /// <param name="Shift">Where the injection method runs relative to the construction.</param>
+    /// <param name="By">The 1-based occurrence to target, or <c>0</c> to target every match.</param>
+    /// <param name="ParameterTypes">Restricts matches to one constructor overload by parameter types.</param>
+    /// <param name="Arg">The 1-based constructor argument to rewrite for At.Argument, or 0 to infer by unique type match.</param>
+    public sealed record NewObj(Type ConstructedType, At Shift, uint By = 0, Type[]? ParameterTypes = null, uint Arg = 0) : InjectAt {
+        /// <summary>
+        ///     Bounds matching and <c>By</c> counting to a range of the target body.
+        /// </summary>
+        public SliceRange? Slice { get; init; }
+    }
 
     /// <summary>
     ///     Rewrites the target body's raw IL through an author-supplied transpiler method.
