@@ -329,6 +329,10 @@ internal static class IlDump {
             return count;
         }
 
+        if (instruction.Operand is CallSite site) {
+            return site.Parameters.Count + (site.HasThis ? 1 : 0) + 1;
+        }
+
         if (instruction.OpCode == OpCodes.Ret) {
             return method is not null && method.ReturnType.FullName != "System.Void" ? 1 : 0;
         }
@@ -337,6 +341,10 @@ internal static class IlDump {
     }
 
     private static int VarPush(Instruction instruction) {
+        if (instruction.Operand is CallSite site) {
+            return site.ReturnType.FullName == "System.Void" ? 0 : 1;
+        }
+
         if (instruction.Operand is not MethodReference reference) {
             return 1;
         }
