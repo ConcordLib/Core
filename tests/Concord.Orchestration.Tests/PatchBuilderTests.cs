@@ -201,6 +201,32 @@ public static class BuilderNewObjInjectionMethod2 {
     }
 }
 
+public static class BuilderNewObjAnchors3 {
+    public static void Begin() { }
+
+    public static void End() { }
+}
+
+public sealed class BuilderNewObjValue3 {
+    public BuilderNewObjValue3(int value) {
+        Value = value;
+    }
+
+    public int Value { get; }
+}
+
+public class BuilderNewObjTarget3 {
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public int[] Run() {
+        BuilderNewObjValue3 first = new BuilderNewObjValue3(1);
+        BuilderNewObjAnchors3.Begin();
+        BuilderNewObjValue3 second = new BuilderNewObjValue3(2);
+        BuilderNewObjAnchors3.End();
+        BuilderNewObjValue3 third = new BuilderNewObjValue3(3);
+        return [first.Value, second.Value, third.Value];
+    }
+}
+
 [Collection(SharedAssemblyApplyCollection.Name)]
 public sealed class PatchBuilderTests {
     [Fact]
@@ -424,6 +450,31 @@ public sealed class PatchBuilderTests {
         }
 
         Assert.Equal(3, new BuilderNewObjTarget2().Run(3));
+    }
+
+    [Fact]
+    public void NewObj_Builder_Slice_BoundsConstructionInjection() {
+        MethodBase targetMethod = typeof(BuilderNewObjTarget3).GetMethod(nameof(BuilderNewObjTarget3.Run))!;
+        MethodInfo injectionMethod = typeof(BuilderNewObjInjectionMethod2).GetMethod(nameof(BuilderNewObjInjectionMethod2.Bump))!;
+        SliceRange range = new SliceRange(
+            typeof(BuilderNewObjAnchors3),
+            nameof(BuilderNewObjAnchors3.Begin),
+            1,
+            typeof(BuilderNewObjAnchors3),
+            nameof(BuilderNewObjAnchors3.End),
+            1);
+
+        IPatchHandle handle = Patcher.For(targetMethod)
+            .NewObj(typeof(BuilderNewObjValue3), [typeof(int)], injectionMethod, At.Argument)
+            .Slice(range)
+            .Apply();
+        try {
+            Assert.Equal([1, 3, 3], new BuilderNewObjTarget3().Run());
+        } finally {
+            handle.Dispose();
+        }
+
+        Assert.Equal([1, 2, 3], new BuilderNewObjTarget3().Run());
     }
 
     [Fact]

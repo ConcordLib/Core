@@ -11,6 +11,7 @@ namespace Concord.Orchestration;
 /// </summary>
 public static class PatchDeclarationScanner {
     private const string InjectOnPrefix = "[Inject] on ";
+    private const string InjectNewOnPrefix = "[InjectNew] on ";
 
     /// <summary>
     ///     Scans every type in <paramref name="assembly" /> and processes each <see cref="PatchAttribute" />
@@ -164,7 +165,7 @@ public static class PatchDeclarationScanner {
             InjectNewAttribute? injectNew = method.GetCustomAttribute<InjectNewAttribute>();
             if (inject is not null && injectNew is not null) {
                 throw new ConcordDeclarationException(
-                    InjectOnPrefix + declaration.FullName + " cannot apply both [Inject] and [InjectNew] to method '" + method.Name + "'.");
+                    declaration.FullName + " cannot apply both [Inject] and [InjectNew] to method '" + method.Name + "'.");
             }
 
             if (inject is not null) {
@@ -175,10 +176,11 @@ public static class PatchDeclarationScanner {
                 continue;
             }
 
+            string prefix = inject is not null ? InjectOnPrefix : InjectNewOnPrefix;
             string? targetMethod = inject?.Method ?? injectNew?.Method;
             Type[]? targetParameterTypes = inject?.ParameterTypes ?? injectNew?.ParameterTypes;
             bool targetsConstructor = inject?.TargetsConstructor ?? injectNew!.TargetsConstructor;
-            MethodBase resolvedTarget = ResolveInjectionTarget(declaration, baseType, targetMethod, targetParameterTypes, targetsConstructor);
+            MethodBase resolvedTarget = ResolveInjectionTarget(declaration, baseType, prefix, targetMethod, targetParameterTypes, targetsConstructor);
             InjectAt at = inject?.ResolvedAt ?? injectNew!.ResolvedAt;
             SliceAttribute? slice = method.GetCustomAttribute<SliceAttribute>();
             if (slice is not null) {
@@ -256,6 +258,7 @@ public static class PatchDeclarationScanner {
     private static MethodBase ResolveInjectionTarget(
         Type declaration,
         Type baseType,
+        string prefix,
         string? targetMethod,
         Type[]? targetParameterTypes,
         bool targetsConstructor) {
@@ -268,7 +271,7 @@ public static class PatchDeclarationScanner {
                 null);
             if (ctor == null) {
                 throw new ConcordDeclarationException(
-                    InjectOnPrefix +
+                    prefix +
                     declaration.FullName +
                     " targets a constructor, but no instance constructor with the specified parameter types was found on " +
                     baseType.FullName +
@@ -282,7 +285,7 @@ public static class PatchDeclarationScanner {
         try {
             methodName = AccessorNameResolver.ResolveAccessorName(baseType, targetMethod!, null, false);
         } catch (ConcordEmitException ex) {
-            throw new ConcordDeclarationException(InjectOnPrefix + declaration.FullName + ": " + ex.Message);
+            throw new ConcordDeclarationException(prefix + declaration.FullName + ": " + ex.Message);
         }
 
         if (targetParameterTypes is not null) {
@@ -294,7 +297,7 @@ public static class PatchDeclarationScanner {
                 null);
             if (baseMethod == null) {
                 throw new ConcordDeclarationException(
-                    InjectOnPrefix +
+                    prefix +
                     declaration.FullName +
                     " target '" +
                     targetMethod +
@@ -313,7 +316,7 @@ public static class PatchDeclarationScanner {
                 BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static); // NOSONAR concord reaches private target members by design; validated at resolve time
         } catch (AmbiguousMatchException) {
             throw new ConcordDeclarationException(
-                InjectOnPrefix +
+                prefix +
                 declaration.FullName +
                 " target '" +
                 targetMethod +
@@ -322,7 +325,7 @@ public static class PatchDeclarationScanner {
 
         if (byName == null) {
             throw new ConcordDeclarationException(
-                InjectOnPrefix +
+                prefix +
                 declaration.FullName +
                 " names method '" +
                 targetMethod +

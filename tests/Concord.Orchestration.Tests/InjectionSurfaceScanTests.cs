@@ -15,6 +15,7 @@ public sealed class InjectionSurfaceScanTests {
         PatchDeclarationScanner.ScanType(typeof(InjectNewDeclaration), patches, props);
 
         PatchCall call = Assert.Single(patches.Calls);
+        Assert.Equal(typeof(InjectionSurfaceTarget).GetMethod(nameof(InjectionSurfaceTarget.Run)), call.Target);
         InjectAt.NewObj at = Assert.IsType<InjectAt.NewObj>(call.Injection.At);
         Assert.Equal(typeof(InjectionSurfaceConstructed), at.ConstructedType);
         Assert.Equal(At.Tail, at.Shift);
@@ -28,6 +29,7 @@ public sealed class InjectionSurfaceScanTests {
         PatchDeclarationScanner.ScanType(typeof(InvokeSliceDeclaration), patches, props);
 
         PatchCall call = Assert.Single(patches.Calls);
+        Assert.Equal(typeof(InjectionSurfaceTarget).GetMethod(nameof(InjectionSurfaceTarget.Run)), call.Target);
         InjectAt.Invoke at = Assert.IsType<InjectAt.Invoke>(call.Injection.At);
         SliceRange range = Assert.IsType<SliceRange>(at.Slice);
         Assert.Equal(typeof(InjectionSurfaceFrom), range.FromType);
@@ -46,6 +48,7 @@ public sealed class InjectionSurfaceScanTests {
         PatchDeclarationScanner.ScanType(CreateWholeMethodSliceDeclaration(), patches, props);
 
         PatchCall call = Assert.Single(patches.Calls);
+        Assert.Equal(typeof(InjectionSurfaceTarget).GetMethod(nameof(InjectionSurfaceTarget.Run)), call.Target);
         Assert.IsType<InjectAt.Head>(call.Injection.At);
     }
 
@@ -57,12 +60,15 @@ public sealed class InjectionSurfaceScanTests {
         PatchDeclarationScanner.ScanType(typeof(InjectNewSliceDeclaration), patches, props);
 
         PatchCall call = Assert.Single(patches.Calls);
+        Assert.Equal(typeof(InjectionSurfaceTarget).GetMethod(nameof(InjectionSurfaceTarget.Run)), call.Target);
         InjectAt.NewObj at = Assert.IsType<InjectAt.NewObj>(call.Injection.At);
         SliceRange range = Assert.IsType<SliceRange>(at.Slice);
         Assert.Equal(typeof(InjectionSurfaceFrom), range.FromType);
         Assert.Equal(nameof(InjectionSurfaceFrom.Start), range.FromMember);
+        Assert.Equal(2u, range.FromBy);
         Assert.Equal(typeof(InjectionSurfaceTo), range.ToType);
         Assert.Equal(nameof(InjectionSurfaceTo.End), range.ToMember);
+        Assert.Equal(3u, range.ToBy);
     }
 
     [Fact]
