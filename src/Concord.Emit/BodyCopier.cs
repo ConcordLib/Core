@@ -535,7 +535,7 @@ internal static class BodyCopier {
         }
 
         throw new ConcordEmitException(
-            "CONC128",
+            "CONC135",
             "No state slot was allocated for injection '" + site.InjectionMethod.DeclaringType?.Name + "." + site.InjectionMethod.Name +
             "'; its declaring type was not scanned for state calls during composition.");
     }

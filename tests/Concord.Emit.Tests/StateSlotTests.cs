@@ -57,6 +57,32 @@ public static class SlotConflictDeclaration {
     }
 }
 
+public static class SlotReaderOnlyDeclaration {
+    public static void Tail(ControlHandle<int> ch) {
+        SlotRecorder.SeenA = ch.GetState<long>();
+    }
+}
+
+public static class SlotAroundHost {
+    public static int Compute() {
+        return 3;
+    }
+}
+
+public static class SlotAroundDeclaration {
+    public static void Head(ControlHandle<int> ch) {
+        ch.SetState(77L);
+    }
+
+    public static int Around(Operation<int> original) {
+        return original.Invoke();
+    }
+
+    public static void Tail(ControlHandle<int> ch) {
+        SlotRecorder.SeenA = ch.GetState<long>();
+    }
+}
+
 public sealed class StateSlotTests {
     private static Instruction FindControlCall(MethodBase method) {
         using DynamicMethodDefinition source = new DynamicMethodDefinition(method);
@@ -128,5 +154,52 @@ public sealed class StateSlotTests {
         ConcordEmitException ex = Assert.Throws<ConcordEmitException>(() => WrapperComposer.Compose(target, [head, tail]));
 
         Assert.Equal("CONC127", ex.Code);
+    }
+
+    [Fact]
+    public void Compose_ReadWithoutWrite_YieldsTheStateTypeDefault() {
+        MethodBase target = typeof(SlotHost).GetMethod(nameof(SlotHost.Total))!;
+        Injection tail = new Injection(typeof(SlotReaderOnlyDeclaration).GetMethod(nameof(SlotReaderOnlyDeclaration.Tail))!, new InjectAt.Tail(), "test", 0);
+
+        SlotRecorder.SeenA = 999L;
+        ComposeResult result = WrapperComposer.Compose(target, [tail]);
+        Func<SlotHost, int, int> invoke = result.Wrapper.CreateDelegate<Func<SlotHost, int, int>>();
+
+        Assert.Equal(10, invoke(new SlotHost(), 5));
+        Assert.Equal(0L, SlotRecorder.SeenA);
+    }
+
+    // Guards the state-local entry in CollectProtocolLocals: without it SpineTemplate.Capture clones
+    // the slot per Around spine copy and the spliced Tail silently reads a fresh zero instead.
+    [Fact]
+    public void Compose_HeadWrite_ReachesTailSplicedIntoAnAroundSpineCopy() {
+        MethodBase target = typeof(SlotAroundHost).GetMethod(nameof(SlotAroundHost.Compute))!;
+        Injection head = new Injection(typeof(SlotAroundDeclaration).GetMethod(nameof(SlotAroundDeclaration.Head))!, new InjectAt.Head(), "test", 0);
+        Injection around = new Injection(typeof(SlotAroundDeclaration).GetMethod(nameof(SlotAroundDeclaration.Around))!, new InjectAt.Around(), "test", 1);
+        Injection tail = new Injection(typeof(SlotAroundDeclaration).GetMethod(nameof(SlotAroundDeclaration.Tail))!, new InjectAt.Tail(), "test", 2);
+
+        SlotRecorder.SeenA = 0;
+        ComposeResult result = WrapperComposer.Compose(target, [head, around, tail]);
+        Func<int> invoke = result.Wrapper.CreateDelegate<Func<int>>();
+
+        Assert.Equal(3, invoke());
+        Assert.Equal(77L, SlotRecorder.SeenA);
+    }
+
+    [Fact]
+    public void Compose_StateSlot_DoesNotLeakAcrossWrapperInvocations() {
+        MethodBase target = typeof(SlotHost).GetMethod(nameof(SlotHost.Total))!;
+        Injection head = new Injection(typeof(SlotDeclarationA).GetMethod(nameof(SlotDeclarationA.Head))!, new InjectAt.Head(), "test", 0);
+        Injection tail = new Injection(typeof(SlotDeclarationA).GetMethod(nameof(SlotDeclarationA.Tail))!, new InjectAt.Tail(), "test", 0);
+
+        ComposeResult result = WrapperComposer.Compose(target, [head, tail]);
+        Func<SlotHost, int, int> invoke = result.Wrapper.CreateDelegate<Func<SlotHost, int, int>>();
+        SlotHost host = new SlotHost();
+
+        invoke(host, 5);
+        Assert.Equal(105L, SlotRecorder.SeenA);
+
+        invoke(host, 7);
+        Assert.Equal(107L, SlotRecorder.SeenA);
     }
 }
