@@ -51,6 +51,7 @@ public sealed class NullAttachedPropertyRegistry : IAttachedPropertyRegistry {
     public void RegisterAttachedProperty(Type baseType, string name, Type valueType) { }
 }
 
+[Collection(RegistryCollection.Name)]
 public sealed class DeclarationScanTests {
     [Fact]
     public void StaticEnumFields_BecomeMembers() {
