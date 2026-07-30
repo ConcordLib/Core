@@ -12,6 +12,11 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Concord.Enums.Tests"/>
+    <InternalsVisibleTo Include="Concord.Orchestration"/>
+  </ItemGroup>
+
   <ItemGroup Condition="'$(TargetFramework)' == 'net472'">
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all"/>
   </ItemGroup>

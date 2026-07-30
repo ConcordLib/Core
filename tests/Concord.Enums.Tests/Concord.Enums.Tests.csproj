@@ -20,5 +20,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Concord.Enums/Concord.Enums.csproj"/>
+    <ProjectReference Include="../../src/Concord.Orchestration/Concord.Orchestration.csproj"/>
   </ItemGroup>
 </Project>

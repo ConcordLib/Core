@@ -89,6 +89,11 @@ public static class PatchDeclarationScanner {
             return;
         }
 
+        if (ExtendedEnumRegistry.ResolveExtendedEnumType(declaration) is not null) {
+            ScanExtendedEnumDeclaration(declaration);
+            return;
+        }
+
         Type? explicitTarget = attribute!.Target;
         if (explicitTarget == null && attribute.TargetTypeName != null) {
             explicitTarget = ResolveTypeByName(declaration, attribute.TargetTypeName);
@@ -145,6 +150,29 @@ public static class PatchDeclarationScanner {
         }
 
         throw new ConcordDeclarationException("Target type '" + name + "' could not be resolved from any loaded assembly.");
+    }
+
+    private static void ScanExtendedEnumDeclaration(Type declaration) {
+        const BindingFlags declared = BindingFlags.Public |
+                                      BindingFlags.NonPublic |
+                                      BindingFlags.Instance |
+                                      BindingFlags.Static |
+                                      BindingFlags.DeclaredOnly;
+
+        foreach (MethodInfo method in declaration.GetMethods(declared)) {
+            if (method.GetCustomAttribute<InjectAttribute>() is null && method.GetCustomAttribute<InjectNewAttribute>() is null) {
+                continue;
+            }
+
+            throw new ConcordDeclarationException(
+                "CONC138: " + declaration.FullName + " extends an enum, so it cannot also carry [Inject] or [InjectNew] methods.");
+        }
+
+        try {
+            ExtendedEnumRegistry.RegisterDeclaration(declaration);
+        } catch (ConcordEnumException ex) {
+            throw new ConcordDeclarationException(ex.Message);
+        }
     }
 
     private static List<(MethodBase Target, Injection Injection)> ResolveInjections(
