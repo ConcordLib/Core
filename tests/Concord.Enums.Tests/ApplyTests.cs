@@ -1,3 +1,4 @@
+using Concord.Orchestration;
 using Xunit;
 
 namespace Concord.Enums.Tests;
@@ -8,6 +9,11 @@ public abstract class ApplyWeather : ExtendedEnum<WeatherKind> {
 
 public abstract class ApplyAbility : ExtendedEnum<Ability> {
     public static Ability Glide;
+}
+
+[Patch]
+public abstract class ReloadWeather : ExtendedEnum<WeatherKind> {
+    public static WeatherKind Thaw;
 }
 
 [Collection(RegistryCollection.Name)]
@@ -36,5 +42,23 @@ public sealed class ApplyTests {
         Assert.True(combined.HasFlag(ApplyAbility.Glide));
         Assert.False(combined.HasFlag(Ability.Fly));
         Assert.Equal(Ability.Swim, combined & Ability.Swim);
+    }
+
+    [Fact]
+    public void Reload_RestoresSavedValuesAndReassignsFields() {
+        ExtendedEnumRegistry.ResetForTests();
+        ExtendedEnumRegistry.UseStore(new FakeStore());
+        PatchDeclarationScanner.ScanExtendedEnums([typeof(ReloadWeather)]);
+
+        Assert.Equal(3, (int)ReloadWeather.Thaw);
+
+        Dictionary<string, long> saved = new Dictionary<string, long>(StringComparer.Ordinal) {
+            [typeof(ReloadWeather).FullName + ".Thaw"] = 9,
+        };
+
+        ExtendedEnumRegistry.Reload(saved);
+
+        Assert.Equal(9, (int)ReloadWeather.Thaw);
+        Assert.Contains(typeof(WeatherKind), ExtendedEnumRegistry.ExtendedEnums());
     }
 }

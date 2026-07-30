@@ -39,6 +39,30 @@ public static partial class ExtendedEnumRegistry {
         return ByEnum.ContainsKey(enumType);
     }
 
+    /// <summary>
+    ///     Every enum a declaration has added members to. An adapter walks this to register consumers for
+    ///     exactly the enums in play, rather than guessing a list up front.
+    /// </summary>
+    /// <returns>The extended enum types.</returns>
+    public static IReadOnlyCollection<Type> ExtendedEnums() {
+        return ByEnum.Keys;
+    }
+
+    /// <summary>
+    ///     Replaces the in-memory map with a saved one and reassigns every member field. A runtime adapter
+    ///     calls this when it loads saved state, so a save written under a different mod set restores the
+    ///     values it recorded rather than the ones this session allocated.
+    /// </summary>
+    /// <param name="saved">The saved id-to-value pairs.</param>
+    public static void Reload(IReadOnlyDictionary<string, long> saved) {
+        foreach (KeyValuePair<string, long> entry in saved) {
+            Map[entry.Key] = entry.Value;
+        }
+
+        ByEnum.Clear();
+        ApplyPending();
+    }
+
     internal static IReadOnlyList<(long Value, string Name)> MembersOf(Type enumType) {
         return ByEnum.TryGetValue(enumType, out List<(long Value, string Name)>? list) ? list : [];
     }
