@@ -45,6 +45,10 @@ public static partial class ExtendedEnumRegistry {
         }
     }
 
+    internal static void ApplyPending() {
+        ApplyTo(PendingMembers);
+    }
+
     internal static void Reset() {
         PendingMembers.Clear();
         PendingIds.Clear();

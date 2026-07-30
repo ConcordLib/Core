@@ -98,6 +98,25 @@ public static partial class ExtendedEnumRegistry {
         return assigned;
     }
 
+    internal static void ApplyTo(IReadOnlyList<ExtendedEnumMember> members) {
+        IReadOnlyDictionary<string, long> allocated = Allocate(members);
+
+        foreach (ExtendedEnumMember member in members) {
+            if (member.Field.IsLiteral) {
+                continue;
+            }
+
+            object value = Enum.ToObject(
+                member.EnumType,
+                Convert.ChangeType(
+                    allocated[member.Id],
+                    Enum.GetUnderlyingType(member.EnumType),
+                    CultureInfo.InvariantCulture));
+
+            member.Field.SetValue(null, value);
+        }
+    }
+
     internal static void ResetForTests() {
         Map.Clear();
         Owners.Clear();

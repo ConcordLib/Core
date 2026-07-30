@@ -32,11 +32,13 @@ public static class Patcher {
 
             CollectingPatchApplier applier = new CollectingPatchApplier();
             try {
-                if (PatchDeclarationScanner.TryGetRegistryDeclarations(assembly, out IReadOnlyList<Type> registryDeclarations)) {
-                    PatchDeclarationScanner.ScanDeclarations(registryDeclarations, applier, Properties);
-                } else {
-                    PatchDeclarationScanner.ScanAssembly(assembly, applier, Properties);
-                }
+                IReadOnlyList<Type> declarations =
+                    PatchDeclarationScanner.TryGetRegistryDeclarations(assembly, out IReadOnlyList<Type> registryDeclarations)
+                        ? registryDeclarations
+                        : assembly.GetTypes();
+
+                PatchDeclarationScanner.ScanExtendedEnums(declarations);
+                PatchDeclarationScanner.ScanDeclarations(declarations, applier, Properties);
             } catch {
                 foreach (IDetourHandle handle in applier.Handles) {
                     try {

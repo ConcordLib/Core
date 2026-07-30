@@ -129,6 +129,39 @@ public static class PatchDeclarationScanner {
     }
 
     /// <summary>
+    ///     Registers every extended enum declaration among <paramref name="declarations" /> and assigns their
+    ///     member fields. Callers run this before any injection, because an injection body can read a member.
+    ///     Per-declaration <see cref="ConcordDeclarationException" />s are swallowed the same way
+    ///     <see cref="ScanDeclarations" /> swallows them.
+    /// </summary>
+    /// <param name="declarations">The declaration types to inspect.</param>
+    public static void ScanExtendedEnums(IEnumerable<Type> declarations) {
+        bool found = false;
+
+        foreach (Type type in declarations) {
+            if (!type.IsClass || !TryReadPatchAttribute(type, out _)) {
+                continue;
+            }
+
+            if (ExtendedEnumRegistry.ResolveExtendedEnumType(type) is null) {
+                continue;
+            }
+
+            try {
+                ScanExtendedEnumDeclaration(type);
+                found = true;
+            } catch (ConcordDeclarationException ex) {
+                Debug.WriteLine("[Concord] declaration error in " + type.FullName + ": " + ex.Message);
+                Console.Error.WriteLine("[Concord] declaration error in " + type.FullName + ": " + ex.Message);
+            }
+        }
+
+        if (found) {
+            ExtendedEnumRegistry.ApplyPending();
+        }
+    }
+
+    /// <summary>
     ///     Resolves a type by its full name across all loaded assemblies.
     /// </summary>
     /// <param name="name">The full type name to resolve.</param>
