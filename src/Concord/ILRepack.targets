@@ -6,6 +6,7 @@
       <ConcordMergeInputs Include="$(OutputPath)Concord.Emit.dll"/>
       <ConcordMergeInputs Include="$(OutputPath)Concord.AttachedData.dll"/>
       <ConcordMergeInputs Include="$(OutputPath)Concord.Orchestration.dll"/>
+      <ConcordMergeInputs Include="$(OutputPath)Concord.Enums.dll"/>
       <ConcordMergeInputs Include="$(OutputPath)MonoMod.*.dll"/>
       <ConcordMergeInputs Include="$(OutputPath)Mono.Cecil*.dll"/>
       <ConcordMergeInputs Include="$(OutputPath)System.ValueTuple.dll" Condition="'$(TargetFramework)' == 'net472' And Exists('$(OutputPath)System.ValueTuple.dll')"/>
@@ -30,6 +31,8 @@
       <ConcordLeftovers Include="$(OutputPath)MonoMod.*.pdb;$(OutputPath)MonoMod.*.xml;$(OutputPath)Mono.Cecil*.pdb;$(OutputPath)Mono.Cecil*.xml"/>
       <ConcordLeftovers Include="$(OutputPath)Concord.AttachedData.dll;$(OutputPath)Concord.Orchestration.dll"/>
       <ConcordLeftovers Include="$(OutputPath)Concord.AttachedData.pdb;$(OutputPath)Concord.AttachedData.xml;$(OutputPath)Concord.Orchestration.pdb;$(OutputPath)Concord.Orchestration.xml"/>
+      <ConcordLeftovers Include="$(OutputPath)Concord.Enums.dll"/>
+      <ConcordLeftovers Include="$(OutputPath)Concord.Enums.pdb;$(OutputPath)Concord.Enums.xml"/>
       <ConcordLeftovers Include="$(OutputPath)System.ValueTuple.dll" Condition="'$(TargetFramework)' == 'net472'"/>
     </ItemGroup>
     <Delete Files="@(ConcordLeftovers)"/>

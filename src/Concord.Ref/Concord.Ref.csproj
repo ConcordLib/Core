@@ -64,6 +64,7 @@
     <Compile Include="..\Concord.Emit\*.cs"               Link="Emit\%(Filename)"/>
     <Compile Include="..\Concord.AttachedData\*.cs"       Link="AttachedData\%(Filename)"/>
     <Compile Include="..\Concord.Orchestration\*.cs"      Link="Orchestration\%(Filename)"/>
+    <Compile Include="..\Concord.Enums\*.cs"              Link="Enums\%(Filename)"/>
     <Compile Include="..\Shared\Polyfills.cs" Link="Polyfills.cs"/>
   </ItemGroup>
 

@@ -42,6 +42,7 @@
     <ProjectReference Include="../Concord.Emit/Concord.Emit.csproj"/>
     <ProjectReference Include="../Concord.AttachedData/Concord.AttachedData.csproj"/>
     <ProjectReference Include="../Concord.Orchestration/Concord.Orchestration.csproj"/>
+    <ProjectReference Include="../Concord.Enums/Concord.Enums.csproj"/>
   </ItemGroup>
 
   <ItemGroup>

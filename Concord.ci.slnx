@@ -13,6 +13,7 @@
     <Project Path="src/Concord.Emit/Concord.Emit.csproj"/>
     <Project Path="src/Concord.AttachedData/Concord.AttachedData.csproj"/>
     <Project Path="src/Concord.Orchestration/Concord.Orchestration.csproj"/>
+    <Project Path="src/Concord.Enums/Concord.Enums.csproj"/>
     <Project Path="src/Concord.Harmony/Concord.Harmony.csproj"/>
     <Project Path="src/Concord.Ref/Concord.Ref.csproj"/>
   </Folder>
@@ -24,6 +25,7 @@
     <Project Path="tests/Concord.Emit.Tests/Concord.Emit.Tests.csproj"/>
     <Project Path="tests/Concord.Emit.Tests.ForeignTargets/Concord.Emit.Tests.ForeignTargets.csproj"/>
     <Project Path="tests/Concord.AttachedData.Tests/Concord.AttachedData.Tests.csproj"/>
+    <Project Path="tests/Concord.Enums.Tests/Concord.Enums.Tests.csproj"/>
     <Project Path="tests/Concord.Orchestration.Tests/Concord.Orchestration.Tests.csproj"/>
     <Project Path="tests/Concord.Orchestration.Tests.RegistryAssembly/Concord.Orchestration.Tests.RegistryAssembly.csproj"/>
     <Project Path="tests/Concord.Generators.Tests.Consumer/Concord.Generators.Tests.Consumer.csproj"/>
