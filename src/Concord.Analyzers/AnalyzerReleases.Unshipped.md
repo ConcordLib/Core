@@ -34,3 +34,8 @@ CONCORD027 | Concord.Patches | Warning | A control-handle state slot a declarati
 CONCORD028 | Concord.Patches | Error | [Capture] parameters require an invoke or construction injection shifted to At.Head or At.Tail.
 CONCORD029 | Concord.Patches | Error | [Slice] requires an invoke or construction injection position.
 CONCORD030 | Concord.Patches | Error | [Capture] must name a 1-based argument the matched call supplies.
+CONCORD031 | Concord.Patches | Error | A declaration extending an enum must not also declare injections.
+CONCORD032 | Concord.Patches | Error | An [EnumMember] field must be static and typed as the extended enum.
+CONCORD033 | Concord.Patches | Warning | An extended enum member must be const to pin its value; a plain initializer is discarded.
+CONCORD034 | Concord.Patches | Error | Each extended enum member needs its own persisted id.
+CONCORD035 | Concord.Patches | Warning | An extended enum member read from a static constructor runs before Concord assigns it.

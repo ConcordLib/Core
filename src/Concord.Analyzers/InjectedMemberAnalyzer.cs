@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Linq;
 using System.Reflection.Metadata;
@@ -5,6 +6,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
+using Microsoft.CodeAnalysis.Operations;
 
 namespace Concord.Analyzers;
 
@@ -163,8 +165,32 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     /// </summary>
     public const string InvalidCaptureArgumentDiagnosticId = "CONCORD030";
 
-    private const string ConcordPatchesNamespace = "Concord.Patches";
-    private const string ConcordNamespace = "Concord";
+    /// <summary>
+    ///     Diagnostic id for an extended enum declaration that also declares an injection.
+    /// </summary>
+    public const string EnumDeclarationInjectionDiagnosticId = "CONCORD031";
+
+    /// <summary>
+    ///     Diagnostic id for an [EnumMember] field that is not static or not typed as the extended enum.
+    /// </summary>
+    public const string InvalidEnumMemberFieldDiagnosticId = "CONCORD032";
+
+    /// <summary>
+    ///     Diagnostic id for a member field with a non-const initializer, which Concord overwrites.
+    /// </summary>
+    public const string NonConstEnumMemberInitializerDiagnosticId = "CONCORD033";
+
+    /// <summary>
+    ///     Diagnostic id for two extended enum members in one assembly that resolve to the same id.
+    /// </summary>
+    public const string DuplicateEnumMemberIdDiagnosticId = "CONCORD034";
+
+    /// <summary>
+    ///     Diagnostic id for a member read from a static constructor, before Concord assigns it.
+    /// </summary>
+    public const string EnumMemberReadBeforeApplyDiagnosticId = "CONCORD035";
+
+    private const string ConcordPatchesNamespace = "Concord.Patches";    private const string ConcordNamespace = "Concord";
     private const string OperationTypeName = "Operation";
     private const string VoidOperationPrefix = "VoidOperation<";
     private const string ConstructorName = ".ctor";
@@ -430,6 +456,52 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         true,
         "[Capture] names a 1-based argument of the matched call, so the ordinal must be at least 1 and no greater than the number of arguments the matched call takes.");
 
+    private static readonly DiagnosticDescriptor EnumDeclarationInjectionRule = new(
+        EnumDeclarationInjectionDiagnosticId,
+        "Extended enum declaration cannot inject",
+        "'{0}' extends an enum, so it cannot also declare the injection '{1}'",
+        ConcordPatchesNamespace,
+        DiagnosticSeverity.Error,
+        true,
+        "A declaration whose base is ExtendedEnum<T> holds member fields. Move injections to their own [Patch] class.");
+
+    private static readonly DiagnosticDescriptor InvalidEnumMemberFieldRule = new(
+        InvalidEnumMemberFieldDiagnosticId,
+        "[EnumMember] field has the wrong shape",
+        "Field '{0}' carries [EnumMember] but must be static and typed as '{1}'",
+        ConcordPatchesNamespace,
+        DiagnosticSeverity.Error,
+        true,
+        "Concord assigns extended enum members to static fields typed as the extended enum.");
+
+    private static readonly DiagnosticDescriptor NonConstEnumMemberInitializerRule = new(
+        NonConstEnumMemberInitializerDiagnosticId,
+        "Extended enum member initializer is discarded",
+        "Member '{0}' has an initializer Concord cannot read and overwrites; declare it const to pin the value",
+        ConcordPatchesNamespace,
+        DiagnosticSeverity.Warning,
+        true,
+        "Concord reads a pinned value from a compile-time constant. A plain static initializer runs before Concord assigns the field, so the value is lost.");
+
+    private static readonly DiagnosticDescriptor DuplicateEnumMemberIdRule = new(
+        DuplicateEnumMemberIdDiagnosticId,
+        "Two extended enum members share an id",
+        "Member id '{0}' is already declared by '{1}'",
+        ConcordPatchesNamespace,
+        DiagnosticSeverity.Error,
+        true,
+        "Each extended enum member needs its own persisted id, because the id is the key Concord stores its value under.",
+        customTags: WellKnownDiagnosticTags.CompilationEnd);
+
+    private static readonly DiagnosticDescriptor EnumMemberReadBeforeApplyRule = new(
+        EnumMemberReadBeforeApplyDiagnosticId,
+        "Extended enum member read before Concord assigns it",
+        "Member '{0}' is read from a static constructor, which runs before Concord assigns it",
+        ConcordPatchesNamespace,
+        DiagnosticSeverity.Warning,
+        true,
+        "Concord assigns member fields during Patcher.Apply. A static constructor on the declaring type can run first and read the default value.");
+
     private enum MetadataMemberKind {
         Field,
         Property,
@@ -467,7 +539,12 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             UnwrittenStateSlotRule,
             MisplacedCaptureRule,
             MisplacedSliceRule,
-            InvalidCaptureArgumentRule);
+            InvalidCaptureArgumentRule,
+            EnumDeclarationInjectionRule,
+            InvalidEnumMemberFieldRule,
+            NonConstEnumMemberInitializerRule,
+            DuplicateEnumMemberIdRule,
+            EnumMemberReadBeforeApplyRule);
 
     /// <inheritdoc />
     public override void Initialize(AnalysisContext context) {
@@ -475,11 +552,17 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         context.EnableConcurrentExecution();
         context.RegisterSymbolAction(AnalyzeNamedType, SymbolKind.NamedType);
         context.RegisterSymbolStartAction(AnalyzeStateSlots, SymbolKind.NamedType);
+        context.RegisterCompilationStartAction(AnalyzeEnumMemberIds);
     }
 
     private static void AnalyzeNamedType(SymbolAnalysisContext context) {
         if (context.Symbol is not INamedTypeSymbol patchType ||
             patchType.TypeKind != TypeKind.Class) {
+            return;
+        }
+
+        if (GetExtendedEnumType(patchType) is INamedTypeSymbol extendedEnum) {
+            AnalyzeExtendedEnumDeclaration(context, patchType, extendedEnum);
             return;
         }
 
@@ -3043,6 +3126,176 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
 
     private static bool IsInjectAttribute(AttributeData attribute) {
         return IsConcordAttribute(attribute, "InjectAttribute");
+    }
+
+    private static bool IsEnumMemberAttribute(AttributeData attribute) {
+        return IsConcordAttribute(attribute, "EnumMemberAttribute");
+    }
+
+    private static INamedTypeSymbol? GetExtendedEnumType(INamedTypeSymbol declaration) {
+        for (INamedTypeSymbol? current = declaration.BaseType; current is not null; current = current.BaseType) {
+            if (current.Name != "ExtendedEnum" ||
+                current.Arity != 1 ||
+                current.ContainingNamespace?.ToDisplayString() != ConcordNamespace) {
+                continue;
+            }
+
+            return current.TypeArguments[0] as INamedTypeSymbol;
+        }
+
+        return null;
+    }
+
+    private static void AnalyzeExtendedEnumDeclaration(
+        SymbolAnalysisContext context,
+        INamedTypeSymbol declaration,
+        INamedTypeSymbol enumType) {
+        if (!declaration.GetAttributes().Any(IsPatchAttribute)) {
+            return;
+        }
+
+        foreach (IMethodSymbol method in declaration.GetMembers().OfType<IMethodSymbol>()) {
+            if (!method.GetAttributes().Any(IsInjectionAttribute)) {
+                continue;
+            }
+
+            context.ReportDiagnostic(Diagnostic.Create(
+                EnumDeclarationInjectionRule,
+                method.Locations.FirstOrDefault() ?? Location.None,
+                declaration.Name,
+                method.Name));
+        }
+
+        List<IFieldSymbol> members = new List<IFieldSymbol>();
+
+        foreach (IFieldSymbol field in declaration.GetMembers().OfType<IFieldSymbol>()) {
+            bool typed = SymbolEqualityComparer.Default.Equals(field.Type, enumType);
+            bool tagged = field.GetAttributes().Any(IsEnumMemberAttribute);
+
+            if (!typed || !field.IsStatic) {
+                if (tagged) {
+                    context.ReportDiagnostic(Diagnostic.Create(
+                        InvalidEnumMemberFieldRule,
+                        field.Locations.FirstOrDefault() ?? Location.None,
+                        declaration.Name + "." + field.Name,
+                        enumType.Name));
+                }
+
+                continue;
+            }
+
+            members.Add(field);
+
+            if (!field.IsConst && HasInitializer(field)) {
+                context.ReportDiagnostic(Diagnostic.Create(
+                    NonConstEnumMemberInitializerRule,
+                    field.Locations.FirstOrDefault() ?? Location.None,
+                    declaration.Name + "." + field.Name));
+            }
+        }
+    }
+
+    private static bool HasInitializer(IFieldSymbol field) {
+        foreach (SyntaxReference reference in field.DeclaringSyntaxReferences) {
+            if (reference.GetSyntax() is VariableDeclaratorSyntax { Initializer: not null }) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void AnalyzeEnumMemberIds(CompilationStartAnalysisContext context) {
+        ConcurrentBag<(string Id, string Owner, Location Location)> declared = [];
+
+        context.RegisterSymbolAction(
+            symbolContext => CollectEnumMemberIds(symbolContext, declared),
+            SymbolKind.NamedType);
+
+        context.RegisterOperationAction(ReportEnumMemberReadBeforeApply, OperationKind.FieldReference);
+
+        context.RegisterCompilationEndAction(endContext => ReportDuplicateEnumMemberIds(endContext, declared));
+    }
+
+    private static void ReportEnumMemberReadBeforeApply(OperationAnalysisContext context) {
+        if (context.Operation is not IFieldReferenceOperation reference ||
+            context.ContainingSymbol is not IMethodSymbol { MethodKind: MethodKind.StaticConstructor } constructor) {
+            return;
+        }
+
+        INamedTypeSymbol declaration = constructor.ContainingType;
+        if (!declaration.GetAttributes().Any(IsPatchAttribute) ||
+            GetExtendedEnumType(declaration) is not INamedTypeSymbol enumType) {
+            return;
+        }
+
+        IFieldSymbol field = reference.Field;
+        if (!field.IsStatic ||
+            field.IsConst ||
+            !SymbolEqualityComparer.Default.Equals(field.ContainingType, declaration) ||
+            !SymbolEqualityComparer.Default.Equals(field.Type, enumType)) {
+            return;
+        }
+
+        context.ReportDiagnostic(Diagnostic.Create(
+            EnumMemberReadBeforeApplyRule,
+            reference.Syntax.GetLocation(),
+            declaration.Name + "." + field.Name));
+    }
+
+    private static void CollectEnumMemberIds(
+        SymbolAnalysisContext context,
+        ConcurrentBag<(string Id, string Owner, Location Location)> declared) {
+        if (context.Symbol is not INamedTypeSymbol declaration ||
+            declaration.TypeKind != TypeKind.Class ||
+            !declaration.GetAttributes().Any(IsPatchAttribute)) {
+            return;
+        }
+
+        if (GetExtendedEnumType(declaration) is not INamedTypeSymbol enumType) {
+            return;
+        }
+
+        foreach (IFieldSymbol field in declaration.GetMembers().OfType<IFieldSymbol>()) {
+            if (!field.IsStatic || !SymbolEqualityComparer.Default.Equals(field.Type, enumType)) {
+                continue;
+            }
+
+            string id = ReadEnumMemberId(field) ?? declaration.ToDisplayString() + "." + field.Name;
+            declared.Add((id, declaration.Name + "." + field.Name, field.Locations.FirstOrDefault() ?? Location.None));
+        }
+    }
+
+    private static string? ReadEnumMemberId(IFieldSymbol field) {
+        foreach (AttributeData attribute in field.GetAttributes()) {
+            if (!IsEnumMemberAttribute(attribute) || attribute.ConstructorArguments.Length != 1) {
+                continue;
+            }
+
+            return attribute.ConstructorArguments[0].Value as string;
+        }
+
+        return null;
+    }
+
+    private static void ReportDuplicateEnumMemberIds(
+        CompilationAnalysisContext context,
+        ConcurrentBag<(string Id, string Owner, Location Location)> declared) {
+        List<(string Id, string Owner, Location Location)> ordered = declared
+            .OrderBy(entry => entry.Location.SourceTree?.FilePath ?? string.Empty, StringComparer.Ordinal)
+            .ThenBy(entry => entry.Location.SourceSpan.Start)
+            .ToList();
+
+        Dictionary<string, string> seen = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach ((string id, string owner, Location location) in ordered) {
+            if (seen.TryGetValue(id, out string? first)) {
+                context.ReportDiagnostic(Diagnostic.Create(DuplicateEnumMemberIdRule, location, id, first));
+                continue;
+            }
+
+            seen.Add(id, owner);
+        }
     }
 
     private static bool IsInjectNewAttribute(AttributeData attribute) {

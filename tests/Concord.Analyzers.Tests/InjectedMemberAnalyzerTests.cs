@@ -2051,6 +2051,17 @@ public sealed class InjectedMemberAnalyzerTests {
             public void Invoke(T1 arg1, T2 arg2) {
             }
         }
+
+        public abstract class ExtendedEnum<TEnum> where TEnum : struct, Enum {
+        }
+
+        [AttributeUsage(AttributeTargets.Field)]
+        public sealed class EnumMemberAttribute : Attribute {
+            public EnumMemberAttribute(string id) {
+            }
+
+            public string Id => null;
+        }
     }
     """;
 
