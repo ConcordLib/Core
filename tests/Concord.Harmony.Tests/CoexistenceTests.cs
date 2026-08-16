@@ -491,6 +491,45 @@ namespace Concord.Harmony.Tests
         }
     }
 
+    public static class IteratorReturnTarget
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static IEnumerable<int> Numbers()
+        {
+            yield return 1;
+            yield return 2;
+        }
+    }
+
+    public static class IteratorReturnMods
+    {
+        public static void PassThrough(ControlHandle<IEnumerable<int>> ch)
+        {
+            IEnumerable<int> current = ch.ReturnValue;
+            ch.ReturnValue = current;
+        }
+    }
+
+    public static class ExceptionRegionInjectionLog
+    {
+        public static List<string> Entries = new List<string>();
+    }
+
+    public static class ExceptionRegionInjectionMods
+    {
+        public static void TryFinallyHead(ControlHandle ch)
+        {
+            try
+            {
+                ExceptionRegionInjectionLog.Entries.Add("try");
+            }
+            finally
+            {
+                ExceptionRegionInjectionLog.Entries.Add("finally");
+            }
+        }
+    }
+
     [Collection("HarmonySerial")]
     public sealed class CoexistenceTests
     {
@@ -1201,6 +1240,68 @@ namespace Concord.Harmony.Tests
                 TranspilerParticipant.LastStreamFailure = null;
                 TranspilerParticipant.Log = null;
                 harmonyForeign.UnpatchAll("test.composefailure.foreign");
+            }
+        }
+
+        // Harmony hands the bridge the stream for the method it opened. On an iterator that is the
+        // compiler's stub, which is what a PatchBody.Declared injection is shaped against, so the
+        // composition has to keep the stub's identity instead of resolving through to MoveNext -
+        // composing against MoveNext's bool return drops the IEnumerable and the target returns null.
+        [Fact]
+        public void TryRoute_IteratorTarget_DeclaredBody_ComposesAgainstTheStub()
+        {
+            MethodInfo target = typeof(IteratorReturnTarget).GetMethod(nameof(IteratorReturnTarget.Numbers));
+            MethodInfo passThrough = typeof(IteratorReturnMods).GetMethod(nameof(IteratorReturnMods.PassThrough));
+
+            HarmonyBridge bridge = new HarmonyBridge(_ => { });
+
+            ForeignRouteResult result = null;
+            try
+            {
+                Injection returnInjection = new Injection(passThrough, new InjectAt.Return(), "test.concord.iterator", 0);
+
+                result = bridge.TryRoute(target, new[] { returnInjection }, forceRoute: true);
+
+                Assert.Equal(ForeignRouteKind.Routed, result.Kind);
+                Assert.Equal(new List<int> { 1, 2 }, new List<int>(IteratorReturnTarget.Numbers()));
+            }
+            finally
+            {
+                result?.Handle?.Dispose();
+                TranspilerParticipant.Registry.Clear(MethodIdentity.Normalize(target));
+                TranspilerParticipant.LastStreamFailure = null;
+                TranspilerParticipant.Log = null;
+            }
+        }
+
+        // Harmony wants EndExceptionBlock on the region's last instruction; Concord puts it on the
+        // one after. Composition can introduce a region the incoming stream never had, so that
+        // translation cannot be gated on the incoming stream having had one.
+        [Fact]
+        public void TryRoute_InjectionBodyWithExceptionRegion_ComposesValidStream()
+        {
+            MethodInfo target = typeof(ForceRouteTarget).GetMethod(nameof(ForceRouteTarget.Bare));
+            MethodInfo tryFinallyHead = typeof(ExceptionRegionInjectionMods).GetMethod(nameof(ExceptionRegionInjectionMods.TryFinallyHead));
+
+            HarmonyBridge bridge = new HarmonyBridge(_ => { });
+
+            ForeignRouteResult result = null;
+            try
+            {
+                result = bridge.TryRoute(target, new[] { MakeHeadInjection(tryFinallyHead, "test.concord.tryfinally") }, forceRoute: true);
+
+                Assert.Equal(ForeignRouteKind.Routed, result.Kind);
+
+                ExceptionRegionInjectionLog.Entries.Clear();
+                Assert.Equal(5, ForceRouteTarget.Bare());
+                Assert.Equal(new List<string> { "try", "finally" }, ExceptionRegionInjectionLog.Entries);
+            }
+            finally
+            {
+                result?.Handle?.Dispose();
+                TranspilerParticipant.Registry.Clear(MethodIdentity.Normalize(target));
+                TranspilerParticipant.LastStreamFailure = null;
+                TranspilerParticipant.Log = null;
             }
         }
     }

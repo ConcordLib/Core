@@ -68,8 +68,11 @@ internal static class CodeInstructionConverter {
     internal static List<CodeInstruction> FromConcord(List<Concord.CodeInstruction> composed, HarmonyStreamContext context, ILGenerator generator) {
         if (context.AppendedSacrificialNop) {
             StripSacrificialNop(composed);
-            UnshiftEndMarkersOntoPrecedingInstruction(composed);
         }
+
+        // Unconditional: composition can introduce regions the incoming stream never had, and those
+        // need the same Concord-to-Harmony End placement. A stream with no End markers is untouched.
+        UnshiftEndMarkersOntoPrecedingInstruction(composed);
 
         Dictionary<Concord.LocalRef, LocalBuilder> mintedLocals = new Dictionary<Concord.LocalRef, LocalBuilder>();
 

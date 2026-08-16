@@ -30,17 +30,20 @@ internal static class TranspilerParticipant {
             return instructions;
         }
 
-        Injection[] ordered = Registry.OrderedSnapshot(MethodIdentity.Normalize(original));
+        // Harmony hands back the stream for the method it opened, so composition keeps that method's
+        // shape. Resolving an iterator to MoveNext here composes against a body Harmony never opened.
+        MethodBase opened = MethodIdentity.Normalize(original);
+
+        Injection[] ordered = Registry.OrderedSnapshot(opened);
         if (ordered.Length == 0) {
             return instructions;
         }
 
         List<CodeInstruction> stream = new List<CodeInstruction>(instructions);
         try {
-            MethodBase resolved = WrapperComposer.ResolveStateMachineTarget(original);
-            Concord.ITranspilerContext context = WrapperComposer.CreateStreamContext(resolved);
+            Concord.ITranspilerContext context = WrapperComposer.CreateStreamContext(opened);
             List<Concord.CodeInstruction> incoming = CodeInstructionConverter.ToConcord(stream, context, out HarmonyStreamContext harmonyContext);
-            List<Concord.CodeInstruction> outgoing = WrapperComposer.TransformStream(resolved, incoming, ordered, context);
+            List<Concord.CodeInstruction> outgoing = WrapperComposer.TransformStream(opened, incoming, ordered, context);
             return CodeInstructionConverter.FromConcord(outgoing, harmonyContext, generator);
         } catch (ConcordEmitException ex) {
             LastStreamFailure = ex;
