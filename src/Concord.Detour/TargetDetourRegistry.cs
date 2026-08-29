@@ -127,7 +127,7 @@ internal sealed class TargetDetourRegistry {
         old?.Dispose();
 
         if (composed is not null) {
-            detour = DetourFactory.Current.CreateDetour(target, composed.Wrapper);
+            detour = MonoModHost.Factory.CreateDetour(target, composed.Wrapper);
         }
     }
 

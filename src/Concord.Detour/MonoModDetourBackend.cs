@@ -21,7 +21,7 @@ public sealed class MonoModDetourBackend : IDetourBackend {
             throw new ArgumentNullException(nameof(replacement));
         }
 
-        ICoreDetour detour = DetourFactory.Current.CreateDetour(original, replacement);
+        ICoreDetour detour = MonoModHost.Factory.CreateDetour(original, replacement);
         return new Handle(original, detour);
     }
 
