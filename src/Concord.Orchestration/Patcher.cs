@@ -114,6 +114,16 @@ public static class Patcher {
     }
 
     /// <summary>
+    ///     Lists every patch owner live on <paramref name="target" />, in the order they run. Covers both
+    ///     targets Concord detoured itself and targets handed to a foreign patch host such as Harmony.
+    /// </summary>
+    /// <param name="target">The method to inspect.</param>
+    /// <returns>Distinct owner ids in run order, empty when Concord has no injections on the method.</returns>
+    public static IReadOnlyList<string> OwnersOf(MethodBase target) {
+        return PatchOwners.Of(target);
+    }
+
+    /// <summary>
     ///     Creates a fluent <see cref="PatchBuilder" /> targeting the given method.
     /// </summary>
     /// <param name="target">The method to patch.</param>

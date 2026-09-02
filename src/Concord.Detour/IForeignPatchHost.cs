@@ -62,6 +62,14 @@ public interface IForeignPatchHost {
     IReadOnlyList<string> ForeignOwners(MethodBase target);
 
     /// <summary>
+    ///     Lists Concord's own patch owners on a target the host has taken over. Those injections live in
+    ///     the host's wrapper rather than in Concord's detour registry, so only the host can report them.
+    /// </summary>
+    /// <param name="target">The method to inspect.</param>
+    /// <returns>The Concord owner identifiers in run order, empty when none.</returns>
+    IReadOnlyList<string> ConcordOwners(MethodBase target);
+
+    /// <summary>
     ///     Hooks the host so it notifies <paramref name="observer" /> before it rebuilds any method.
     ///     Without this, Concord only learns about a foreign patch by polling after the fact.
     /// </summary>

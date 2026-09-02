@@ -53,6 +53,7 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
             }
 
             this.host = host;
+            PatchOwners.Host = host;
         }
 
         try {

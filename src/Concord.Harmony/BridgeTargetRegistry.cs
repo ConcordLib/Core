@@ -19,6 +19,7 @@ internal sealed class BridgeTargetRegistry
         lock (gate)
         {
             Entry entry = GetOrCreateEntry(target);
+            entry.Owners = null;
 
             long[] owned = new long[added.Count];
             for (int i = 0; i < added.Count; i++)
@@ -44,6 +45,7 @@ internal sealed class BridgeTargetRegistry
             }
 
             List<(long Seq, Injection Injection)> removed = new List<(long Seq, Injection Injection)>(owned.Count);
+            entry.Owners = null;
             foreach (long seq in owned)
             {
                 for (int i = entry.Live.Count - 1; i >= 0; i--)
@@ -68,7 +70,28 @@ internal sealed class BridgeTargetRegistry
         lock (gate)
         {
             Entry entry = GetOrCreateEntry(target);
+            entry.Owners = null;
             entry.Live.AddRange(pairs);
+        }
+    }
+
+    internal IReadOnlyList<string> OwnersFor(MethodBase target)
+    {
+        target = MethodIdentity.Normalize(target);
+
+        lock (gate)
+        {
+            if (!entries.TryGetValue(target, out Entry entry) || entry.Live.Count == 0)
+            {
+                return System.Array.Empty<string>();
+            }
+
+            if (entry.Owners == null)
+            {
+                entry.Owners = BuildOwners(entry.Live);
+            }
+
+            return entry.Owners;
         }
     }
 
@@ -110,6 +133,37 @@ internal sealed class BridgeTargetRegistry
         }
     }
 
+    // Composition order runs backwards: the body composed last wraps the others, so it runs first.
+    private static IReadOnlyList<string> BuildOwners(List<(long Seq, Injection Injection)> live)
+    {
+        Injection[] ordered;
+        try
+        {
+            ordered = InjectionOrderer.OrderForComposition(live);
+        }
+        catch (ConcordEmitException)
+        {
+            // Callers read this during crash capture, so a cycle names owners instead of throwing.
+            ordered = new Injection[live.Count];
+            for (int i = 0; i < live.Count; i++)
+            {
+                ordered[i] = live[i].Injection;
+            }
+        }
+
+        List<string> result = new List<string>(ordered.Length);
+        for (int i = ordered.Length - 1; i >= 0; i--)
+        {
+            string owner = ordered[i].Owner;
+            if (!result.Contains(owner))
+            {
+                result.Add(owner);
+            }
+        }
+
+        return result;
+    }
+
     private Entry GetOrCreateEntry(MethodBase target)
     {
         if (!entries.TryGetValue(target, out Entry entry))
@@ -126,5 +180,7 @@ internal sealed class BridgeTargetRegistry
         internal List<(long Seq, Injection Injection)> Live { get; } = new List<(long Seq, Injection Injection)>();
 
         internal long NextSeq { get; set; }
+
+        internal IReadOnlyList<string> Owners { get; set; }
     }
 }

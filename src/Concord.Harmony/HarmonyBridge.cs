@@ -215,6 +215,12 @@ public sealed class HarmonyBridge : IForeignPatchHost
         }
     }
 
+    /// <inheritdoc />
+    public IReadOnlyList<string> ConcordOwners(MethodBase target)
+    {
+        return TranspilerParticipant.Registry.OwnersFor(target);
+    }
+
     internal void DisposeHandle(MethodBase target, long[] owned)
     {
         if (HarmonyLockScope.Available)

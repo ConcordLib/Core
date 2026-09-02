@@ -13,6 +13,7 @@ internal sealed class TargetDetourRegistry {
     private readonly List<(long Seq, Injection Injection)> live = [];
     private ICoreDetour? detour;
     private long sequence;
+    private IReadOnlyList<string> owners = [];
 
     private TargetDetourRegistry(MethodBase target) {
         this.target = target;
@@ -36,6 +37,41 @@ internal sealed class TargetDetourRegistry {
         }
 
         return registry.AddInternal(added);
+    }
+
+    // Keys are normalized when RoutingDetourBackend is in the chain and raw when it is not, so try both.
+    internal static IReadOnlyList<string> OwnersFor(MethodBase target) {
+        TargetDetourRegistry? registry = Find(target) ?? Find(MethodIdentity.Normalize(target));
+        if (registry == null) {
+            return [];
+        }
+
+        lock (registry.gate) {
+            return registry.owners;
+        }
+    }
+
+    private static TargetDetourRegistry? Find(MethodBase target) {
+        lock (RegistriesGate) {
+            return Registries.TryGetValue(target, out TargetDetourRegistry? registry) ? registry : null;
+        }
+    }
+
+    // Composition order runs backwards: the body composed last wraps the others, so it runs first.
+    private static IReadOnlyList<string> BuildOwners(IReadOnlyList<Injection> ordered) {
+        if (ordered.Count == 0) {
+            return [];
+        }
+
+        List<string> result = new List<string>(ordered.Count);
+        for (int i = ordered.Count - 1; i >= 0; i--) {
+            string owner = ordered[i].Owner;
+            if (!result.Contains(owner)) {
+                result.Add(owner);
+            }
+        }
+
+        return result;
     }
 
     private IDetourHandle AddInternal(IReadOnlyList<Injection> added) {
@@ -129,6 +165,8 @@ internal sealed class TargetDetourRegistry {
         if (composed is not null) {
             detour = MonoModHost.Factory.CreateDetour(target, composed.Wrapper);
         }
+
+        owners = BuildOwners(ordered);
     }
 
     private sealed class RegistryHandle : IDetourHandle {
