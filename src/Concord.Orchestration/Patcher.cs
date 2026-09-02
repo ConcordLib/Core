@@ -124,6 +124,30 @@ public static class Patcher {
     }
 
     /// <summary>
+    ///     Lists every patch owner live on the method a stack frame is running, in the order they run. A
+    ///     detoured target does not run under its own name, so the frame reports Concord's composed wrapper
+    ///     instead: this resolves the wrapper back to its target first. Reading the method off the frame and
+    ///     passing it to <see cref="OwnersOf" /> asks about the wrapper and always comes back empty.
+    /// </summary>
+    /// <param name="frame">The stack frame to inspect.</param>
+    /// <returns>
+    ///     Distinct owner ids in run order, empty when Concord has no injections on the method the frame is
+    ///     running or the frame reports no method at all.
+    /// </returns>
+    public static IReadOnlyList<string> OwnersOfFrame(StackFrame frame) {
+        if (frame is null) {
+            throw new ArgumentNullException(nameof(frame));
+        }
+
+        MethodBase? method = frame.GetMethod();
+        if (method is null) {
+            return [];
+        }
+
+        return OwnersOf(MethodIdentity.ResolveOriginal(method) ?? method);
+    }
+
+    /// <summary>
     ///     Creates a fluent <see cref="PatchBuilder" /> targeting the given method.
     /// </summary>
     /// <param name="target">The method to patch.</param>

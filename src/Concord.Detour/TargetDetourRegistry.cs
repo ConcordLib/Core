@@ -11,6 +11,7 @@ internal sealed class TargetDetourRegistry {
     private readonly MethodBase target;
     private readonly object gate = new object();
     private readonly List<(long Seq, Injection Injection)> live = [];
+    private readonly List<IntPtr> wrapperKeys = [];
     private ICoreDetour? detour;
     private long sequence;
     private IReadOnlyList<string> owners = [];
@@ -156,6 +157,7 @@ internal sealed class TargetDetourRegistry {
 
         ICoreDetour? old = detour;
         detour = null;
+        MethodIdentity.Forget(wrapperKeys);
         if (old is { IsApplied: true }) {
             old.Undo();
         }
@@ -164,6 +166,7 @@ internal sealed class TargetDetourRegistry {
 
         if (composed is not null) {
             detour = MonoModHost.Factory.CreateDetour(target, composed.Wrapper);
+            MethodIdentity.Remember(composed.Wrapper, target, wrapperKeys);
         }
 
         owners = BuildOwners(ordered);
