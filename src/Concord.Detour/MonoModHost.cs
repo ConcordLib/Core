@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.InteropServices;
@@ -56,7 +57,7 @@ internal static class MonoModHost {
             return;
         }
 
-        Console.Error.WriteLine(
+        Debug.WriteLine(
             $"[Concord] JIT reports version {reported}, MonoMod expected {*expected}. Trusting the JIT. "
             + "If this runtime also changed the ICorJitInfo vtable, detouring will crash.");
         *expected = reported;
