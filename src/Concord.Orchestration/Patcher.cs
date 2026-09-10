@@ -15,7 +15,17 @@ public static class Patcher {
     private static readonly object Gate = new object();
     private static readonly Dictionary<Assembly, IPatchHandle> Applied = [];
     private static readonly HashSet<IPatchHandle> Live = [];
-    private static readonly AttachedPropertyStore Properties = new AttachedPropertyStore();
+    private static IAttachedPropertyRegistry properties = new AttachedPropertyStore();
+
+    /// <summary>
+    ///     Registers the adapter registry that receives every attached property declared by
+    ///     <see cref="Apply(Assembly)" />. Without one, declared properties are held in memory only and the
+    ///     host never learns about them.
+    /// </summary>
+    /// <param name="registry">The adapter's registry.</param>
+    public static void UseAttachedPropertyRegistry(IAttachedPropertyRegistry registry) {
+        properties = registry;
+    }
 
     /// <summary>
     ///     Applies every <see cref="PatchAttribute" /> declaration in <paramref name="assembly" />, composing each
@@ -38,7 +48,7 @@ public static class Patcher {
                         : assembly.GetTypes();
 
                 PatchDeclarationScanner.ScanExtendedEnums(declarations);
-                PatchDeclarationScanner.ScanDeclarations(declarations, applier, Properties);
+                PatchDeclarationScanner.ScanDeclarations(declarations, applier, properties);
             } catch {
                 foreach (IDetourHandle handle in applier.Handles) {
                     try {
