@@ -165,7 +165,7 @@ public sealed class SpineCopyTests {
         (ModuleDefinition module, MethodDefinition wrapperA) = NewWrapper("A");
         (_, MethodDefinition wrapperB) = NewWrapper("B");
 
-        SpineTemplate template = SpineTemplate.Capture(fixture.Instructions, fixture.Handlers, new HashSet<VariableDefinition>());
+        SpineTemplate template = SpineTemplate.Capture(fixture.Instructions, fixture.Handlers, new HashSet<VariableDefinition>(), []);
 
         SpineCopy copyA = SpineCopy.Create(template, wrapperA);
         SpineCopy copyB = SpineCopy.Create(template, wrapperB);
@@ -280,7 +280,7 @@ public sealed class SpineCopyTests {
     public void Create_TryCatchFilter_FilterStartResolvesWithinCopy() {
         (ModuleDefinition module, MethodDefinition _) = NewWrapper("Probe");
         (List<Instruction> instructions, List<ExceptionHandler> handlers, VariableDefinition _) = BuildTryCatchFilter(module);
-        SpineTemplate template = SpineTemplate.Capture(instructions, handlers, new HashSet<VariableDefinition>());
+        SpineTemplate template = SpineTemplate.Capture(instructions, handlers, new HashSet<VariableDefinition>(), []);
 
         (ModuleDefinition _, MethodDefinition wrapperA) = NewWrapper("FilterA");
         SpineCopy copy = SpineCopy.Create(template, wrapperA);
@@ -295,7 +295,7 @@ public sealed class SpineCopyTests {
     public void Create_NestedTryFinallyInsideTryCatch_NestedBoundariesStayNested() {
         (ModuleDefinition module, MethodDefinition _) = NewWrapper("Probe");
         (List<Instruction> instructions, List<ExceptionHandler> handlers, VariableDefinition _) = BuildNestedTryFinallyInsideTryCatch(module);
-        SpineTemplate template = SpineTemplate.Capture(instructions, handlers, new HashSet<VariableDefinition>());
+        SpineTemplate template = SpineTemplate.Capture(instructions, handlers, new HashSet<VariableDefinition>(), []);
 
         (ModuleDefinition _, MethodDefinition wrapperA) = NewWrapper("NestedA");
         SpineCopy copy = SpineCopy.Create(template, wrapperA);

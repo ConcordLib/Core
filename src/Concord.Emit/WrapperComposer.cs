@@ -1469,7 +1469,7 @@ public static class WrapperComposer {
 
         HashSet<VariableDefinition> protocolLocals = CollectProtocolLocals(site.Locals);
 
-        SpineTemplate template = SpineTemplate.Capture(spine, site.WrapperDefinition.Body.ExceptionHandlers, protocolLocals);
+        SpineTemplate template = SpineTemplate.Capture(spine, site.WrapperDefinition.Body.ExceptionHandlers, protocolLocals, site.WrapperDefinition.Body.Variables);
 
         foreach (ExceptionHandler handler in template.Handlers) {
             site.WrapperDefinition.Body.ExceptionHandlers.Remove(handler);
