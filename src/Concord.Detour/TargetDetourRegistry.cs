@@ -8,6 +8,10 @@ internal sealed class TargetDetourRegistry {
     private static readonly Dictionary<MethodBase, TargetDetourRegistry> Registries = new Dictionary<MethodBase, TargetDetourRegistry>();
     private static readonly object RegistriesGate = new object();
 
+    // never released: mono frees a collected wrapper's code while a thread may still be inside it.
+    private static readonly List<MethodInfo> RootedWrappers = [];
+    private static readonly object RootedGate = new object();
+
     private readonly MethodBase target;
     private readonly object gate = new object();
     private readonly List<(long Seq, Injection Injection)> live = [];
@@ -18,6 +22,14 @@ internal sealed class TargetDetourRegistry {
 
     private TargetDetourRegistry(MethodBase target) {
         this.target = target;
+    }
+
+    internal static int RootedWrapperCount {
+        get {
+            lock (RootedGate) {
+                return RootedWrappers.Count;
+            }
+        }
     }
 
     private bool IsApplied {
@@ -49,6 +61,12 @@ internal sealed class TargetDetourRegistry {
 
         lock (registry.gate) {
             return registry.owners;
+        }
+    }
+
+    private static void Root(MethodInfo wrapper) {
+        lock (RootedGate) {
+            RootedWrappers.Add(wrapper);
         }
     }
 
@@ -155,19 +173,22 @@ internal sealed class TargetDetourRegistry {
             composed = WrapperComposer.Compose(target, ordered);
         }
 
-        ICoreDetour? old = detour;
-        detour = null;
-        MethodIdentity.Forget(wrapperKeys);
-        if (old is { IsApplied: true }) {
-            old.Undo();
-        }
+        using (WrapperPrecompile.Enter()) {
+            ICoreDetour? old = detour;
+            detour = null;
+            MethodIdentity.Forget(wrapperKeys);
+            if (old is { IsApplied: true }) {
+                old.Undo();
+            }
 
-        old?.Dispose();
+            old?.Dispose();
 
-        if (composed is not null) {
-            WrapperPrecompile.Compile(composed.Wrapper);
-            detour = MonoModHost.Factory.CreateDetour(target, composed.Wrapper);
-            MethodIdentity.Remember(composed.Wrapper, target, wrapperKeys);
+            if (composed is not null) {
+                WrapperPrecompile.Compile(composed.Wrapper);
+                Root(composed.Wrapper);
+                detour = MonoModHost.Factory.CreateDetour(target, composed.Wrapper);
+                MethodIdentity.Remember(composed.Wrapper, target, wrapperKeys);
+            }
         }
 
         owners = BuildOwners(ordered);

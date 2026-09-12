@@ -14,7 +14,10 @@ public static class PrecompileTarget {
 }
 
 public static class PrecompileInjections {
+    public static int HeadRuns;
+
     public static void Head() {
+        HeadRuns++;
     }
 
     public static void Tail() {
@@ -52,10 +55,32 @@ public sealed class WrapperPrecompileTests : IDisposable {
         Patcher.PrecompileWrappers = true;
 
         using (Patch(nameof(PrecompileInjections.Head), new InjectAt.Head())) {
+            Assert.Equal(["open", "close"], events);
             Assert.Equal(4, PrecompileTarget.Compute(2));
         }
 
-        Assert.Equal(["open", "close"], events);
+        Assert.Equal(["open", "close", "open", "close"], events);
+    }
+
+    [Fact]
+    public void Enabled_KeepsTheGuardOpenUntilTheDetourIsInstalled() {
+        Patcher.PrecompileWrappers = true;
+        int runsInsideScope = -1;
+        Patcher.UseCompileGuard(() => new Probe(() => {
+            if (runsInsideScope >= 0) {
+                return;
+            }
+
+            PrecompileInjections.HeadRuns = 0;
+            PrecompileTarget.Compute(2);
+            runsInsideScope = PrecompileInjections.HeadRuns;
+        }));
+
+        using (Patch(nameof(PrecompileInjections.Head), new InjectAt.Head())) {
+            Assert.Equal(4, PrecompileTarget.Compute(2));
+        }
+
+        Assert.Equal(1, runsInsideScope);
     }
 
     [Fact]
@@ -86,6 +111,12 @@ public sealed class WrapperPrecompileTests : IDisposable {
     private sealed class Scope(List<string> events) : IDisposable {
         public void Dispose() {
             events.Add("close");
+        }
+    }
+
+    private sealed class Probe(Action onClose) : IDisposable {
+        public void Dispose() {
+            onClose();
         }
     }
 }
