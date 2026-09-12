@@ -22,6 +22,13 @@ public sealed record Injection(MethodBase InjectionMethod, InjectAt At, string O
     public PatchBody Body { get; set; } = PatchBody.Declared;
 
     /// <summary>
+    ///     Values bound to this injection's <see cref="BoundAttribute" /> parameters, keyed by parameter
+    ///     name. Each one is emitted as a literal into the composed wrapper, so a single injection method
+    ///     can carry a different value for every target it is registered on.
+    /// </summary>
+    public IReadOnlyDictionary<string, object?>? BoundArguments { get; set; }
+
+    /// <summary>
     ///     The patch owners that should run after this injection.
     /// </summary>
     public IReadOnlyList<string> BeforeOwners { get; set; } = [];

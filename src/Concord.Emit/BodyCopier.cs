@@ -79,11 +79,20 @@ internal static class BodyCopier {
             }
         }
 
+        Dictionary<int, object?> boundValues = BoundConstants.Resolve(request.InjectionMethod, request.BoundArguments);
+        foreach (int bound in boundValues.Keys) {
+            argRemap.Remove(bound);
+        }
+
         int controlHandleArgIndex = ControlHandleLowering.FindControlHandleArgIndex(request.InjectionMethod);
         int operationArgIndex = ControlHandleLowering.FindOperationArgIndex(request.InjectionMethod);
 
         Dictionary<VariableDefinition, VariableDefinition> variableMap = CopyInjectionLocals(injectionBody, request.Destination.Body, module);
         LoweringContext ctx = new LoweringContext(module, variableMap, injectionBody.Variables, request.InjectedMembers, argRemap, request.Destination.Body.Variables);
+
+        List<Instruction> boundPrologue = [];
+        Dictionary<int, VariableDefinition> boundConstants =
+            BoundConstants.SpillToLocals(boundValues, request.InjectionMethod, request.Destination.Body, module, boundPrologue);
 
         InjectionLoweringSite site = new InjectionLoweringSite(
             controlHandleArgIndex,
@@ -96,7 +105,8 @@ internal static class BodyCopier {
             request.Destination,
             spineCopies,
             insideAround,
-            captureBinding);
+            captureBinding,
+            boundConstants);
 
         List<(Instruction Source, List<Instruction> Emitted)> entries =
             new List<(Instruction Source, List<Instruction> Emitted)>(injectionBody.Instructions.Count);
@@ -108,7 +118,8 @@ internal static class BodyCopier {
 
         Dictionary<Instruction, Instruction> instructionMap = BuildInstructionMap(entries);
 
-        List<Instruction> result = new List<Instruction>(injectionBody.Instructions.Count);
+        List<Instruction> result = new List<Instruction>(injectionBody.Instructions.Count + boundPrologue.Count);
+        result.AddRange(boundPrologue);
         foreach ((Instruction _, List<Instruction> emitted) in entries) {
             foreach (Instruction copy in emitted) {
                 RemapBranchTargets(copy, instructionMap);
@@ -134,6 +145,8 @@ internal static class BodyCopier {
         MethodBase injectionMethod,
         InjectedMemberMap injectedMembers,
         VariableDefinition valueLocal) {
+        BoundConstants.RejectDeclarations(injectionMethod, "a value injection");
+
         MethodBody injectionBody = injectionDefinition.Body;
         ModuleDefinition module = destination.Module;
 
@@ -195,6 +208,8 @@ internal static class BodyCopier {
         IReadOnlyList<VariableDefinition> argLocals,
         OpCode originalOpCode,
         CallSiteShape shape) {
+        BoundConstants.RejectDeclarations(request.InjectionMethod, "an invoke-wrap injection");
+
         MethodBody injectionBody = request.InjectionDefinition.Body;
         ModuleDefinition module = request.Destination.Module;
 
@@ -424,6 +439,10 @@ internal static class BodyCopier {
 
         if (site.CaptureBinding is not null && TryLowerArgBinding(source, site.CaptureBinding, out Instruction? captured)) {
             return new List<Instruction> { captured! };
+        }
+
+        if (site.BoundConstants is not null && TryLowerArgBinding(source, site.BoundConstants, out Instruction? boundLocal)) {
+            return new List<Instruction> { boundLocal! };
         }
 
         if (TryLowerProjectedMethodCall(source, ctx, out List<Instruction>? projectedCall)) {

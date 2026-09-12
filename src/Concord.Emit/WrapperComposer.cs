@@ -883,7 +883,7 @@ public static class WrapperComposer {
             ControlHandleLowering.ReturnsControl(site.Injection.InjectionMethod));
         heads.Add(
             BodyCopier.CopyInjection(
-                new InjectionCopyRequest(injectionMethodDefinition.Definition, site.WrapperDefinition, site.Target, site.Injection.InjectionMethod, injectedMembers),
+                new InjectionCopyRequest(injectionMethodDefinition.Definition, site.WrapperDefinition, site.Target, site.Injection.InjectionMethod, injectedMembers) { BoundArguments = site.Injection.BoundArguments },
                 site.Locals,
                 guardStart));
     }
@@ -907,7 +907,7 @@ public static class WrapperComposer {
         InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
         using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
         List<Instruction> siteBody = BodyCopier.CopyInjection(
-            new InjectionCopyRequest(injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers),
+            new InjectionCopyRequest(injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers) { BoundArguments = injection.BoundArguments },
             locals,
             lastExit);
         tailBodies.Add(siteBody);
@@ -935,7 +935,7 @@ public static class WrapperComposer {
         using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
         foreach (Instruction exit in exits) {
             List<Instruction> siteBody = BodyCopier.CopyInjection(
-                new InjectionCopyRequest(injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers),
+                new InjectionCopyRequest(injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers) { BoundArguments = injection.BoundArguments },
                 locals,
                 exit);
             RedirectIntermediateBranches(spine, exit, siteBody[0]);
@@ -967,7 +967,7 @@ public static class WrapperComposer {
             using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
             foreach (Instruction exit in exits) {
                 List<Instruction> siteBody = BodyCopier.CopyInjection(
-                    new InjectionCopyRequest(injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers),
+                    new InjectionCopyRequest(injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers) { BoundArguments = injection.BoundArguments },
                     locals,
                     exit,
                     insideAround: true);
@@ -1008,7 +1008,7 @@ public static class WrapperComposer {
             InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
             using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
             List<Instruction> siteBody = BodyCopier.CopyInjection(
-                new InjectionCopyRequest(injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers),
+                new InjectionCopyRequest(injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers) { BoundArguments = injection.BoundArguments },
                 locals,
                 lastExit,
                 insideAround: true);
@@ -1154,7 +1154,7 @@ public static class WrapperComposer {
             int siteIndex = spine.IndexOf(match);
             Instruction continuation = after ? spine[siteIndex + 1] : match;
             List<Instruction> invokeBody = BodyCopier.CopyInjection(
-                new InjectionCopyRequest(injectionMethodDefinition.Definition, site.WrapperDefinition, site.Target, injection.InjectionMethod, injectedMembers),
+                new InjectionCopyRequest(injectionMethodDefinition.Definition, site.WrapperDefinition, site.Target, injection.InjectionMethod, injectedMembers) { BoundArguments = injection.BoundArguments },
                 site.Locals,
                 continuation,
                 captureBinding: captureBinding);
@@ -1484,7 +1484,7 @@ public static class WrapperComposer {
 
         List<SpineCopy> spineCopies = [];
         aroundBody = BodyCopier.CopyInjection(
-            new InjectionCopyRequest(injectionMethodDefinition.Definition, site.WrapperDefinition, site.Target, site.Injection.InjectionMethod, injectedMembers),
+            new InjectionCopyRequest(injectionMethodDefinition.Definition, site.WrapperDefinition, site.Target, site.Injection.InjectionMethod, injectedMembers) { BoundArguments = site.Injection.BoundArguments },
             site.Locals,
             epilogueStart,
             template,

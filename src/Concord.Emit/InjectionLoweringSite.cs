@@ -19,6 +19,7 @@ namespace Concord.Emit;
 /// <param name="SpineCopies">Accumulates spine copies spliced for an Around injection's invoke sites.</param>
 /// <param name="InsideAround">Whether lowering occurs inside an Around injection's spliced spine copy.</param>
 /// <param name="CaptureBinding">Maps an injection argument index to the call-site spill local it reads, or null when nothing is captured.</param>
+/// <param name="BoundConstants">Maps an injection argument index to the local holding its bound literal, or null when nothing is bound.</param>
 internal readonly record struct InjectionLoweringSite(
     int ControlHandleArgIndex,
     int OperationArgIndex,
@@ -30,4 +31,5 @@ internal readonly record struct InjectionLoweringSite(
     MethodDefinition? Destination,
     List<SpineCopy>? SpineCopies,
     bool InsideAround,
-    IReadOnlyDictionary<int, VariableDefinition>? CaptureBinding);
+    IReadOnlyDictionary<int, VariableDefinition>? CaptureBinding,
+    IReadOnlyDictionary<int, VariableDefinition>? BoundConstants);

@@ -17,4 +17,9 @@ internal readonly record struct InjectionCopyRequest(
     MethodDefinition Destination,
     MethodBase Target,
     MethodBase InjectionMethod,
-    InjectedMemberMap InjectedMembers);
+    InjectedMemberMap InjectedMembers) {
+    /// <summary>
+    ///     Values bound to the injection's <see cref="BoundAttribute" /> parameters, keyed by parameter name.
+    /// </summary>
+    public IReadOnlyDictionary<string, object?>? BoundArguments { get; init; }
+}
