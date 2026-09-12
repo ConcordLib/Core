@@ -27,8 +27,6 @@ public static class WrapperComposer {
 
         MethodBase resolved = target;
 
-        MethodInfo originalBody = OriginalBody.Clone(resolved);
-
         using DynamicMethodDefinition source = new DynamicMethodDefinition(resolved);
         Type returnType = ResolveReturnType(resolved);
         Type[] parameterTypes = ResolveParameterTypes(resolved);
@@ -43,7 +41,7 @@ public static class WrapperComposer {
         AssembleInto(wrapper.Definition, resolved, declarative, returnType);
         RunTranspilers(wrapper.Definition, resolved, finalTranspilers);
         MethodInfo wrapperMethod = wrapper.Generate();
-        return new ComposeResult(wrapperMethod, originalBody);
+        return new ComposeResult(wrapperMethod, () => OriginalBody.Clone(resolved));
     }
 
     /// <summary>
