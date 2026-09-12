@@ -15,6 +15,9 @@ namespace Concord.Emit;
 /// <param name="AfterSpine">The sentinel instruction following the spine.</param>
 /// <param name="Returns">Chained return injection bodies emitted before the epilogue.</param>
 /// <param name="Epilogue">The wrapper epilogue.</param>
+/// <param name="FinallyBody">Chained finally injection bodies, or empty when nothing is bound to a finally.</param>
+/// <param name="FinallyEnd">The <c>endfinally</c> closing the synthesized region.</param>
+/// <param name="LeaveEpilogue">The <c>leave</c> that exits the synthesized region into the epilogue.</param>
 internal readonly record struct AssembledBodyParts(
     List<Instruction> Heads,
     bool HasHead,
@@ -24,4 +27,7 @@ internal readonly record struct AssembledBodyParts(
     List<Instruction> Spine,
     Instruction AfterSpine,
     List<Instruction> Returns,
-    List<Instruction> Epilogue);
+    List<Instruction> Epilogue,
+    List<Instruction> FinallyBody,
+    Instruction FinallyEnd,
+    Instruction LeaveEpilogue);

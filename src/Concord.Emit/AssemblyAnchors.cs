@@ -13,8 +13,10 @@ namespace Concord.Emit;
 /// <param name="AfterSpine">The sentinel instruction that spine returns branch to.</param>
 /// <param name="GuardStart">The cancel-flag load that begins the head guard.</param>
 /// <param name="EpilogueStart">The first instruction of the epilogue.</param>
+/// <param name="FinallyEnd">The <c>endfinally</c> that closes a synthesized finally region.</param>
 internal readonly record struct AssemblyAnchors(
     List<Instruction> Spine,
     Instruction AfterSpine,
     Instruction GuardStart,
-    Instruction EpilogueStart);
+    Instruction EpilogueStart,
+    Instruction FinallyEnd);

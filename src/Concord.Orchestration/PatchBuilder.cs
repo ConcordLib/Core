@@ -444,6 +444,7 @@ public sealed class PatchBuilder {
             At.Return => new InjectAt.Return(0),
             At.Tail => new InjectAt.Tail(),
             At.Around => new InjectAt.Around(),
+            At.Finally => new InjectAt.Finally(),
             At.Transpiler => new InjectAt.Transpiler(false),
             At.TranspilerFinal => new InjectAt.Transpiler(true),
             _ => throw new ConcordEmitException("CONC116", $"Unsupported injection position '{at}'."),

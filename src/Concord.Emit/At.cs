@@ -67,4 +67,11 @@ public enum At {
     ///     caveat on <see cref="Transpiler" /> applies here too.
     /// </remarks>
     TranspilerFinal,
+
+    /// <summary>
+    ///     Run the injection method after the target, whether it returned or threw. The body runs inside a
+    ///     synthesized <c>finally</c>, so it cannot read or replace the return value and an escaping
+    ///     exception keeps propagating once it has run.
+    /// </summary>
+    Finally,
 }

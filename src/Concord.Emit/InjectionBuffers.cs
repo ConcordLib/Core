@@ -11,8 +11,10 @@ namespace Concord.Emit;
 /// <param name="TailBodies">Copied tail injection bodies, spliced before the last exit.</param>
 /// <param name="AroundReturnInjections">Return injections deferred to the Around spine copies.</param>
 /// <param name="AroundTailInjections">Tail injections deferred to the Around spine copies.</param>
+/// <param name="FinallyBodies">Copied finally injection bodies, emitted into the synthesized finally region.</param>
 internal readonly record struct InjectionBuffers(
     List<List<Instruction>> HeadBodies,
     List<List<Instruction>> TailBodies,
     List<(Injection Injection, InjectAt.Return ReturnSite)> AroundReturnInjections,
-    List<Injection> AroundTailInjections);
+    List<Injection> AroundTailInjections,
+    List<List<Instruction>> FinallyBodies);

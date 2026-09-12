@@ -500,6 +500,7 @@ public static class WrapperComposer {
             InjectAt.Return => "At.Return",
             InjectAt.Tail => "At.Tail",
             InjectAt.Around => "At.Around",
+            InjectAt.Finally => "At.Finally",
             InjectAt.Constant => "At.Constant",
             InjectAt.Invoke invoke => $"At.{invoke.Shift}",
             InjectAt.NewObj newObj => $"At.{newObj.Shift}",
@@ -646,14 +647,17 @@ public static class WrapperComposer {
 
         Instruction guardStart = Instruction.Create(OpCodes.Ldloc, locals.Cancel);
         Instruction guardBranch = Instruction.Create(OpCodes.Brtrue, hasAround ? epilogueStart : afterSpine);
+        Instruction finallyEnd = Instruction.Create(OpCodes.Endfinally);
+        Instruction leaveEpilogue = Instruction.Create(OpCodes.Leave, epilogueStart);
 
         WrapperAssembly context = new WrapperAssembly(wrapperDefinition, target, ordered, locals, isVoid, hasAround);
-        AssemblyAnchors anchors = new AssemblyAnchors(spine, afterSpine, guardStart, epilogueStart);
+        AssemblyAnchors anchors = new AssemblyAnchors(spine, afterSpine, guardStart, epilogueStart, finallyEnd);
         InjectionBuffers buffers = new InjectionBuffers(
             new List<List<Instruction>>(),
             new List<List<Instruction>>(),
             new List<(Injection, InjectAt.Return)>(),
-            new List<Injection>());
+            new List<Injection>(),
+            new List<List<Instruction>>());
 
         bool hasHead = DispatchInjections(context, anchors, buffers, out Injection? aroundInjection, out Instruction? lastExit);
 
@@ -675,11 +679,28 @@ public static class WrapperComposer {
         List<Instruction> heads = ChainBodies(buffers.HeadBodies, guardStart);
         List<Instruction> returns = ChainBodies(new List<List<Instruction>>(), epilogueStart);
 
-        List<Instruction> assembled = AssembleFinalBody(new AssembledBodyParts(heads, hasHead, guardStart, guardBranch, aroundBody, spine, afterSpine, returns, epilogue));
+        List<Instruction> finallyBody = ChainBodies(buffers.FinallyBodies, finallyEnd);
+        if (finallyBody.Count > 0 && hasAround) {
+            throw new ConcordEmitException(
+                "CONC138",
+                $"Target '{target.DeclaringType?.Name}.{target.Name}' has both an At.Finally injection and a whole-method Around. An Around already owns the whole body; write the finally inside it.");
+        }
+
+        List<Instruction> assembled = AssembleFinalBody(
+            new AssembledBodyParts(heads, hasHead, guardStart, guardBranch, aroundBody, spine, afterSpine, returns, epilogue, finallyBody, finallyEnd, leaveEpilogue));
 
         body.Instructions.Clear();
         foreach (Instruction instruction in assembled) {
             body.Instructions.Add(instruction);
+        }
+
+        if (finallyBody.Count > 0) {
+            body.ExceptionHandlers.Add(new ExceptionHandler(ExceptionHandlerType.Finally) {
+                TryStart = assembled[0],
+                TryEnd = finallyBody[0],
+                HandlerStart = finallyBody[0],
+                HandlerEnd = epilogueStart,
+            });
         }
     }
 
@@ -767,6 +788,11 @@ public static class WrapperComposer {
                 continue;
             }
 
+            if (injection.At is InjectAt.Finally) {
+                ProcessFinallyInjection(new InjectionSiteContext(injection, context.WrapperDefinition, context.Target, context.Locals), anchors.FinallyEnd, buffers.FinallyBodies);
+                continue;
+            }
+
             if (injection.At is InjectAt.Around) {
                 aroundInjection = RegisterAroundInjection(injection, aroundInjection, context.Target);
                 continue;
@@ -837,6 +863,12 @@ public static class WrapperComposer {
 
             assembled.AddRange(parts.Spine);
             assembled.Add(parts.AfterSpine);
+            if (parts.FinallyBody.Count > 0) {
+                assembled.Add(parts.LeaveEpilogue);
+                assembled.AddRange(parts.FinallyBody);
+                assembled.Add(parts.FinallyEnd);
+            }
+
             assembled.AddRange(parts.Returns);
             assembled.AddRange(parts.Epilogue);
         }
@@ -886,6 +918,23 @@ public static class WrapperComposer {
                 new InjectionCopyRequest(injectionMethodDefinition.Definition, site.WrapperDefinition, site.Target, site.Injection.InjectionMethod, injectedMembers) { BoundArguments = site.Injection.BoundArguments },
                 site.Locals,
                 guardStart));
+    }
+
+    private static void ProcessFinallyInjection(InjectionSiteContext site, Instruction finallyEnd, List<List<Instruction>> finallyBodies) {
+        MethodBase injectionMethod = site.Injection.InjectionMethod;
+        if (ControlHandleLowering.FindControlHandleArgIndex(injectionMethod) >= 0) {
+            throw new ConcordEmitException(
+                "CONC138",
+                $"At.Finally injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' declares a ControlHandle. A finally cannot cancel the target or change its return value.");
+        }
+
+        InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injectionMethod.DeclaringType!, site.Target);
+        using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injectionMethod);
+        finallyBodies.Add(
+            BodyCopier.CopyInjection(
+                new InjectionCopyRequest(injectionMethodDefinition.Definition, site.WrapperDefinition, site.Target, injectionMethod, injectedMembers) { BoundArguments = site.Injection.BoundArguments },
+                site.Locals,
+                finallyEnd));
     }
 
     private static Instruction ProcessTailInjection(

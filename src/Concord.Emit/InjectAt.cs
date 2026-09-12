@@ -34,6 +34,13 @@ public abstract record InjectAt {
     public sealed record Around : InjectAt;
 
     /// <summary>
+    ///     Runs the injection inside a synthesized <c>finally</c> that covers the head injections and the
+    ///     target body, so it runs whether the target returns or throws. Cannot read or replace the return
+    ///     value.
+    /// </summary>
+    public sealed record Finally : InjectAt;
+
+    /// <summary>
     ///     Targets an inlined literal constant in the target body.
     /// </summary>
     /// <param name="Value">The literal to match. Supported kinds: int, long, float, double, string.</param>

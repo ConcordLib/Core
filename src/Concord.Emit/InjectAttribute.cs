@@ -193,6 +193,7 @@ public sealed class InjectAttribute : Attribute {
                 Concord.At.Return => new InjectAt.Return(by),
                 Concord.At.Tail => new InjectAt.Tail(),
                 Concord.At.Around => new InjectAt.Around(),
+                Concord.At.Finally => new InjectAt.Finally(),
                 Concord.At.Transpiler => new InjectAt.Transpiler(false),
                 Concord.At.TranspilerFinal => new InjectAt.Transpiler(true),
                 _ => throw new ConcordEmitException("CONC116", $"Unsupported injection position '{At}'."),
