@@ -165,6 +165,7 @@ internal sealed class TargetDetourRegistry {
         old?.Dispose();
 
         if (composed is not null) {
+            WrapperPrecompile.Compile(composed.Wrapper);
             detour = MonoModHost.Factory.CreateDetour(target, composed.Wrapper);
             MethodIdentity.Remember(composed.Wrapper, target, wrapperKeys);
         }

@@ -18,6 +18,24 @@ public static class Patcher {
     private static IAttachedPropertyRegistry properties = new AttachedPropertyStore();
 
     /// <summary>
+    ///     Whether a composed wrapper is compiled at compose time rather than on its first call.
+    ///     Off by default.
+    /// </summary>
+    public static bool PrecompileWrappers {
+        get => WrapperPrecompile.Enabled;
+        set => WrapperPrecompile.Enabled = value;
+    }
+
+    /// <summary>
+    ///     Registers a scope opened around every wrapper compile, including a recompose any patcher
+    ///     triggers.
+    /// </summary>
+    /// <param name="guard">Opens the scope, or null to clear.</param>
+    public static void UseCompileGuard(Func<IDisposable?>? guard) {
+        WrapperPrecompile.UseGuard(guard);
+    }
+
+    /// <summary>
     ///     Registers the adapter registry that receives every attached property declared by
     ///     <see cref="Apply(Assembly)" />. Without one, declared properties are held in memory only and the
     ///     host never learns about them.
