@@ -279,4 +279,46 @@ public class CodeInstructionConverterTests
         Assert.Equal(OpCodes.Stloc_0, outgoing[1].opcode);
         Assert.Null(outgoing[1].operand);
     }
+
+    private static Concord.ITranspilerContext StructLocalStreamContext()
+    {
+        return WrapperComposer.CreateStreamContext(typeof(CompactStructTarget).GetMethod(nameof(CompactStructTarget.Run))!);
+    }
+
+    [Fact]
+    public void CompactOnlyLocal_TakesItsTypeFromTheOriginalBody()
+    {
+        List<CodeInstruction> stream = new List<CodeInstruction>
+        {
+            new CodeInstruction(OpCodes.Stloc_0),
+            new CodeInstruction(OpCodes.Ldloc_0),
+            new CodeInstruction(OpCodes.Ret),
+        };
+
+        Concord.ITranspilerContext context = StructLocalStreamContext();
+        CodeInstructionConverter.ToConcord(stream, context, out _);
+
+        Assert.Equal(typeof(CompactStructLocal), context.GetLocal(0).Type);
+    }
+
+    [Fact]
+    public void CompactLocalWithOperandForm_StillResolvesToHarmonysOwnLocal()
+    {
+        ILGenerator generator = NewGenerator();
+        LocalBuilder local = generator.DeclareLocal(typeof(CompactStructLocal));
+
+        List<CodeInstruction> stream = new List<CodeInstruction>
+        {
+            new CodeInstruction(OpCodes.Stloc_0),
+            new CodeInstruction(OpCodes.Ldloc_S, local),
+            new CodeInstruction(OpCodes.Ret),
+        };
+
+        Concord.ITranspilerContext context = StructLocalStreamContext();
+        List<Concord.CodeInstruction> concord = CodeInstructionConverter.ToConcord(stream, context, out HarmonyStreamContext harmonyContext);
+        List<CodeInstruction> outgoing = CodeInstructionConverter.FromConcord(concord, harmonyContext, generator);
+
+        Assert.Equal(typeof(CompactStructLocal), context.GetLocal(0).Type);
+        Assert.Same(local, outgoing[1].operand);
+    }
 }

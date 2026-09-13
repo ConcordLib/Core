@@ -98,10 +98,8 @@ internal static class CodeInstructionConverter {
     ///     incoming stream stay usable as positions into the returned list.
     /// </summary>
     /// <remarks>
-    ///     Slots are scanned from both directions Harmony can express them: an explicit
-    ///     <see cref="LocalVariableInfo" /> operand, and the compact <c>ldloc.0</c>-style opcodes that
-    ///     carry the slot in the opcode itself. A gap in the middle of the range gets a filler local
-    ///     typed <see cref="object" />, because the list is indexed by slot and cannot be sparse.
+    ///     Compact <c>ldloc.0</c>-style slots carry no operand, so the gap filler takes its type from
+    ///     the original body's local at that slot. Harmony declares from the same list, so slots line up.
     /// </remarks>
     private static List<Concord.LocalRef> DeclareLocalsForStream(List<CodeInstruction> stream, Concord.ITranspilerContext context, HarmonyStreamContext built) {
         int maxSlot = -1;
@@ -120,10 +118,13 @@ internal static class CodeInstructionConverter {
             }
         }
 
+        IList<LocalVariableInfo>? originalLocals = context.Original.GetMethodBody()?.LocalVariables;
         List<Concord.LocalRef> localRefBySlot = new List<Concord.LocalRef>(maxSlot + 1);
         for (int slot = 0; slot <= maxSlot; slot++) {
             localBySlot.TryGetValue(slot, out LocalVariableInfo? original);
-            Type localType = original is null ? typeof(object) : original.LocalType;
+            Type localType = original is not null ? original.LocalType
+                : originalLocals is not null && slot < originalLocals.Count ? originalLocals[slot].LocalType
+                : typeof(object);
             Concord.LocalRef declared = context.DeclareLocal(localType);
             localRefBySlot.Add(declared);
             if (original is not null) {

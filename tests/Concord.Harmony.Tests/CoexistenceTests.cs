@@ -252,6 +252,42 @@ namespace Concord.Harmony.Tests
         }
     }
 
+    public struct CompactStructLocal
+    {
+        public int A;
+        public int B;
+    }
+
+    public static class CompactStructTarget
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static CompactStructLocal Make(int a)
+        {
+            return new CompactStructLocal { A = a, B = a * 2 };
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static int Sum(CompactStructLocal value)
+        {
+            return value.A + value.B;
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static int Run(int a)
+        {
+            CompactStructLocal held = Make(a);
+            return Sum(held);
+        }
+    }
+
+    public static class CompactStructMods
+    {
+        public static int WrapRun(int a, Operation<int, int> original)
+        {
+            return original.Invoke(a) + 1000;
+        }
+    }
+
     public static class SelfOwnedTarget
     {
         [MethodImpl(MethodImplOptions.NoInlining)]
@@ -1302,6 +1338,34 @@ namespace Concord.Harmony.Tests
                 TranspilerParticipant.Registry.Clear(MethodIdentity.Normalize(target));
                 TranspilerParticipant.LastStreamFailure = null;
                 TranspilerParticipant.Log = null;
+            }
+        }
+
+        [Fact]
+        public void WholeMethodAround_CompactOnlyStructLocalKeepsItsType()
+        {
+            MethodInfo target = typeof(CompactStructTarget).GetMethod(nameof(CompactStructTarget.Run));
+            MethodInfo wrapMethod = typeof(CompactStructMods).GetMethod(nameof(CompactStructMods.WrapRun));
+            MethodInfo foreignPostfix = typeof(AroundGapMods).GetMethod(nameof(AroundGapMods.ForeignPostfix));
+
+            HarmonyLib.Harmony harmonyForeign = new HarmonyLib.Harmony("test.around.structlocal");
+            HarmonyBridge bridge = new HarmonyBridge(_ => { });
+
+            ForeignRouteResult result = null;
+            try
+            {
+                harmonyForeign.Patch(target, postfix: new HarmonyMethod(foreignPostfix));
+
+                Injection around = new Injection(wrapMethod, new InjectAt.Around(), "test.concord.around.structlocal", 0);
+                result = bridge.TryRoute(target, new[] { around }, true);
+                Assert.Equal(ForeignRouteKind.Routed, result.Kind);
+
+                Assert.Equal(1015, CompactStructTarget.Run(5));
+            }
+            finally
+            {
+                result?.Handle?.Dispose();
+                harmonyForeign.UnpatchAll("test.around.structlocal");
             }
         }
     }
