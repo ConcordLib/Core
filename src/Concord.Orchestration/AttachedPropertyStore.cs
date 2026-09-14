@@ -21,8 +21,6 @@ internal sealed class AttachedPropertyStore : IAttachedPropertyRegistry {
         return false;
     }
 
-    // A host that installs its registry after a mod has already applied would otherwise never hear about
-    // that mod's properties, and they would silently stop persisting.
     public void ReplayInto(IAttachedPropertyRegistry registry) {
         foreach (KeyValuePair<(Type BaseType, string Name), Registration> entry in entries) {
             registry.RegisterAttachedProperty(

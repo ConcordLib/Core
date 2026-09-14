@@ -23,8 +23,6 @@ public static class AttachedStorage {
     /// <param name="valueType">The declared field type.</param>
     /// <returns>The slot id, stable for the process.</returns>
     public static int SlotFor(Type declaringType, string fieldName, Type valueType) {
-        // AssemblyQualifiedName, not FullName: two mods can both ship Patches.PawnPatch, and sharing
-        // one slot between them would silently share the values too.
         string key = declaringType.AssemblyQualifiedName + "::" + fieldName;
         lock (Gate) {
             if (Ids.TryGetValue(key, out Allocation existing)) {
@@ -85,8 +83,6 @@ public static class AttachedStorage {
         return new Slot<TVal>(slot);
     }
 
-    // Grown only under Gate at slot-allocation time. A reader reads Fields once, so it either sees the
-    // old array (which still holds every slot it could be asking for) or the new one.
     private readonly struct Allocation {
         public Allocation(int slot, Type valueType) {
             Slot = slot;

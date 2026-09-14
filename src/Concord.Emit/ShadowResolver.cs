@@ -48,8 +48,6 @@ internal static class ShadowResolver {
                     continue;
                 }
 
-                // A backing field the compiler wrote (an auto-property, a field-like event) has nowhere
-                // to hang an attribute, and it cannot be a shadow of anything. Attach it and move on.
                 if (!marked && !IsCompilerGenerated(declarationField)) {
                     throw new ConcordEmitException(
                         "CONC003",

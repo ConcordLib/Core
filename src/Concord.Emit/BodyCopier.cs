@@ -1109,8 +1109,6 @@ internal static class BodyCopier {
         };
     }
 
-    // An [Attached] field has no home on the target type, so every access is rewritten to a call into
-    // the side table. The slot id is a constant baked in at compose time.
     private static bool TryLowerAttachedField(Instruction source, LoweringContext ctx, out List<Instruction>? lowered) {
         lowered = null;
         if (source.Operand is not FieldReference reference ||

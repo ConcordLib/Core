@@ -19,8 +19,6 @@ internal sealed class InjectedMemberMap {
         return method.Module.ModuleVersionId + ":" + method.MetadataToken;
     }
 
-    // A field is only ours when the declaration owns it. Without this an injection body that touches a
-    // same-named field on some other object gets rewritten to reach the declaration's member instead.
     public bool Owns(string? declaringTypeName) {
         return declarationTypeName is null || declaringTypeName == declarationTypeName;
     }
