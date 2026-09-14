@@ -22,6 +22,7 @@ public class OtherBase {
 
 [Patch]
 public abstract class GoodDeclaration : GameBase {
+    [Attached]
     public int counter;
 
     [Inject(At.Head, nameof(Step))]
@@ -69,6 +70,7 @@ public abstract class PropertyTargetDeclaration : GameBase {
 
 [Patch]
 public abstract class FieldOnlyDeclaration : GameBase {
+    [Attached]
     public int marker;
 }
 
@@ -78,6 +80,7 @@ public abstract class InjectFieldDeclaration : GameBase {
     [InjectField("targetCounter")]
     public int injectedCounter;
 
+    [Attached]
     public int attachedCounter;
 }
 #pragma warning restore CS0649
@@ -86,6 +89,7 @@ public abstract class InjectFieldDeclaration : GameBase {
 public abstract class StaticFieldDeclaration : GameBase {
     private static readonly HashSet<string> Registered = [];
 
+    [Attached]
     public int marker;
 }
 
@@ -125,7 +129,7 @@ public sealed record PropCall(Type BaseType, string Name, Type ValueType);
 public sealed class FakeAttachedPropertyRegistry : IAttachedPropertyRegistry {
     public List<PropCall> Calls { get; } = [];
 
-    public void RegisterAttachedProperty(Type baseType, string name, Type valueType) {
+    public void RegisterAttachedProperty(Type declarationType, Type baseType, string name, Type valueType, Concord.AttachedData.IAttachedSlot slot) {
         Calls.Add(new PropCall(baseType, name, valueType));
     }
 }

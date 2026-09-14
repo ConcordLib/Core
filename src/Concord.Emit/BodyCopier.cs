@@ -1,4 +1,5 @@
 using System.Reflection;
+using Concord.AttachedData;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 using MonoMod.Utils;
@@ -10,6 +11,10 @@ namespace Concord.Emit;
 ///     Copies Cecil method bodies into generated wrappers while remapping Concord control calls.
 /// </summary>
 internal static class BodyCopier {
+    private static readonly MethodInfo AttachedGet = typeof(AttachedStorage).GetMethod(nameof(AttachedStorage.Get))!;
+    private static readonly MethodInfo AttachedSet = typeof(AttachedStorage).GetMethod(nameof(AttachedStorage.Set))!;
+    private static readonly MethodInfo AttachedRef = typeof(AttachedStorage).GetMethod(nameof(AttachedStorage.GetOrAddRef))!;
+
     /// <summary>
     ///     Copies the original target body into a destination dynamic method definition.
     /// </summary>
@@ -30,7 +35,7 @@ internal static class BodyCopier {
         ILProcessor il = destinationBody.GetILProcessor();
         Dictionary<Instruction, Instruction> instructionMap = new Dictionary<Instruction, Instruction>(sourceBody.Instructions.Count);
 
-        InjectedMemberMap emptyMembers = new InjectedMemberMap(new Dictionary<string, FieldInfo>(), new Dictionary<string, MethodInfo?>());
+        InjectedMemberMap emptyMembers = new InjectedMemberMap(new Dictionary<string, FieldInfo>(), new Dictionary<string, MethodInfo?>(), new Dictionary<string, AttachedFieldSlot>());
         foreach (Instruction source_instruction in sourceBody.Instructions) {
             Instruction copy = CloneInstruction(source_instruction, module, variableMap, emptyMembers);
             instructionMap[source_instruction] = copy;
@@ -333,6 +338,10 @@ internal static class BodyCopier {
             return boxedField!;
         }
 
+        if (TryLowerAttachedField(source, ctx, out List<Instruction>? attachedField)) {
+            return attachedField!;
+        }
+
         Instruction copy = CloneInstruction(source, ctx.Module, ctx.VariableMap, ctx.InjectedMembers);
         RemapArgInstruction(copy, ctx.ArgRemap);
         return new List<Instruction> { copy };
@@ -455,6 +464,10 @@ internal static class BodyCopier {
 
         if (TryLowerObjectTypedInjectedField(source, ctx, out List<Instruction>? boxedField)) {
             return boxedField!;
+        }
+
+        if (TryLowerAttachedField(source, ctx, out List<Instruction>? attachedField)) {
+            return attachedField!;
         }
 
         Instruction copy = CloneInstruction(source, ctx.Module, ctx.VariableMap, ctx.InjectedMembers);
@@ -628,6 +641,10 @@ internal static class BodyCopier {
 
         if (TryLowerObjectTypedInjectedField(source, ctx, out List<Instruction>? boxedField)) {
             return boxedField!;
+        }
+
+        if (TryLowerAttachedField(source, ctx, out List<Instruction>? attachedField)) {
+            return attachedField!;
         }
 
         Instruction copy = CloneInstruction(source, ctx.Module, ctx.VariableMap, ctx.InjectedMembers);
@@ -1092,6 +1109,37 @@ internal static class BodyCopier {
         };
     }
 
+    // An [Attached] field has no home on the target type, so every access is rewritten to a call into
+    // the side table. The slot id is a constant baked in at compose time.
+    private static bool TryLowerAttachedField(Instruction source, LoweringContext ctx, out List<Instruction>? lowered) {
+        lowered = null;
+        if (source.Operand is not FieldReference reference ||
+            !ctx.InjectedMembers.Owns(reference.DeclaringType?.FullName) ||
+            !ctx.InjectedMembers.TryGetAttached(reference.Name, out AttachedFieldSlot slot)) {
+            return false;
+        }
+
+        MethodInfo definition;
+        if (source.OpCode == OpCodes.Ldfld) {
+            definition = AttachedGet;
+        } else if (source.OpCode == OpCodes.Stfld) {
+            definition = AttachedSet;
+        } else if (source.OpCode == OpCodes.Ldflda) {
+            definition = AttachedRef;
+        } else {
+            throw new ConcordEmitException(
+                "CONC004",
+                $"Attached field '{reference.Name}' was accessed with '{source.OpCode}'. Attached fields are per-instance, so only instance access is supported.");
+        }
+
+        MethodReference call = ctx.Module.ImportReference(definition.MakeGenericMethod(slot.ValueType));
+        lowered = new List<Instruction> {
+            Instruction.Create(OpCodes.Ldc_I4, slot.Slot),
+            Instruction.Create(OpCodes.Call, call),
+        };
+        return true;
+    }
+
     // An [InjectField] declared as object reaches a target whose type cannot be named from the
     // patch class - a private nested enum, say. The access still has to be emitted against the
     // real field, so the value is boxed on the way out and unboxed on the way back in.
@@ -1099,6 +1147,7 @@ internal static class BodyCopier {
         lowered = null;
         if (source.Operand is not FieldReference reference ||
             reference.FieldType.FullName != "System.Object" ||
+            !ctx.InjectedMembers.Owns(reference.DeclaringType?.FullName) ||
             !ctx.InjectedMembers.TryGetField(reference.Name, out FieldInfo? target) ||
             target.FieldType == typeof(object)) {
             return false;
@@ -1140,7 +1189,7 @@ internal static class BodyCopier {
         FieldReference field,
         ModuleDefinition module,
         InjectedMemberMap injectedMembers) {
-        if (injectedMembers.TryGetField(field.Name, out FieldInfo? realField)) {
+        if (injectedMembers.Owns(field.DeclaringType?.FullName) && injectedMembers.TryGetField(field.Name, out FieldInfo? realField)) {
             return Instruction.Create(opCode, module.ImportReference(realField));
         }
 

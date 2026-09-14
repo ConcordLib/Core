@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using Concord.AttachedData;
 using Concord.Emit;
 
 namespace Concord.Orchestration;
@@ -291,11 +292,12 @@ public static class PatchDeclarationScanner {
                 continue;
             }
 
-            if (field.GetCustomAttribute<InjectFieldAttribute>() is not null) {
+            if (field.GetCustomAttribute<AttachedAttribute>() is null) {
                 continue;
             }
 
-            props.RegisterAttachedProperty(baseType, field.Name, field.FieldType);
+            int slot = AttachedStorage.SlotFor(declaration, field.Name, field.FieldType);
+            props.RegisterAttachedProperty(declaration, baseType, field.Name, field.FieldType, AttachedStorage.SlotAt(slot));
         }
     }
 

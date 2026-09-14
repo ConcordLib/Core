@@ -66,4 +66,25 @@ public sealed class AttachedFieldTests {
 
         Assert.Equal(1, field.Get(target));
     }
+
+    [Fact]
+    public void GetOrAddRef_WriteThroughRef_IsVisibleToGet() {
+        AttachedField<Holder, int> field = new AttachedField<Holder, int>();
+        Holder h = new Holder();
+
+        field.GetOrAddRef(h)++;
+        field.GetOrAddRef(h) += 4;
+
+        Assert.Equal(5, field.Get(h));
+    }
+
+    [Fact]
+    public void GetOrAddRef_Absent_CreatesEntryWithDefault() {
+        AttachedField<Holder, int> field = new AttachedField<Holder, int>();
+        Holder h = new Holder();
+
+        Assert.Equal(0, field.GetOrAddRef(h));
+        Assert.True(field.TryGet(h, out int value));
+        Assert.Equal(0, value);
+    }
 }

@@ -21,7 +21,7 @@ internal static class InjectedMemberResolver {
 
     public static InjectedMemberMap Build(Type declarationType, MethodBase target) {
         Type targetType = target.DeclaringType!;
-        Dictionary<string, FieldInfo> fields = ShadowResolver.BuildFieldMap(declarationType, targetType);
+        Dictionary<string, FieldInfo> fields = ShadowResolver.BuildFieldMap(declarationType, targetType, out Dictionary<string, AttachedFieldSlot> attached);
         Dictionary<string, MethodInfo?> methods = new Dictionary<string, MethodInfo?>();
 
         AddInjectedInstance(declarationType, target, methods);
@@ -29,7 +29,7 @@ internal static class InjectedMemberResolver {
         AddInjectedProperties(declarationType, targetType, methods);
         AddInjectedMethods(declarationType, targetType, methods);
 
-        return new InjectedMemberMap(fields, methods);
+        return new InjectedMemberMap(fields, methods, attached, declarationType.FullName);
     }
 
     private static void AddInjectedInstance(Type declarationType, MethodBase target, Dictionary<string, MethodInfo?> methods) {

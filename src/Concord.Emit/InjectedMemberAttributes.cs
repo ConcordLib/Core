@@ -61,3 +61,13 @@ public sealed class InjectMethodAttribute : Attribute {
     /// <summary>Gets the target member name, or <see langword="null" /> to use the declaration name.</summary>
     public string? TargetName { get; }
 }
+
+/// <summary>
+///     Marks a declaration field as new state attached to each target instance. The target type has no
+///     such field, so reads and writes are lowered to a weak side table keyed by the instance. A runtime
+///     adapter that supports persistence saves it; one that does not keeps it in memory.
+/// </summary>
+[AttributeUsage(AttributeTargets.Field)]
+[JetBrains.Annotations.MeansImplicitUse(
+    JetBrains.Annotations.ImplicitUseKindFlags.Access | JetBrains.Annotations.ImplicitUseKindFlags.Assign)]
+public sealed class AttachedAttribute : Attribute { }

@@ -16,6 +16,9 @@
     <PackageReference Include="MonoMod.Utils" Version="25.0.12"/>
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="../Concord.AttachedData/Concord.AttachedData.csproj"/>
+  </ItemGroup>
+  <ItemGroup>
     <InternalsVisibleTo Include="Concord.Emit.Tests"/>
     <InternalsVisibleTo Include="Concord.Orchestration"/>
   </ItemGroup>

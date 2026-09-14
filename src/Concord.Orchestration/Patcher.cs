@@ -42,7 +42,13 @@ public static class Patcher {
     /// </summary>
     /// <param name="registry">The adapter's registry.</param>
     public static void UseAttachedPropertyRegistry(IAttachedPropertyRegistry registry) {
-        properties = registry;
+        lock (Gate) {
+            if (properties is AttachedPropertyStore pending) {
+                pending.ReplayInto(registry);
+            }
+
+            properties = registry;
+        }
     }
 
     /// <summary>

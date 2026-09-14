@@ -48,7 +48,7 @@ public sealed class NullPatchApplier : IPatchApplier {
 }
 
 public sealed class NullAttachedPropertyRegistry : IAttachedPropertyRegistry {
-    public void RegisterAttachedProperty(Type baseType, string name, Type valueType) { }
+    public void RegisterAttachedProperty(Type declarationType, Type baseType, string name, Type valueType, Concord.AttachedData.IAttachedSlot slot) { }
 }
 
 [Collection(RegistryCollection.Name)]

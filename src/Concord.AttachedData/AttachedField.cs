@@ -37,6 +37,17 @@ public sealed class AttachedField<TTarget, TVal>
     }
 
     /// <summary>
+    ///     Gets a mutable reference to the value attached to <paramref name="target" />, creating the
+    ///     entry with <c>default(TVal)</c> when none is set. The reference stays valid while the entry lives.
+    /// </summary>
+    /// <param name="target">The instance to attach to.</param>
+    /// <returns>A reference to the attached value.</returns>
+    public ref TVal GetOrAddRef(TTarget target) {
+        StrongBox<TVal> box = _table.GetValue(target, static _ => new StrongBox<TVal>());
+        return ref box.Value!;
+    }
+
+    /// <summary>
     ///     Attempts to read the value attached to <paramref name="target" />.
     /// </summary>
     /// <param name="target">The instance to read from.</param>
