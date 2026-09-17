@@ -32,7 +32,7 @@ public static class WrapperComposer {
         Type[] parameterTypes = ResolveParameterTypes(resolved);
 
         using DynamicMethodDefinition wrapper = new DynamicMethodDefinition(WrapperName(resolved), returnType, parameterTypes);
-        BodyCopier.CopySpine(source.Definition, wrapper.Definition);
+        BodyCopier.CopySpine(source.Definition, wrapper.Definition, resolved.DeclaringType!);
 
         PartitionTranspilers(ordered, out List<Injection> preTranspilers, out List<Injection> finalTranspilers, out List<Injection> declarative);
 
@@ -60,7 +60,7 @@ public static class WrapperComposer {
         Type[] parameterTypes = ResolveParameterTypes(resolved);
 
         using DynamicMethodDefinition wrapper = new DynamicMethodDefinition(WrapperName(resolved), returnType, parameterTypes);
-        BodyCopier.CopySpine(source.Definition, wrapper.Definition);
+        BodyCopier.CopySpine(source.Definition, wrapper.Definition, resolved.DeclaringType!);
 
         PartitionTranspilers(ordered, out List<Injection> preTranspilers, out List<Injection> finalTranspilers, out List<Injection> declarative);
 
@@ -355,9 +355,23 @@ public static class WrapperComposer {
         TranspilerContext context = new TranspilerContext(resolved);
         List<CodeInstruction> instructions = CecilCodeConverter.ToInstructions(wrapperDefinition, context);
 
+        int baseline = CountGetExecutingAssemblyCalls(instructions);
+
         for (int i = 0; i < transpilers.Count; i++) {
             IEnumerable<CodeInstruction> produced = TranspilerInvoker.Invoke(transpilers[i].InjectionMethod, instructions, context);
             instructions = produced as List<CodeInstruction> ?? new List<CodeInstruction>(produced);
+
+            int emitted = CountGetExecutingAssemblyCalls(instructions);
+            if (emitted > baseline) {
+                MethodBase offender = transpilers[i].InjectionMethod;
+                throw new ConcordEmitException(
+                    "CONC143",
+                    $"Transpiler '{offender.DeclaringType?.Name}.{offender.Name}' on '{resolved.DeclaringType?.Name}.{resolved.Name}' emitted a call to Assembly.GetExecutingAssembly. " +
+                    "Concord cannot tell which assembly that call is meant to observe, and under a Harmony bridge Harmony rewrites it to the target's assembly. " +
+                    "Emit ldtoken of the type you mean followed by Type.GetTypeFromHandle and Type.get_Assembly instead.");
+            }
+
+            baseline = emitted;
         }
 
         try {
@@ -368,6 +382,20 @@ public static class WrapperComposer {
                 ex.Code,
                 $"Transpiler(s) '{names}' on '{resolved.DeclaringType?.Name}.{resolved.Name}' produced instructions Concord cannot write back: {ex.Message}");
         }
+    }
+
+    private static int CountGetExecutingAssemblyCalls(List<CodeInstruction> instructions) {
+        int count = 0;
+        foreach (CodeInstruction instruction in instructions) {
+            if (instruction.opcode == System.Reflection.Emit.OpCodes.Call
+                && instruction.operand is MethodBase method
+                && method.Name == "GetExecutingAssembly"
+                && method.DeclaringType == typeof(System.Reflection.Assembly)) {
+                count++;
+            }
+        }
+
+        return count;
     }
 
     private static TranspilerContext RequireConcreteContext(ITranspilerContext context) {

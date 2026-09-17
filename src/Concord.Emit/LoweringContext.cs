@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -14,10 +15,12 @@ namespace Concord.Emit;
 /// <param name="InjectedMembers">Maps injected member declarations to the resolved target members.</param>
 /// <param name="ArgRemap">Maps injection method argument indices to target argument indices.</param>
 /// <param name="DestinationVariables">The destination wrapper body's variable collection.</param>
+/// <param name="InjectionDeclaringType">The type declaring the injection method whose body is being copied.</param>
 internal readonly record struct LoweringContext(
     ModuleDefinition Module,
     Dictionary<VariableDefinition, VariableDefinition> VariableMap,
     IList<VariableDefinition> InjectionMethodLocals,
     InjectedMemberMap InjectedMembers,
     Dictionary<int, int> ArgRemap,
-    Collection<VariableDefinition> DestinationVariables);
+    Collection<VariableDefinition> DestinationVariables,
+    Type InjectionDeclaringType);

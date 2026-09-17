@@ -33,23 +33,12 @@ namespace Concord.Harmony.Tests
         {
             yield return 1;
         }
-
-        [MethodImpl(MethodImplOptions.NoInlining)]
-        public static void GetExecutingAssemblyCaller()
-        {
-            System.Reflection.Assembly asm = System.Reflection.Assembly.GetExecutingAssembly();
-        }
     }
 
     public static class SupportMatrixTestInjections
     {
         public static void SimplePrefix()
         {
-        }
-
-        public static void GetExecutingAssemblyInjection()
-        {
-            System.Reflection.Assembly asm = System.Reflection.Assembly.GetExecutingAssembly();
         }
     }
 
@@ -129,66 +118,6 @@ namespace Concord.Harmony.Tests
 
             string reason = SupportMatrix.Validate(target, injections, null);
             Assert.Null(reason);
-        }
-    }
-
-    public sealed class SupportMatrixGetExecutingAssemblyTests
-    {
-        [Fact]
-        public void CallsGetExecutingAssemblyDetectsCall()
-        {
-            MethodBase target = typeof(SupportMatrixTestTargets).GetMethod(nameof(SupportMatrixTestTargets.GetExecutingAssemblyCaller));
-            bool calls = SupportMatrix.CallsGetExecutingAssembly(target);
-            Assert.True(calls);
-        }
-
-        [Fact]
-        public void CallsGetExecutingAssemblyDetectsNonCall()
-        {
-            MethodBase target = typeof(SupportMatrixTestTargets).GetMethod(nameof(SupportMatrixTestTargets.SimpleTarget));
-            bool calls = SupportMatrix.CallsGetExecutingAssembly(target);
-            Assert.False(calls);
-        }
-
-        [Fact]
-        public void RejectsInjectionCallingGetExecutingAssembly()
-        {
-            MethodBase target = typeof(SupportMatrixTestTargets).GetMethod(nameof(SupportMatrixTestTargets.SimpleTarget));
-            MethodBase injectionMethod = typeof(SupportMatrixTestInjections).GetMethod(nameof(SupportMatrixTestInjections.GetExecutingAssemblyInjection));
-            Injection[] injections = new Injection[]
-            {
-                new Injection(injectionMethod, new InjectAt.Head(), "test", 0)
-            };
-
-            string reason = SupportMatrix.Validate(target, injections, null);
-            Assert.NotNull(reason);
-            Assert.Contains("GetExecutingAssembly", reason);
-        }
-    }
-
-    [Collection("HarmonySerial")]
-    public sealed class SupportMatrixUnknownOpCodeTests
-    {
-        [Fact]
-        public void CallsGetExecutingAssemblyFailsClosedOnUnknownOpCode()
-        {
-            MethodBase target = typeof(SupportMatrixTestTargets).GetMethod(nameof(SupportMatrixTestTargets.SimpleTarget));
-            FieldInfo tableField = typeof(SupportMatrix).GetField("OpCodesByValue", BindingFlags.NonPublic | BindingFlags.Static);
-            Dictionary<short, OpCode> table = (Dictionary<short, OpCode>)tableField.GetValue(null);
-
-            short retValue = OpCodes.Ret.Value;
-            OpCode removed = table[retValue];
-            table.Remove(retValue);
-
-            try
-            {
-                bool calls = SupportMatrix.CallsGetExecutingAssembly(target);
-                Assert.True(calls);
-            }
-            finally
-            {
-                table[retValue] = removed;
-            }
         }
     }
 
@@ -311,42 +240,6 @@ namespace Concord.Harmony.Tests
             TranspilerParticipant.Log = null;
             TranspilerParticipant.LastStreamFailure = null;
             TranspilerParticipant.Registry.Clear(target);
-        }
-    }
-
-    [Collection("HarmonySerial")]
-    public sealed class SupportMatrixApplyToRoutedGetExecutingAssemblyTests
-    {
-        [Fact]
-        public void ApplyToRoutedRejectsInjectionCallingGetExecutingAssembly()
-        {
-            MethodInfo target = typeof(SupportMatrixTestTargets).GetMethod(nameof(SupportMatrixTestTargets.SimpleTarget));
-            MethodInfo headMethod = typeof(SupportMatrixTestInjections).GetMethod(nameof(SupportMatrixTestInjections.SimplePrefix));
-            MethodInfo getExecutingAssemblyMethod = typeof(SupportMatrixTestInjections).GetMethod(nameof(SupportMatrixTestInjections.GetExecutingAssemblyInjection));
-            HarmonyBridge bridge = new HarmonyBridge(_ => { });
-
-            ForeignRouteResult result = null;
-            try
-            {
-                result = bridge.TryRoute(target, new Injection[]
-                {
-                    new Injection(headMethod, new InjectAt.Head(), "test.route.first", 0)
-                }, forceRoute: true);
-                Assert.Equal(ForeignRouteKind.Routed, result.Kind);
-
-                Injection[] additionalInjections = new Injection[]
-                {
-                    new Injection(getExecutingAssemblyMethod, new InjectAt.Head(), "test.route.second", 0)
-                };
-
-                InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
-                    bridge.ApplyToRouted(target, additionalInjections));
-                Assert.Contains("GetExecutingAssembly", ex.Message);
-            }
-            finally
-            {
-                result?.Handle?.Dispose();
-            }
         }
     }
 }

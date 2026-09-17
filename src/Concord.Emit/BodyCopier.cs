@@ -14,13 +14,16 @@ internal static class BodyCopier {
     private static readonly MethodInfo AttachedGet = typeof(AttachedStorage).GetMethod(nameof(AttachedStorage.Get))!;
     private static readonly MethodInfo AttachedSet = typeof(AttachedStorage).GetMethod(nameof(AttachedStorage.Set))!;
     private static readonly MethodInfo AttachedRef = typeof(AttachedStorage).GetMethod(nameof(AttachedStorage.GetOrAddRef))!;
+    private static readonly MethodInfo GetTypeFromHandle = typeof(Type).GetMethod(nameof(Type.GetTypeFromHandle))!;
+    private static readonly MethodInfo TypeAssemblyGetter = typeof(Type).GetProperty(nameof(Type.Assembly))!.GetGetMethod()!;
 
     /// <summary>
     ///     Copies the original target body into a destination dynamic method definition.
     /// </summary>
     /// <param name="source">The source target method definition.</param>
     /// <param name="destination">The destination wrapper method definition.</param>
-    public static void CopySpine(MethodDefinition source, MethodDefinition destination) {
+    /// <param name="declaringType">The type declaring the source method, so copied <c>GetExecutingAssembly</c> calls keep observing it.</param>
+    public static void CopySpine(MethodDefinition source, MethodDefinition destination, Type declaringType) {
         MethodBody sourceBody = source.Body;
         MethodBody destinationBody = destination.Body;
 
@@ -40,6 +43,12 @@ internal static class BodyCopier {
             Instruction copy = CloneInstruction(source_instruction, module, variableMap, emptyMembers);
             instructionMap[source_instruction] = copy;
             il.Append(copy);
+            if (IsGetExecutingAssemblyCall(source_instruction)) {
+                copy.OpCode = OpCodes.Ldtoken;
+                copy.Operand = module.ImportReference(declaringType);
+                il.Append(Instruction.Create(OpCodes.Call, module.ImportReference(GetTypeFromHandle)));
+                il.Append(Instruction.Create(OpCodes.Callvirt, module.ImportReference(TypeAssemblyGetter)));
+            }
         }
 
         foreach (Instruction copy in destinationBody.Instructions) {
@@ -93,7 +102,7 @@ internal static class BodyCopier {
         int operationArgIndex = ControlHandleLowering.FindOperationArgIndex(request.InjectionMethod);
 
         Dictionary<VariableDefinition, VariableDefinition> variableMap = CopyInjectionLocals(injectionBody, request.Destination.Body, module);
-        LoweringContext ctx = new LoweringContext(module, variableMap, injectionBody.Variables, request.InjectedMembers, argRemap, request.Destination.Body.Variables);
+        LoweringContext ctx = new LoweringContext(module, variableMap, injectionBody.Variables, request.InjectedMembers, argRemap, request.Destination.Body.Variables, request.InjectionMethod.DeclaringType!);
 
         List<Instruction> boundPrologue = [];
         Dictionary<int, VariableDefinition> boundConstants =
@@ -166,7 +175,7 @@ internal static class BodyCopier {
         Instruction spliceEnd = Instruction.Create(OpCodes.Nop);
 
         Dictionary<VariableDefinition, VariableDefinition> variableMap = CopyInjectionLocals(injectionBody, destination.Body, module);
-        LoweringContext ctx = new LoweringContext(module, variableMap, injectionBody.Variables, injectedMembers, argRemap, destination.Body.Variables);
+        LoweringContext ctx = new LoweringContext(module, variableMap, injectionBody.Variables, injectedMembers, argRemap, destination.Body.Variables, injectionMethod.DeclaringType!);
 
         List<(Instruction Source, List<Instruction> Emitted)> entries =
             new List<(Instruction Source, List<Instruction> Emitted)>(injectionBody.Instructions.Count);
@@ -234,7 +243,7 @@ internal static class BodyCopier {
         }
 
         Dictionary<VariableDefinition, VariableDefinition> variableMap = CopyInjectionLocals(injectionBody, request.Destination.Body, module);
-        LoweringContext ctx = new LoweringContext(module, variableMap, injectionBody.Variables, request.InjectedMembers, thisRemap, request.Destination.Body.Variables);
+        LoweringContext ctx = new LoweringContext(module, variableMap, injectionBody.Variables, request.InjectedMembers, thisRemap, request.Destination.Body.Variables, request.InjectionMethod.DeclaringType!);
 
         WrapLoweringSite site = new WrapLoweringSite(
             operationArgIndex,
@@ -324,6 +333,10 @@ internal static class BodyCopier {
 
         if (TryLowerArgBinding(source, site.WrapArgBinding, out Instruction? bound)) {
             return new List<Instruction> { bound! };
+        }
+
+        if (TryLowerGetExecutingAssembly(source, ctx, out List<Instruction>? executingAssembly)) {
+            return executingAssembly;
         }
 
         if (TryLowerProjectedMethodCall(source, ctx, out List<Instruction>? projectedCall)) {
@@ -452,6 +465,10 @@ internal static class BodyCopier {
 
         if (site.BoundConstants is not null && TryLowerArgBinding(source, site.BoundConstants, out Instruction? boundLocal)) {
             return new List<Instruction> { boundLocal! };
+        }
+
+        if (TryLowerGetExecutingAssembly(source, ctx, out List<Instruction>? executingAssembly)) {
+            return executingAssembly;
         }
 
         if (TryLowerProjectedMethodCall(source, ctx, out List<Instruction>? projectedCall)) {
@@ -631,6 +648,10 @@ internal static class BodyCopier {
             };
         }
 
+        if (TryLowerGetExecutingAssembly(source, ctx, out List<Instruction>? executingAssembly)) {
+            return executingAssembly;
+        }
+
         if (TryLowerProjectedMethodCall(source, ctx, out List<Instruction>? projectedCall)) {
             return projectedCall;
         }
@@ -784,6 +805,26 @@ internal static class BodyCopier {
 
             cursor = cursor.Previous;
         }
+    }
+
+    private static bool IsGetExecutingAssemblyCall(Instruction source) {
+        return source.OpCode == OpCodes.Call
+            && source.Operand is MethodReference method
+            && method.Name == "GetExecutingAssembly"
+            && method.DeclaringType?.FullName == "System.Reflection.Assembly";
+    }
+
+    private static bool TryLowerGetExecutingAssembly(Instruction source, LoweringContext ctx, out List<Instruction> lowered) {
+        lowered = [];
+
+        if (!IsGetExecutingAssemblyCall(source)) {
+            return false;
+        }
+
+        lowered.Add(Instruction.Create(OpCodes.Ldtoken, ctx.Module.ImportReference(ctx.InjectionDeclaringType)));
+        lowered.Add(Instruction.Create(OpCodes.Call, ctx.Module.ImportReference(GetTypeFromHandle)));
+        lowered.Add(Instruction.Create(OpCodes.Callvirt, ctx.Module.ImportReference(TypeAssemblyGetter)));
+        return true;
     }
 
     private static bool TryLowerProjectedMethodCall(Instruction source, LoweringContext ctx, out List<Instruction> lowered) {
