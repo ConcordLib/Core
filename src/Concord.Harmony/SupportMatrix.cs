@@ -32,18 +32,6 @@ namespace Concord.Harmony
                 return hostReason;
             }
 
-            // Harmony hands us the stream for the method it was asked to patch. That lines up with a
-            // PatchBody.Declared injection, but a PatchBody.StateMachine one composes onto a MoveNext
-            // Harmony never opened, so there is nothing to compose the two streams onto.
-            foreach (Injection injection in added)
-            {
-                if (injection.Body == PatchBody.StateMachine &&
-                    WrapperComposer.ResolveStateMachineTarget(target) != target)
-                {
-                    return $"Injection {injection.InjectionMethod.Name} selected PatchBody.StateMachine on async/iterator method {target.Name} (stream source is the declared method)";
-                }
-            }
-
             try
             {
                 WrapperComposer.RejectSharedGenericInstantiation(target);

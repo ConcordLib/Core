@@ -102,10 +102,10 @@ namespace Concord.Harmony.Tests
 
     public sealed class SupportMatrixStateMachineTests
     {
-        // Harmony opens the stream for the method it was asked to patch, so a StateMachine injection
-        // wants a MoveNext body Harmony never handed over and the two cannot be composed.
+        // CollectingPatchApplier resolves a StateMachine injection to MoveNext before anything reaches
+        // the bridge, so the declared method never arrives here carrying one. Nothing rejects the shape.
         [Fact]
-        public void RejectsAsyncEntryMethodWhenInjectionSelectsStateMachineBody()
+        public void AcceptsAsyncEntryMethodWhenInjectionSelectsStateMachineBody()
         {
             MethodBase target = typeof(SupportMatrixTestTargets).GetMethod(nameof(SupportMatrixTestTargets.AsyncTarget));
             MethodBase injectionMethod = typeof(SupportMatrixTestInjections).GetMethod(nameof(SupportMatrixTestInjections.SimplePrefix));
@@ -115,8 +115,7 @@ namespace Concord.Harmony.Tests
             };
 
             string reason = SupportMatrix.Validate(target, injections, null);
-            Assert.NotNull(reason);
-            Assert.Contains("async", reason.ToLower());
+            Assert.Null(reason);
         }
 
         // A Declared injection composes onto the same method Harmony streamed, so coexistence works.
