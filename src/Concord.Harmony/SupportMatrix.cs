@@ -13,6 +13,26 @@ namespace Concord.Harmony
     {
         private static readonly Dictionary<short, OpCode> OpCodesByValue = BuildOpCodeTable();
 
+        private static readonly ConstructorInfo PatchesCtor = WidestPatchesCtor();
+
+        private static readonly FieldInfo[] IncomingFields = MatchIncomingFields(PatchesCtor);
+
+        internal static Patches Incoming(PatchInfo patchInfo)
+        {
+            if (patchInfo == null || PatchesCtor == null)
+            {
+                return null;
+            }
+
+            object[] args = new object[IncomingFields.Length];
+            for (int i = 0; i < args.Length; i++)
+            {
+                args[i] = IncomingFields[i]?.GetValue(patchInfo);
+            }
+
+            return (Patches)PatchesCtor.Invoke(args);
+        }
+
         internal static string Validate(MethodBase target, IReadOnlyList<Injection> added, Patches patchInfo)
         {
             string hostReason = ValidateHost(target, added, patchInfo);
@@ -92,6 +112,48 @@ namespace Concord.Harmony
             {
                 return null;
             }
+        }
+
+        private static ConstructorInfo WidestPatchesCtor()
+        {
+            ConstructorInfo widest = null;
+            foreach (ConstructorInfo candidate in typeof(Patches).GetConstructors())
+            {
+                ParameterInfo[] parameters = candidate.GetParameters();
+                bool allArrays = true;
+                foreach (ParameterInfo parameter in parameters)
+                {
+                    if (parameter.ParameterType != typeof(Patch[]))
+                    {
+                        allArrays = false;
+                        break;
+                    }
+                }
+
+                if (allArrays && (widest == null || parameters.Length > widest.GetParameters().Length))
+                {
+                    widest = candidate;
+                }
+            }
+
+            return widest;
+        }
+
+        private static FieldInfo[] MatchIncomingFields(ConstructorInfo ctor)
+        {
+            if (ctor == null)
+            {
+                return Array.Empty<FieldInfo>();
+            }
+
+            ParameterInfo[] parameters = ctor.GetParameters();
+            FieldInfo[] fields = new FieldInfo[parameters.Length];
+            for (int i = 0; i < parameters.Length; i++)
+            {
+                fields[i] = typeof(PatchInfo).GetField(parameters[i].Name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            }
+
+            return fields;
         }
 
         private static Dictionary<short, OpCode> BuildOpCodeTable()

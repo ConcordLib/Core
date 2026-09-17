@@ -26,6 +26,15 @@ public interface IForeignPatchHost {
     string? ValidateRoute(MethodBase target, IReadOnlyList<Injection> added);
 
     /// <summary>
+    ///     Re-checks an already-routed target against a rebuild the host is about to run, and withdraws
+    ///     Concord from that rebuild when the route no longer holds.
+    /// </summary>
+    /// <param name="target">The method the host is about to rebuild.</param>
+    /// <param name="hostPatchState">The host's patch record for the in-flight rebuild.</param>
+    /// <returns>Null when the route still holds, otherwise the reason Concord withdrew.</returns>
+    string? RevalidateRouted(MethodBase target, object hostPatchState);
+
+    /// <summary>
     ///     Asks the host whether it needs to take over <paramref name="target" />, and hands over the
     ///     injections when it does.
     /// </summary>

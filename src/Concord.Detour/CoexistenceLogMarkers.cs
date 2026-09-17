@@ -49,4 +49,10 @@ public static class CoexistenceLogMarkers {
     ///     Promotion passed validation but the handover itself failed.
     /// </summary>
     public const string PromoteFailed = "[Concord.Coex] promote-failed";
+
+    /// <summary>
+    ///     A foreign patch arriving on an already-routed target made the route unsupportable, so Concord
+    ///     pulled its injections out of that rebuild rather than break the other patcher.
+    /// </summary>
+    public const string RouteWithdrawn = "[Concord.Coex] route-withdrawn";
 }

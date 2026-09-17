@@ -26,7 +26,7 @@ internal sealed class BridgeDetourHandle : IDetourHandle
 
     public bool IsApplied
     {
-        get { return !disposed; }
+        get { return !disposed && !bridge.IsWithdrawn(target); }
     }
 
     public void Dispose()

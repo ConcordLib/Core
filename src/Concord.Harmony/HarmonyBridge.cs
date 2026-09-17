@@ -20,6 +20,8 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
 
     private readonly HarmonyLib.Harmony harmony;
     private readonly Action<string> log;
+    private readonly object withdrawnGate = new object();
+    private readonly HashSet<MethodBase> withdrawn = new HashSet<MethodBase>();
     private bool lockUnavailableLogged;
     private bool foreignOwnersFailureLogged;
 
@@ -75,6 +77,32 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
         {
             return SupportMatrix.Validate(target, added, PatchProcessor.GetPatchInfo(target));
         }
+    }
+
+    /// <inheritdoc />
+    public string RevalidateRouted(MethodBase target, object hostPatchState)
+    {
+        target = MethodIdentity.Normalize(target);
+
+        if (hostPatchState is not PatchInfo patchInfo)
+        {
+            return null;
+        }
+
+        Injection[] added = TranspilerParticipant.Registry.OrderedSnapshot(target);
+        if (added.Length == 0)
+        {
+            return null;
+        }
+
+        string reason = SupportMatrix.Validate(target, added, SupportMatrix.Incoming(patchInfo));
+        if (reason == null)
+        {
+            return null;
+        }
+
+        Withdraw(target, patchInfo);
+        return reason;
     }
 
     /// <inheritdoc />
@@ -233,6 +261,14 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
         return TranspilerParticipant.Registry.OwnersFor(target);
     }
 
+    internal bool IsWithdrawn(MethodBase target)
+    {
+        lock (withdrawnGate)
+        {
+            return withdrawn.Contains(MethodIdentity.SharedBodyKey(target));
+        }
+    }
+
     internal void DisposeHandle(MethodBase target, long[] owned)
     {
         if (HarmonyLockScope.Available)
@@ -358,8 +394,24 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
         return owned;
     }
 
+    private void Withdraw(MethodBase target, PatchInfo patchInfo)
+    {
+        patchInfo.RemoveTranspiler(BridgeOwner);
+        TranspilerParticipant.Registry.Clear(target);
+
+        lock (withdrawnGate)
+        {
+            withdrawn.Add(MethodIdentity.SharedBodyKey(target));
+        }
+    }
+
     private void DisposeHandleLocked(MethodBase target, long[] owned)
     {
+        if (IsWithdrawn(target))
+        {
+            return;
+        }
+
         (long Seq, Injection Injection)[] removed = TranspilerParticipant.Registry.Remove(target, owned);
 
         Exception failure;

@@ -121,7 +121,18 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
             MethodBase routeKey = MethodIdentity.SharedBodyKey(normalized);
 
             lock (gate) {
-                if (host == null || RouteOf(routeKey) != RouteState.Raw) {
+                if (host == null) {
+                    return;
+                }
+
+                RouteState state = RouteOf(routeKey);
+
+                if (state == RouteState.Bridge) {
+                    Revalidate(routeKey, normalized, hostPatchState);
+                    return;
+                }
+
+                if (state != RouteState.Raw) {
                     return;
                 }
 
@@ -234,6 +245,16 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
         rejectionReasons[routeKey] = result.Reason!;
         log(result.Reason!);
         throw new InvalidOperationException(result.Reason);
+    }
+
+    private void Revalidate(MethodBase routeKey, MethodBase hostTarget, object hostPatchState) {
+        string? reason = host!.RevalidateRouted(hostTarget, hostPatchState);
+        if (reason == null) {
+            return;
+        }
+
+        routes[routeKey] = RouteState.ContestedLost;
+        log(CoexistenceLogMarkers.RouteWithdrawn + " " + DescribeTarget(hostTarget) + ": " + reason);
     }
 
     private void Promote(MethodBase routeKey, MethodBase hostTarget, object hostPatchState) {
