@@ -8,7 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="../Concord.Harmony.Tests/*.cs" Exclude="../Concord.Harmony.Tests/SupportMatrixHostTests.cs;../Concord.Harmony.Tests/InnerPatchCoexistenceTests.cs;../Concord.Harmony.Tests/TestUnpatch.cs" Link="%(Filename)%(Extension)"/>
+    <Compile Include="../Concord.Harmony.Tests/*.cs" Exclude="../Concord.Harmony.Tests/LateInnerPatchWithdrawalTests.cs;../Concord.Harmony.Tests/SupportMatrixHostTests.cs;../Concord.Harmony.Tests/InnerPatchCoexistenceTests.cs;../Concord.Harmony.Tests/TestUnpatch.cs" Link="%(Filename)%(Extension)"/>
     <Compile Include="*.cs"/>
   </ItemGroup>
 
