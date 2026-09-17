@@ -13,6 +13,9 @@ namespace Concord.Emit;
 public static class WrapperComposer {
     private const string CodeCONC039 = "CONC039";
 
+    private static readonly Dictionary<MethodBase, bool> SharedBodyCache = new Dictionary<MethodBase, bool>();
+    private static readonly object SharedBodyGate = new object();
+
     /// <summary>
     ///     Creates a wrapper method for a target and a copy of the original body.
     /// </summary>
@@ -230,6 +233,24 @@ public static class WrapperComposer {
     /// <param name="target">The method a detour is about to be installed for.</param>
     /// <exception cref="ConcordEmitException">Thrown with <c>CONC061</c> when the target is a reference-type instantiation.</exception>
     public static void RejectSharedGenericInstantiation(MethodBase target) {
+        RejectSharedGenericInstantiation(target, null);
+    }
+
+    /// <summary>
+    ///     Rejects a target that is a reference-type generic instantiation, unless the composition
+    ///     qualifies for a receiver guard. A guarded composition emits a runtime
+    ///     <c>isinst</c> check against the requested instantiation in front of every injection body, so
+    ///     calls that arrive on a different reference-type instantiation of the same shared body run the
+    ///     copied original instead of the injections.
+    /// </summary>
+    /// <param name="target">The method a detour is about to be installed for.</param>
+    /// <param name="ordered">The injections being composed, or <see langword="null" /> when unknown.</param>
+    /// <exception cref="ConcordEmitException">Thrown with <c>CONC061</c> when the target is an unguardable reference-type instantiation.</exception>
+    public static void RejectSharedGenericInstantiation(MethodBase target, IReadOnlyList<Injection>? ordered) {
+        if (CanGuardSharedInstantiation(target, ordered)) {
+            return;
+        }
+
         foreach (Type argument in EnumerateGenericArguments(target)) {
             if (argument.IsGenericParameter || argument.IsValueType) {
                 continue;
@@ -240,6 +261,105 @@ public static class WrapperComposer {
                 $"'{target.DeclaringType?.Name}.{target.Name}' is a generic instantiation with reference-type argument '{argument.Name}'. " +
                 "The runtime shares one compiled body across all reference-type instantiations, so a detour would leak to every other one. " +
                 "Patch generic targets only at value-type instantiations.");
+        }
+    }
+
+    /// <summary>
+    ///     Reports whether a target's compiled body is shared with the other reference-type instantiations
+    ///     of its declaring type, and a copy of that body taken at this instantiation is valid for all of
+    ///     them. Detour registries key every such target to one canonical entry, because the runtime gives
+    ///     them one native body between them.
+    /// </summary>
+    /// <param name="target">The method a detour is about to be installed for.</param>
+    /// <returns><see langword="true" /> when the target shares a guardable body.</returns>
+    public static bool SharesGenericBody(MethodBase target) {
+        if (target.IsStatic || target.IsConstructor) {
+            return false;
+        }
+
+        if (target is MethodInfo { IsGenericMethod: true }) {
+            return false;
+        }
+
+        if (target.DeclaringType is not { IsConstructedGenericType: true, IsValueType: false }) {
+            return false;
+        }
+
+        bool anyReferenceArgument = false;
+        foreach (Type argument in EnumerateGenericArguments(target)) {
+            if (!argument.IsGenericParameter && !argument.IsValueType) {
+                anyReferenceArgument = true;
+                break;
+            }
+        }
+
+        if (!anyReferenceArgument) {
+            return false;
+        }
+
+        lock (SharedBodyGate) {
+            if (SharedBodyCache.TryGetValue(target, out bool cached)) {
+                return cached;
+            }
+        }
+
+        bool contextFree = IsSharedBodyGenericContextFree(target);
+        lock (SharedBodyGate) {
+            SharedBodyCache[target] = contextFree;
+        }
+
+        return contextFree;
+    }
+
+    /// <summary>
+    ///     Records which instantiation each injection was requested for, so composition can guard its body
+    ///     with a receiver check. Injections that already carry a tag keep it, and a target whose body is not
+    ///     shared is returned untouched.
+    /// </summary>
+    /// <param name="target">The instantiation the injections were requested for.</param>
+    /// <param name="added">The injections to tag.</param>
+    /// <returns>The tagged injections, or <paramref name="added" /> when no tag applies.</returns>
+    public static IReadOnlyList<Injection> TagRequestedInstantiation(MethodBase target, IReadOnlyList<Injection> added) {
+        if (!SharesGenericBody(target)) {
+            return added;
+        }
+
+        Injection[] tagged = new Injection[added.Count];
+        for (int i = 0; i < added.Count; i++) {
+            tagged[i] = added[i].RequestedInstantiation is null
+                ? added[i] with { RequestedInstantiation = target.DeclaringType }
+                : added[i];
+        }
+
+        return tagged;
+    }
+
+    internal static bool CanGuardSharedInstantiation(MethodBase target, IReadOnlyList<Injection>? ordered) {
+        if (ordered is null || ordered.Count == 0) {
+            return false;
+        }
+
+        foreach (Injection injection in ordered) {
+            if (injection.At is not (InjectAt.Head or InjectAt.Tail)) {
+                return false;
+            }
+        }
+
+        return SharesGenericBody(target);
+    }
+
+    internal static bool IsSharedBodyGenericContextFree(MethodBase target) {
+        MethodBase? probe = BuildProbeInstantiation(target);
+        if (probe is null) {
+            return false;
+        }
+
+        try {
+            using DynamicMethodDefinition requested = new DynamicMethodDefinition(target);
+            using DynamicMethodDefinition other = new DynamicMethodDefinition(probe);
+            return SameInstructions(requested.Definition, other.Definition);
+        } catch (Exception) {
+            return false;
         }
     }
 
@@ -628,6 +748,93 @@ public static class WrapperComposer {
 #endif
     }
 
+    private static MethodBase? BuildProbeInstantiation(MethodBase target) {
+        Type? declaringType = target.DeclaringType;
+        if (declaringType is not { IsConstructedGenericType: true }) {
+            return null;
+        }
+
+        Type[] arguments = declaringType.GetGenericArguments();
+        Type[] substituted = new Type[arguments.Length];
+        for (int i = 0; i < arguments.Length; i++) {
+            Type argument = arguments[i];
+            if (argument.IsValueType) {
+                substituted[i] = argument;
+                continue;
+            }
+
+            substituted[i] = argument == typeof(object) ? typeof(string) : typeof(object);
+        }
+
+        try {
+            Type probeType = declaringType.GetGenericTypeDefinition().MakeGenericType(substituted);
+            return MethodBase.GetMethodFromHandle(target.MethodHandle, probeType.TypeHandle);
+        } catch (Exception) {
+            return null;
+        }
+    }
+
+    private static bool SameInstructions(MethodDefinition left, MethodDefinition right) {
+        if (left.Body.Instructions.Count != right.Body.Instructions.Count) {
+            return false;
+        }
+
+        for (int i = 0; i < left.Body.Instructions.Count; i++) {
+            Instruction a = left.Body.Instructions[i];
+            Instruction b = right.Body.Instructions[i];
+            if (a.OpCode != b.OpCode) {
+                return false;
+            }
+
+            if (a.Operand is Instruction || a.Operand is Instruction[] || a.Operand is VariableDefinition || a.Operand is ParameterDefinition) {
+                continue;
+            }
+
+            if (a.Operand?.ToString() != b.Operand?.ToString()) {
+                return false;
+            }
+        }
+
+        for (int i = 0; i < left.Body.Variables.Count; i++) {
+            if (i >= right.Body.Variables.Count) {
+                return false;
+            }
+
+            if (left.Body.Variables[i].VariableType.FullName != right.Body.Variables[i].VariableType.FullName) {
+                return false;
+            }
+        }
+
+        return left.Body.Variables.Count == right.Body.Variables.Count;
+    }
+
+    private static void PrefixSharedGenericGuard(
+        MethodDefinition wrapperDefinition,
+        Injection injection,
+        List<List<Instruction>> bodies,
+        int firstNewBody,
+        Instruction skipTo) {
+        if (injection.RequestedInstantiation is null) {
+            return;
+        }
+
+        for (int i = firstNewBody; i < bodies.Count; i++) {
+            bodies[i].InsertRange(0, BuildSharedGenericGuard(wrapperDefinition.Module, injection.RequestedInstantiation, skipTo));
+        }
+    }
+
+    private static List<Instruction> BuildSharedGenericGuard(ModuleDefinition module, Type requested, Instruction skipTo) {
+        MethodInfo matches = typeof(SharedGenericGuard).GetMethod(nameof(SharedGenericGuard.Matches))!;
+        MethodInfo fromHandle = typeof(Type).GetMethod(nameof(Type.GetTypeFromHandle))!;
+        return [
+            Instruction.Create(OpCodes.Ldarg_0),
+            Instruction.Create(OpCodes.Ldtoken, module.ImportReference(requested)),
+            Instruction.Create(OpCodes.Call, module.ImportReference(fromHandle)),
+            Instruction.Create(OpCodes.Call, module.ImportReference(matches)),
+            Instruction.Create(OpCodes.Brfalse, skipTo),
+        ];
+    }
+
     private static IEnumerable<Type> EnumerateGenericArguments(MethodBase target) {
         Type? declaringType = target.DeclaringType;
         if (declaringType is { IsConstructedGenericType: true }) {
@@ -712,6 +919,7 @@ public static class WrapperComposer {
         }
 
         List<Instruction> heads = ChainBodies(buffers.HeadBodies, guardStart);
+
         List<Instruction> returns = ChainBodies(new List<List<Instruction>>(), epilogueStart);
 
         List<Instruction> finallyBody = ChainBodies(buffers.FinallyBodies, finallyEnd);
@@ -794,12 +1002,19 @@ public static class WrapperComposer {
             Injection injection = ordered[i];
 
             if (injection.At is InjectAt.Head) {
+                int firstHeadBody = buffers.HeadBodies.Count;
                 ProcessHeadInjection(new InjectionSiteContext(injection, context.WrapperDefinition, context.Target, context.Locals), anchors.GuardStart, context.IsVoid, ref hasHead, buffers.HeadBodies);
+                PrefixSharedGenericGuard(context.WrapperDefinition, injection, buffers.HeadBodies, firstHeadBody, anchors.GuardStart);
                 continue;
             }
 
             if (injection.At is InjectAt.Tail) {
+                int firstTailBody = buffers.TailBodies.Count;
                 lastExit = DispatchTailInjection(context, anchors, buffers, injection, lastExit);
+                if (lastExit is not null) {
+                    PrefixSharedGenericGuard(context.WrapperDefinition, injection, buffers.TailBodies, firstTailBody, lastExit);
+                }
+
                 continue;
             }
 

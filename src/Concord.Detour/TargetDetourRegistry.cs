@@ -41,11 +41,14 @@ internal sealed class TargetDetourRegistry {
     }
 
     internal static IDetourHandle Add(MethodBase target, IReadOnlyList<Injection> added) {
+        MethodBase key = MethodIdentity.SharedBodyKey(target);
+        added = WrapperComposer.TagRequestedInstantiation(target, added);
+
         TargetDetourRegistry registry;
         lock (RegistriesGate) {
-            if (!Registries.TryGetValue(target, out registry!)) {
-                registry = new TargetDetourRegistry(target);
-                Registries[target] = registry;
+            if (!Registries.TryGetValue(key, out registry!)) {
+                registry = new TargetDetourRegistry(key);
+                Registries[key] = registry;
             }
         }
 
@@ -54,7 +57,7 @@ internal sealed class TargetDetourRegistry {
 
     // Keys are normalized when RoutingDetourBackend is in the chain and raw when it is not, so try both.
     internal static IReadOnlyList<string> OwnersFor(MethodBase target) {
-        TargetDetourRegistry? registry = Find(target) ?? Find(MethodIdentity.Normalize(target));
+        TargetDetourRegistry? registry = Find(target) ?? Find(MethodIdentity.SharedBodyKey(target));
         if (registry == null) {
             return [];
         }

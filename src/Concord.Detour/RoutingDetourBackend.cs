@@ -67,10 +67,11 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
     /// <inheritdoc />
     public IDetourHandle Apply(MethodBase original, MethodInfo replacement) {
         original = MethodIdentity.Normalize(original);
+        MethodBase routeKey = MethodIdentity.SharedBodyKey(original);
 
         using (EnterHostLock()) {
             lock (gate) {
-                RouteState state = RouteOf(original);
+                RouteState state = RouteOf(routeKey);
 
                 if (state == RouteState.Bridge) {
                     throw new InvalidOperationException(
@@ -79,12 +80,12 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
                 }
 
                 if (state == RouteState.Rejected) {
-                    throw new InvalidOperationException(rejectionReasons[original]);
+                    throw new InvalidOperationException(rejectionReasons[routeKey]);
                 }
 
                 if (state == RouteState.Unpinned) {
                     IDetourHandle handle = inner.Apply(original, replacement);
-                    PinRaw(original);
+                    PinRaw(routeKey);
                     return handle;
                 }
 
@@ -97,12 +98,15 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
     public IDetourHandle ApplyComposed(MethodBase target, IReadOnlyList<Injection> added) {
         target = MethodIdentity.Normalize(target);
 
+        added = WrapperComposer.TagRequestedInstantiation(target, added);
+        MethodBase routeKey = MethodIdentity.SharedBodyKey(target);
+
         // The host lock is taken before `gate`, always. The notifier fires while the host already holds
         // its lock and then takes `gate`, so acquiring them in the other order here would deadlock.
         using (EnterHostLock()) {
             lock (gate) {
-                RoutedHandle handle = new RoutedHandle(this, target, added);
-                handle.Attach(ApplyComposedRouted(target, added, handle));
+                RoutedHandle handle = new RoutedHandle(this, target, routeKey, added);
+                handle.Attach(ApplyComposedRouted(target, routeKey, added, handle));
                 return handle;
             }
         }
@@ -114,13 +118,14 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
         // unrelated caller's patch, which is exactly the blast radius this design exists to avoid.
         try {
             MethodBase normalized = MethodIdentity.Normalize(target);
+            MethodBase routeKey = MethodIdentity.SharedBodyKey(normalized);
 
             lock (gate) {
-                if (host == null || RouteOf(normalized) != RouteState.Raw) {
+                if (host == null || RouteOf(routeKey) != RouteState.Raw) {
                     return;
                 }
 
-                Promote(normalized, hostPatchState);
+                Promote(routeKey, normalized, hostPatchState);
             }
         } catch (Exception ex) {
             log(CoexistenceLogMarkers.PromoteFailed + " notifier failed for " + DescribeTarget(target) + ": " + ex.Message);
@@ -133,10 +138,10 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
     /// <param name="target">The method to inspect.</param>
     /// <returns>The target's route state, <see cref="RouteState.Unpinned" /> when undecided.</returns>
     public RouteState GetRoute(MethodBase target) {
-        target = MethodIdentity.Normalize(target);
+        MethodBase routeKey = MethodIdentity.SharedBodyKey(MethodIdentity.Normalize(target));
 
         lock (gate) {
-            return RouteOf(target);
+            return RouteOf(routeKey);
         }
     }
 
@@ -180,12 +185,12 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
         return routes.TryGetValue(target, out RouteState existing) ? existing : RouteState.Unpinned;
     }
 
-    private IDetourHandle ApplyComposedRouted(MethodBase target, IReadOnlyList<Injection> added, RoutedHandle handle) {
-        RouteState state = RouteOf(target);
+    private IDetourHandle ApplyComposedRouted(MethodBase target, MethodBase routeKey, IReadOnlyList<Injection> added, RoutedHandle handle) {
+        RouteState state = RouteOf(routeKey);
 
         if (state == RouteState.Raw) {
             IDetourHandle raw = inner.ApplyComposed(target, added);
-            TrackRaw(target, handle);
+            TrackRaw(routeKey, handle);
             return raw;
         }
 
@@ -194,7 +199,7 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
         }
 
         if (state == RouteState.Rejected) {
-            throw new InvalidOperationException(rejectionReasons[target]);
+            throw new InvalidOperationException(rejectionReasons[routeKey]);
         }
 
         // ContestedLost: the host owns the entry point. Apply anyway so the injections are live if the
@@ -205,8 +210,8 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
 
         if (host == null) {
             IDetourHandle raw = inner.ApplyComposed(target, added);
-            PinRaw(target);
-            TrackRaw(target, handle);
+            PinRaw(routeKey);
+            TrackRaw(routeKey, handle);
             return raw;
         }
 
@@ -214,25 +219,25 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
 
         if (result.Kind == ForeignRouteKind.NotContested) {
             IDetourHandle raw = inner.ApplyComposed(target, added);
-            PinRaw(target);
-            TrackRaw(target, handle);
+            PinRaw(routeKey);
+            TrackRaw(routeKey, handle);
             return raw;
         }
 
         if (result.Kind == ForeignRouteKind.Routed) {
-            routes[target] = RouteState.Bridge;
+            routes[routeKey] = RouteState.Bridge;
             log(CoexistenceLogMarkers.RoutedContested + " " + DescribeTarget(target));
             return result.Handle!;
         }
 
-        routes[target] = RouteState.Rejected;
-        rejectionReasons[target] = result.Reason!;
+        routes[routeKey] = RouteState.Rejected;
+        rejectionReasons[routeKey] = result.Reason!;
         log(result.Reason!);
         throw new InvalidOperationException(result.Reason);
     }
 
-    private void Promote(MethodBase target, object hostPatchState) {
-        if (!rawApplies.TryGetValue(target, out List<RoutedHandle>? applies) || applies.Count == 0) {
+    private void Promote(MethodBase routeKey, MethodBase hostTarget, object hostPatchState) {
+        if (!rawApplies.TryGetValue(routeKey, out List<RoutedHandle>? applies) || applies.Count == 0) {
             return;
         }
 
@@ -244,11 +249,11 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
         // Validation is pure, so a refusal never has to unwind a detour that was already removed. The
         // notifier runs at the head of the host's rebuild, so anything re-applied on the refusal path
         // would be clobbered by the rebuild that follows.
-        string? reason = host!.ValidateRoute(target, all);
+        string? reason = host!.ValidateRoute(hostTarget, all);
         if (reason != null) {
-            routes[target] = RouteState.ContestedLost;
-            rawInventory.Remove(target);
-            log(CoexistenceLogMarkers.PromoteRejected + " " + DescribeTarget(target) + ": " + reason);
+            routes[routeKey] = RouteState.ContestedLost;
+            rawInventory.Remove(routeKey);
+            log(CoexistenceLogMarkers.PromoteRejected + " " + DescribeTarget(hostTarget) + ": " + reason);
             return;
         }
 
@@ -261,7 +266,7 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
             // the host stores its own patch record after this returns, discarding anything a nested
             // call registered.
             foreach (RoutedHandle held in applies) {
-                ForeignRouteResult result = host.RouteInto(target, held.Injections, hostPatchState);
+                ForeignRouteResult result = host.RouteInto(hostTarget, held.Injections, hostPatchState);
                 if (result.Kind != ForeignRouteKind.Routed) {
                     throw new InvalidOperationException(result.Reason ?? "host declined the in-flight route");
                 }
@@ -269,26 +274,26 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
                 held.Swap(result.Handle!);
             }
 
-            routes[target] = RouteState.Bridge;
-            rawInventory.Remove(target);
-            rawApplies.Remove(target);
-            log(CoexistenceLogMarkers.Promoted + " " + DescribeTarget(target));
+            routes[routeKey] = RouteState.Bridge;
+            rawInventory.Remove(routeKey);
+            rawApplies.Remove(routeKey);
+            log(CoexistenceLogMarkers.Promoted + " " + DescribeTarget(hostTarget));
         } catch (Exception ex) {
-            RestoreRawAfterFailedPromotion(target, applies);
-            routes[target] = RouteState.ContestedLost;
-            rawInventory.Remove(target);
-            log(CoexistenceLogMarkers.PromoteFailed + " " + DescribeTarget(target) + ": " + ex.Message);
+            RestoreRawAfterFailedPromotion(applies);
+            routes[routeKey] = RouteState.ContestedLost;
+            rawInventory.Remove(routeKey);
+            log(CoexistenceLogMarkers.PromoteFailed + " " + DescribeTarget(hostTarget) + ": " + ex.Message);
         }
     }
 
     // Best effort only. The host's rebuild runs immediately after this and is expected to replace these
     // detours; they survive only if that rebuild also fails, which is exactly when they are wanted.
-    private void RestoreRawAfterFailedPromotion(MethodBase target, List<RoutedHandle> applies) {
+    private void RestoreRawAfterFailedPromotion(List<RoutedHandle> applies) {
         foreach (RoutedHandle held in applies) {
             try {
-                held.Swap(inner.ApplyComposed(target, held.Injections));
+                held.Swap(inner.ApplyComposed(held.Original, held.Injections));
             } catch (Exception ex) {
-                log(CoexistenceLogMarkers.PromoteFailed + " could not restore the detour for " + DescribeTarget(target) + ": " + ex.Message);
+                log(CoexistenceLogMarkers.PromoteFailed + " could not restore the detour for " + DescribeTarget(held.Original) + ": " + ex.Message);
             }
         }
     }
@@ -321,12 +326,14 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
     private sealed class RoutedHandle : IDetourHandle {
         private readonly RoutingDetourBackend owner;
         private readonly MethodBase target;
+        private readonly MethodBase routeKey;
         private IDetourHandle? real;
         private bool disposed;
 
-        public RoutedHandle(RoutingDetourBackend owner, MethodBase target, IReadOnlyList<Injection> injections) {
+        public RoutedHandle(RoutingDetourBackend owner, MethodBase target, MethodBase routeKey, IReadOnlyList<Injection> injections) {
             this.owner = owner;
             this.target = target;
+            this.routeKey = routeKey;
             Injections = injections;
         }
 
@@ -369,7 +376,7 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
                 }
 
                 disposed = true;
-                owner.ReleaseRaw(target, this);
+                owner.ReleaseRaw(routeKey, this);
                 real?.Dispose();
             }
         }

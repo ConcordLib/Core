@@ -23,7 +23,7 @@ namespace Concord.Harmony
 
             try
             {
-                WrapperComposer.RejectSharedGenericInstantiation(target);
+                WrapperComposer.RejectSharedGenericInstantiation(target, added);
             }
             catch (ConcordEmitException ex)
             {

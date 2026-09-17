@@ -97,6 +97,45 @@ public class PromotionTests
     }
 
     [Fact]
+    public void SharedGenericInstantiation_RoutesThroughTheBridgeInsteadOfClobberingHarmony()
+    {
+        PromotionLog.Entries.Clear();
+        MethodBase patched = typeof(SharedRouteTarget<string>).GetMethod(nameof(SharedRouteTarget<string>.Compute));
+        MethodBase sibling = typeof(SharedRouteTarget<Version>).GetMethod(nameof(SharedRouteTarget<Version>.Compute));
+        HarmonyLib.Harmony foreign = new HarmonyLib.Harmony("test.foreign.sharedroute");
+
+        RoutingDetourBackend router = new RoutingDetourBackend(new MonoModDetourBackend(), Noop);
+        HarmonyBridge bridge = new HarmonyBridge(Noop);
+
+        try
+        {
+            router.ActivateHost(bridge);
+
+            foreign.Patch(
+                patched,
+                postfix: new HarmonyMethod(typeof(PromotionMods).GetMethod(nameof(PromotionMods.SharedRouteForeignPostfix))));
+
+            // The sibling instantiation is a different MethodBase but the same native body, so Harmony
+            // already owns this entry point and Concord must bridge rather than detour over it.
+            using IDetourHandle handle = router.ApplyComposed(sibling, new[] { HeadOf(nameof(PromotionMods.SharedRouteHead)) });
+            Assert.Equal(RouteState.Bridge, router.GetRoute(sibling));
+
+            PromotionLog.Entries.Clear();
+            Assert.Equal(4, new SharedRouteTarget<Version>().Compute());
+            Assert.Equal(new[] { "concord-shared", "foreign-shared" }, PromotionLog.Entries);
+
+            PromotionLog.Entries.Clear();
+            Assert.Equal(4, new SharedRouteTarget<string>().Compute());
+            Assert.Equal(new[] { "foreign-shared" }, PromotionLog.Entries);
+        }
+        finally
+        {
+            TestUnpatch.Own(foreign, "test.foreign.sharedroute");
+            UpdateWrapperHook.DetachObserver();
+        }
+    }
+
+    [Fact]
     public void ConcordOwnRebuilds_DoNotRecurseThroughTheNotifier()
     {
         MethodBase target = typeof(RecursionTarget).GetMethod(nameof(RecursionTarget.Compute));
@@ -165,6 +204,15 @@ public class PromotionTests
         }
     }
 
+    public sealed class SharedRouteTarget<T>
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public int Compute()
+        {
+            return 4;
+        }
+    }
+
     public static class RecursionTarget
     {
         [MethodImpl(MethodImplOptions.NoInlining)]
@@ -194,6 +242,16 @@ public class PromotionTests
         public static void UnpatchForeignPrefix()
         {
             PromotionLog.Entries.Add("foreign-unpatch");
+        }
+
+        public static void SharedRouteHead(ControlHandle<int> ch)
+        {
+            PromotionLog.Entries.Add("concord-shared");
+        }
+
+        public static void SharedRouteForeignPostfix()
+        {
+            PromotionLog.Entries.Add("foreign-shared");
         }
 
         public static void RecursionHead(ControlHandle<int> ch)

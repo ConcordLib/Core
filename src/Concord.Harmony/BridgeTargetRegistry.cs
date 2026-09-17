@@ -14,7 +14,8 @@ internal sealed class BridgeTargetRegistry
 
     internal long[] Add(MethodBase target, IReadOnlyList<Injection> added)
     {
-        target = MethodIdentity.Normalize(target);
+        added = WrapperComposer.TagRequestedInstantiation(target, added);
+        target = MethodIdentity.SharedBodyKey(target);
 
         lock (gate)
         {
@@ -35,7 +36,7 @@ internal sealed class BridgeTargetRegistry
 
     internal (long Seq, Injection Injection)[] Remove(MethodBase target, IReadOnlyList<long> owned)
     {
-        target = MethodIdentity.Normalize(target);
+        target = MethodIdentity.SharedBodyKey(target);
 
         lock (gate)
         {
@@ -65,7 +66,7 @@ internal sealed class BridgeTargetRegistry
 
     internal void Restore(MethodBase target, IReadOnlyList<(long Seq, Injection Injection)> pairs)
     {
-        target = MethodIdentity.Normalize(target);
+        target = MethodIdentity.SharedBodyKey(target);
 
         lock (gate)
         {
@@ -77,7 +78,7 @@ internal sealed class BridgeTargetRegistry
 
     internal IReadOnlyList<string> OwnersFor(MethodBase target)
     {
-        target = MethodIdentity.Normalize(target);
+        target = MethodIdentity.SharedBodyKey(target);
 
         lock (gate)
         {
@@ -97,7 +98,7 @@ internal sealed class BridgeTargetRegistry
 
     internal Injection[] OrderedSnapshot(MethodBase target)
     {
-        target = MethodIdentity.Normalize(target);
+        target = MethodIdentity.SharedBodyKey(target);
 
         List<(long Seq, Injection Injection)> live;
         lock (gate)
@@ -115,7 +116,7 @@ internal sealed class BridgeTargetRegistry
 
     internal bool HasInjections(MethodBase target)
     {
-        target = MethodIdentity.Normalize(target);
+        target = MethodIdentity.SharedBodyKey(target);
 
         lock (gate)
         {
@@ -125,7 +126,7 @@ internal sealed class BridgeTargetRegistry
 
     internal void Clear(MethodBase target)
     {
-        target = MethodIdentity.Normalize(target);
+        target = MethodIdentity.SharedBodyKey(target);
 
         lock (gate)
         {

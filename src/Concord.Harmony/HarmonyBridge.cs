@@ -87,6 +87,7 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
     public ForeignRouteResult RouteInto(MethodBase target, IReadOnlyList<Injection> added, object hostPatchState)
     {
         target = MethodIdentity.Normalize(target);
+        added = WrapperComposer.TagRequestedInstantiation(target, added);
 
         if (hostPatchState is not PatchInfo patchInfo)
         {
@@ -114,6 +115,7 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
     public ForeignRouteResult TryRoute(MethodBase target, IReadOnlyList<Injection> added, bool forceRoute)
     {
         target = MethodIdentity.Normalize(target);
+        added = WrapperComposer.TagRequestedInstantiation(target, added);
 
         if (!HarmonyLockScope.Available)
         {
@@ -128,7 +130,8 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
 
         using (HarmonyLockScope.Enter())
         {
-            Patches patchInfo = PatchProcessor.GetPatchInfo(target);
+            MethodBase hostTarget = ResolveSharedBodyOwner(target);
+            Patches patchInfo = PatchProcessor.GetPatchInfo(hostTarget);
             bool foreign = HasForeignPatch(patchInfo);
 
             if (!foreign && !forceRoute)
@@ -142,25 +145,25 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
                 return ForeignRouteResult.Rejected(reason);
             }
 
-            long[] owned = TranspilerParticipant.Registry.Add(target, added);
+            long[] owned = TranspilerParticipant.Registry.Add(hostTarget, added);
             Exception failure;
             try
             {
-                failure = RunRebuild(target);
+                failure = RunRebuild(hostTarget);
             }
             catch
             {
-                AbandonFirstApplication(target, owned);
+                AbandonFirstApplication(hostTarget, owned);
                 throw;
             }
 
             if (failure != null)
             {
-                AbandonFirstApplication(target, owned);
+                AbandonFirstApplication(hostTarget, owned);
                 return ForeignRouteResult.Rejected(failure.Message);
             }
 
-            return ForeignRouteResult.Routed(new BridgeDetourHandle(this, target, owned));
+            return ForeignRouteResult.Routed(new BridgeDetourHandle(this, hostTarget, owned));
         }
     }
 
@@ -168,6 +171,7 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
     public IDetourHandle ApplyToRouted(MethodBase target, IReadOnlyList<Injection> added)
     {
         target = MethodIdentity.Normalize(target);
+        added = WrapperComposer.TagRequestedInstantiation(target, added);
 
         long[] owned;
 
@@ -190,6 +194,14 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
     public IReadOnlyList<string> ForeignOwners(MethodBase target)
     {
         target = MethodIdentity.Normalize(target);
+
+        try
+        {
+            target = ResolveSharedBodyOwner(target);
+        }
+        catch (Exception)
+        {
+        }
 
         try
         {
@@ -255,6 +267,37 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
 #pragma warning disable CS0618
         patchInfo.AddTranspiler(TranspilerParticipant.TranspileMethod, BridgeOwner, Priority.Last, null, null, false);
 #pragma warning restore CS0618
+    }
+
+    private static MethodBase ResolveSharedBodyOwner(MethodBase target)
+    {
+        if (!WrapperComposer.SharesGenericBody(target))
+        {
+            return target;
+        }
+
+        Type definition = target.DeclaringType.GetGenericTypeDefinition();
+        MethodBase key = MethodIdentity.SharedBodyKey(target);
+
+        foreach (MethodBase patched in HarmonyLib.Harmony.GetAllPatchedMethods())
+        {
+            if (patched.DeclaringType == null || !patched.DeclaringType.IsConstructedGenericType)
+            {
+                continue;
+            }
+
+            if (patched.DeclaringType.GetGenericTypeDefinition() != definition || patched.Name != target.Name)
+            {
+                continue;
+            }
+
+            if (MethodIdentity.SharedBodyKey(patched).Equals(key))
+            {
+                return patched;
+            }
+        }
+
+        return target;
     }
 
     private static partial bool HasForeignPatch(Patches patchInfo);

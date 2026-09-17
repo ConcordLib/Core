@@ -49,6 +49,18 @@ namespace Concord.Harmony.Tests
         {
             return 1;
         }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public string Describe()
+        {
+            return typeof(T).Name;
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static int StaticCompute()
+        {
+            return 1;
+        }
     }
 
     public sealed class SupportMatrixCtorTests
@@ -124,37 +136,57 @@ namespace Concord.Harmony.Tests
     [Collection("HarmonySerial")]
     public sealed class SupportMatrixSharedGenericTests
     {
-        [Fact]
-        public void TryRouteRejectsSharedReferenceTypeGenericInstantiation()
+        private static Injection[] HeadInjection()
         {
-            HarmonyBridge bridge = new HarmonyBridge(_ => { });
-            MethodBase target = typeof(GenericContainer<string>).GetMethod(nameof(GenericContainer<string>.Compute));
             MethodBase injectionMethod = typeof(SupportMatrixTestInjections).GetMethod(nameof(SupportMatrixTestInjections.SimplePrefix));
-            Injection[] injections = new Injection[]
+            return new Injection[]
             {
                 new Injection(injectionMethod, new InjectAt.Head(), "test", 0)
             };
+        }
 
-            ForeignRouteResult result = bridge.TryRoute(target, injections, forceRoute: true);
+        [Fact]
+        public void TryRouteRejectsSharedReferenceTypeGenericInstantiationWithGenericContextInBody()
+        {
+            HarmonyBridge bridge = new HarmonyBridge(_ => { });
+            MethodBase target = typeof(GenericContainer<string>).GetMethod(nameof(GenericContainer<string>.Describe));
+
+            ForeignRouteResult result = bridge.TryRoute(target, HeadInjection(), forceRoute: true);
 
             Assert.Equal(ForeignRouteKind.Rejected, result.Kind);
             Assert.Contains("generic", result.Reason.ToLower());
         }
 
         [Fact]
-        public void ValidateRejectsSharedReferenceTypeGenericInstantiation()
+        public void ValidateRejectsSharedReferenceTypeGenericInstantiationWithGenericContextInBody()
         {
-            MethodBase target = typeof(GenericContainer<string>).GetMethod(nameof(GenericContainer<string>.Compute));
-            MethodBase injectionMethod = typeof(SupportMatrixTestInjections).GetMethod(nameof(SupportMatrixTestInjections.SimplePrefix));
-            Injection[] injections = new Injection[]
-            {
-                new Injection(injectionMethod, new InjectAt.Head(), "test", 0)
-            };
+            MethodBase target = typeof(GenericContainer<string>).GetMethod(nameof(GenericContainer<string>.Describe));
 
-            string reason = SupportMatrix.Validate(target, injections, null);
+            string reason = SupportMatrix.Validate(target, HeadInjection(), null);
 
             Assert.NotNull(reason);
             Assert.Contains("generic", reason.ToLower());
+        }
+
+        [Fact]
+        public void ValidateRejectsSharedReferenceTypeGenericStaticMethod()
+        {
+            MethodBase target = typeof(GenericContainer<string>).GetMethod(nameof(GenericContainer<string>.StaticCompute));
+
+            string reason = SupportMatrix.Validate(target, HeadInjection(), null);
+
+            Assert.NotNull(reason);
+            Assert.Contains("generic", reason.ToLower());
+        }
+
+        [Fact]
+        public void ValidateAcceptsGuardableSharedReferenceTypeGenericInstantiation()
+        {
+            MethodBase target = typeof(GenericContainer<string>).GetMethod(nameof(GenericContainer<string>.Compute));
+
+            string reason = SupportMatrix.Validate(target, HeadInjection(), null);
+
+            Assert.Null(reason);
         }
     }
 

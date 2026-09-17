@@ -29,6 +29,13 @@ public sealed record Injection(MethodBase InjectionMethod, InjectAt At, string O
     public IReadOnlyDictionary<string, object?>? BoundArguments { get; set; }
 
     /// <summary>
+    ///     The constructed generic type this injection was requested for, when the target's compiled body
+    ///     is shared across reference-type instantiations. Composition emits a receiver check in front of
+    ///     this injection's body so it runs only for that instantiation. Null on every other target.
+    /// </summary>
+    public Type? RequestedInstantiation { get; set; }
+
+    /// <summary>
     ///     The patch owners that should run after this injection.
     /// </summary>
     public IReadOnlyList<string> BeforeOwners { get; set; } = [];
