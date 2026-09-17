@@ -35,9 +35,11 @@
 
   <!-- Harmony is supplied by the host game at runtime, exactly like Concord itself.
        ExcludeAssets=runtime keeps 0Harmony.dll out of this package's runtime graph. -->
-  <ItemGroup>
-    <PackageReference Include="Lib.Harmony" Version="2.4.2" ExcludeAssets="runtime"/>
-  </ItemGroup>
+  <PropertyGroup>
+    <HarmonyExcludeAssets>runtime</HarmonyExcludeAssets>
+    <HarmonyV3Private>false</HarmonyV3Private>
+  </PropertyGroup>
+  <Import Project="$(MSBuildThisFileDirectory)../../HarmonyV3.targets"/>
 
   <!-- Compile against the metadata-only Concord ref assembly, exactly like a mod does, so this
        binds to whatever Concord.dll the target runtime supplies. Referencing Concord.Detour and

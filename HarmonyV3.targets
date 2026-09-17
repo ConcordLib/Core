@@ -1,0 +1,34 @@
+<Project>
+
+  <PropertyGroup>
+    <HarmonyV3Commit>397833114939e44c3fd07f404fb7fe87c3454362</HarmonyV3Commit>
+    <HarmonyV3CacheRoot Condition="'$(HarmonyV3CacheRoot)' == ''">$([MSBuild]::EnsureTrailingSlash($([System.Environment]::GetFolderPath(SpecialFolder.LocalApplicationData))))concord/harmony-v3/$(HarmonyV3Commit)/</HarmonyV3CacheRoot>
+    <HarmonyV3SourceDir>$(HarmonyV3CacheRoot)src/</HarmonyV3SourceDir>
+    <HarmonyV3Dll>$(HarmonyV3CacheRoot)net10.0/0Harmony.dll</HarmonyV3Dll>
+    <HarmonyV3Active Condition="'$(HarmonyV3)' == 'true' And '$(TargetFramework)' == 'net10.0'">true</HarmonyV3Active>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(HarmonyV3Active)' != 'true'">
+    <PackageReference Include="Lib.Harmony" Version="2.4.2" ExcludeAssets="$(HarmonyExcludeAssets)"/>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(HarmonyV3Active)' == 'true'">
+    <Reference Include="0Harmony">
+      <HintPath>$(HarmonyV3Dll)</HintPath>
+      <Private>$(HarmonyV3Private)</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="EnsureHarmonyV3" BeforeTargets="ResolveAssemblyReferences" Condition="'$(HarmonyV3Active)' == 'true' And !Exists('$(HarmonyV3Dll)')">
+    <Message Importance="high" Text="Building Harmony v3 preview ($(HarmonyV3Commit)) into $(HarmonyV3CacheRoot)"/>
+    <MakeDir Directories="$(HarmonyV3SourceDir)"/>
+    <Exec Command="git init -q" WorkingDirectory="$(HarmonyV3SourceDir)" Condition="!Exists('$(HarmonyV3SourceDir).git')"/>
+    <Exec Command="git remote get-url origin &gt;/dev/null 2&gt;&amp;1 || git remote add origin https://github.com/pardeike/Harmony.git" WorkingDirectory="$(HarmonyV3SourceDir)"/>
+    <Exec Command="git fetch -q --depth 1 origin $(HarmonyV3Commit)" WorkingDirectory="$(HarmonyV3SourceDir)"/>
+    <Exec Command="git checkout -q FETCH_HEAD" WorkingDirectory="$(HarmonyV3SourceDir)"/>
+    <Exec Command="git submodule update -q --init --recursive --depth 1" WorkingDirectory="$(HarmonyV3SourceDir)"/>
+    <Exec Command="dotnet build Lib.Harmony/Lib.Harmony.csproj -c Release -f net10.0 --verbosity quiet" WorkingDirectory="$(HarmonyV3SourceDir)"/>
+    <Copy SourceFiles="$(HarmonyV3SourceDir)Lib.Harmony/bin/Release/net10.0/0Harmony.dll" DestinationFolder="$(HarmonyV3CacheRoot)net10.0/"/>
+  </Target>
+
+</Project>

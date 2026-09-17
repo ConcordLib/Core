@@ -45,8 +45,7 @@ namespace Concord.Harmony.Tests
 
             MethodBase target = typeof(SupportMatrixTestTargets).GetMethod(nameof(SupportMatrixTestTargets.SimpleTarget));
             string reason = SupportMatrix.Validate(target, Array.Empty<Injection>(), patchInfo);
-            Assert.NotNull(reason);
-            Assert.Contains("inner", reason.ToLower());
+            Assert.Null(reason);
         }
 
         [Fact]

@@ -1,6 +1,8 @@
 #nullable disable
 
+using System.Collections.Generic;
 using System.Reflection;
+using Concord.Emit;
 using HarmonyLib;
 
 namespace Concord.Harmony
@@ -17,7 +19,7 @@ namespace Concord.Harmony
             return patchInfo.ILManipulators.Count > 0;
         }
 
-        private static partial string ValidateHost(MethodBase target, Patches patchInfo)
+        private static partial string ValidateHost(MethodBase target, IReadOnlyList<Injection> added, Patches patchInfo)
         {
             if (HasILManipulators(patchInfo))
             {
