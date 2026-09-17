@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <Nullable>disable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../Concord.Harmony.Tests/*.cs" Exclude="../Concord.Harmony.Tests/SupportMatrixHostTests.cs;../Concord.Harmony.Tests/TestUnpatch.cs" Link="%(Filename)%(Extension)"/>
+    <Compile Include="*.cs"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.7.0"/>
+    <PackageReference Include="xunit" Version="2.9.3"/>
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5"/>
+    <PackageReference Include="xunit.runner.console" Version="2.9.3" PrivateAssets="all"/>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all"/>
+    <PackageReference Include="HarmonyX" Version="[2.10.2]"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Concord.HarmonyX/Concord.HarmonyX.csproj"/>
+    <ProjectReference Include="../../src/Concord/Concord.csproj" ReferenceOutputAssembly="false"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Concord">
+      <HintPath>../../Assemblies/net472/Concord.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+</Project>

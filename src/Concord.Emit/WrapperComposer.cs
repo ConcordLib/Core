@@ -360,7 +360,14 @@ public static class WrapperComposer {
             instructions = produced as List<CodeInstruction> ?? new List<CodeInstruction>(produced);
         }
 
-        CecilCodeConverter.WriteBack(wrapperDefinition, instructions, context);
+        try {
+            CecilCodeConverter.WriteBack(wrapperDefinition, instructions, context);
+        } catch (ConcordEmitException ex) when (ex.Code is "CONC118" or "CONC119") {
+            string names = string.Join(", ", transpilers.Select(t => $"{t.InjectionMethod.DeclaringType?.Name}.{t.InjectionMethod.Name}"));
+            throw new ConcordEmitException(
+                ex.Code,
+                $"Transpiler(s) '{names}' on '{resolved.DeclaringType?.Name}.{resolved.Name}' produced instructions Concord cannot write back: {ex.Message}");
+        }
     }
 
     private static TranspilerContext RequireConcreteContext(ITranspilerContext context) {
@@ -949,7 +956,8 @@ public static class WrapperComposer {
         if (allExits.Count == 0) {
             throw new ConcordEmitException(
                 "CONC106",
-                $"Tail injection on '{target.DeclaringType?.Name}.{target.Name}' found no return in the target body.");
+                $"Tail injection on '{target.DeclaringType?.Name}.{target.Name}' found no return in the target body, so there is nowhere to run it; " +
+                    "the method always throws or never exits. Use At.Finally to run when the method exits by any path, or At.Head.");
         }
 
         Instruction lastExit = allExits[allExits.Count - 1];
@@ -1049,7 +1057,8 @@ public static class WrapperComposer {
             if (allExits.Count == 0) {
                 throw new ConcordEmitException(
                     "CONC106",
-                    $"Tail injection on '{target.DeclaringType?.Name}.{target.Name}' found no return in the target body.");
+                    $"Tail injection on '{target.DeclaringType?.Name}.{target.Name}' found no return in the target body, so there is nowhere to run it; " +
+                    "the method always throws or never exits. Use At.Finally to run when the method exits by any path, or At.Head.");
             }
 
             Instruction lastExit = allExits[allExits.Count - 1];
@@ -1429,7 +1438,8 @@ public static class WrapperComposer {
         if (found < 0) {
             throw new ConcordEmitException(
                 CodeCONC039,
-                $"Argument injection on '{target.DeclaringType?.Name}.{target.Name}' matches no '{valueType.Name}' argument.");
+                $"Argument injection on '{target.DeclaringType?.Name}.{target.Name}' matches no '{valueType.Name}' argument. " +
+                "The injection method's parameter type must equal one of the call site's parameter types exactly; change the parameter type, or pass arg: to pick a specific argument.");
         }
 
         return found;
@@ -1845,7 +1855,8 @@ public static class WrapperComposer {
             throw new ConcordEmitException(
                 "CONC031",
                 $"Injection on '{target.DeclaringType?.Name}.{target.Name}' targets call site '{siteDescription}' " +
-                $"which does not occur {CallSiteQuery.ScopeName(sliced)}.");
+                $"which does not occur {CallSiteQuery.ScopeName(sliced)}. Check the member name and parameterTypes on the [Inject] target and any [Slice] range; " +
+                "if the call lives inside a lambda, local function, or async/iterator state machine, target that method instead.");
         }
 
         return CallSiteQuery.Select(allSites, by, target, siteDescription, sliced);

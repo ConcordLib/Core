@@ -30,7 +30,8 @@ internal static class UpdateWrapperHook
     private static IDetourHandle hookHandle;
 
     /// <summary>
-    ///     Installs the notifier. Safe to call more than once; only the first call installs.
+    ///     Installs the notifier. Safe to call more than once; later calls only re-point the observer,
+    ///     because the detour itself is never removed once it lands.
     /// </summary>
     /// <param name="target">The observer to notify before each Harmony rebuild.</param>
     /// <param name="rawBackend">The plain backend, never the routing one.</param>
@@ -38,6 +39,8 @@ internal static class UpdateWrapperHook
     /// <returns>True when the hook is installed.</returns>
     internal static bool TryInstall(IForeignPatchObserver target, IDetourBackend rawBackend, Action<string> log)
     {
+        observer = target;
+
         if (hookHandle != null)
         {
             return true;
@@ -55,8 +58,6 @@ internal static class UpdateWrapperHook
             log(CoexistenceLogMarkers.HookUnavailable + " the notify injection method was not found");
             return false;
         }
-
-        observer = target;
 
         try
         {
@@ -85,10 +86,13 @@ internal static class UpdateWrapperHook
         return new SuppressScope();
     }
 
-    internal static void Uninstall()
+    /// <summary>
+    ///     Stops notifying, without touching the detour. Undoing and re-applying a detour on
+    ///     <c>UpdateWrapper</c> SIGSEGVs mono once HarmonyX has patched anything through it, and nothing
+    ///     in a running game ever needs the hook gone, so the detour stays for the process lifetime.
+    /// </summary>
+    internal static void DetachObserver()
     {
-        hookHandle?.Dispose();
-        hookHandle = null;
         observer = null;
     }
 

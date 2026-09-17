@@ -107,8 +107,8 @@ namespace Concord.Harmony.Tests
             finally
             {
                 competitor?.Join(1000);
-                harmonyMain.UnpatchAll("test.lockscope.main");
-                harmonyCompetitor.UnpatchAll("test.lockscope.competitor");
+                TestUnpatch.Own(harmonyMain, "test.lockscope.main");
+                TestUnpatch.Own(harmonyCompetitor, "test.lockscope.competitor");
             }
         }
     }

@@ -61,8 +61,8 @@ public class PatchOwnersBridgeTests
         }
         finally
         {
-            foreign.UnpatchAll("test.foreign.owners");
-            UpdateWrapperHook.Uninstall();
+            TestUnpatch.Own(foreign, "test.foreign.owners");
+            UpdateWrapperHook.DetachObserver();
         }
     }
 

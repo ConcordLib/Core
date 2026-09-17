@@ -143,7 +143,7 @@ internal static class CecilCodeConverter {
             return mapped;
         }
 
-        throw new ConcordEmitException(CodeConversionFailed, $"Unknown opcode '{source.Name}'.");
+        throw new ConcordEmitException(CodeConversionFailed, $"Unknown opcode '{source.Name}'. Use an OpCodes.* value from System.Reflection.Emit.");
     }
 
     private static Dictionary<string, Mono.Cecil.Cil.OpCode> BuildCecilOpCodeTable() {
@@ -171,7 +171,7 @@ internal static class CecilCodeConverter {
             return mapped;
         }
 
-        throw new ConcordEmitException(CodeConversionFailed, $"Unknown opcode '{source.Name}'.");
+        throw new ConcordEmitException(CodeConversionFailed, $"Unknown opcode '{source.Name}'. Use an OpCodes.* value from System.Reflection.Emit.");
     }
 
     private static void AssignLabels(MethodBody body, TranspilerContext context, Dictionary<Instruction, List<int>>? preservedLabels) {
@@ -248,15 +248,15 @@ internal static class CecilCodeConverter {
     }
 
     private static Type ResolveType(TypeReference typeReference) {
-        return typeReference.ResolveReflection() ?? throw new ConcordEmitException(CodeConversionFailed, $"Could not resolve CLR type for '{typeReference.FullName}'.");
+        return typeReference.ResolveReflection() ?? throw new ConcordEmitException(CodeConversionFailed, $"Could not resolve CLR type for '{typeReference.FullName}'. Pass a typeof(...) the mod can reference, and make sure its assembly is loaded before the patch is applied.");
     }
 
     private static FieldInfo ResolveField(FieldReference fieldReference) {
-        return fieldReference.ResolveReflection() ?? throw new ConcordEmitException(CodeConversionFailed, $"Could not resolve CLR field for '{fieldReference.FullName}'.");
+        return fieldReference.ResolveReflection() ?? throw new ConcordEmitException(CodeConversionFailed, $"Could not resolve CLR field for '{fieldReference.FullName}'. Pass a FieldInfo from a loaded type; a name-only reference is not enough.");
     }
 
     private static MethodBase ResolveMethod(MethodReference methodReference) {
-        return methodReference.ResolveReflection() ?? throw new ConcordEmitException(CodeConversionFailed, $"Could not resolve CLR method for '{methodReference.FullName}'.");
+        return methodReference.ResolveReflection() ?? throw new ConcordEmitException(CodeConversionFailed, $"Could not resolve CLR method for '{methodReference.FullName}'. Pass a MethodInfo or ConstructorInfo from a loaded type; a name-only reference is not enough.");
     }
 
     private static void AttachExceptionBlocks(MethodBody body, Dictionary<Instruction, CodeInstruction> byInstruction, TranspilerContext context) {
@@ -475,7 +475,7 @@ internal static class CecilCodeConverter {
             long i64 => Instruction.Create(opcode, i64),
             float f32 => Instruction.Create(opcode, f32),
             double f64 => Instruction.Create(opcode, f64),
-            _ => throw new ConcordEmitException(CodeConversionFailed, $"Unsupported operand '{source.operand}' of type '{source.operand.GetType()}' for opcode '{source.opcode.Name}'."),
+            _ => throw new ConcordEmitException(CodeConversionFailed, $"Unsupported operand '{source.operand}' of type '{source.operand.GetType()}' for opcode '{source.opcode.Name}'. Supported operands are MethodBase, FieldInfo, Type, Label, LocalBuilder, string, and int/long/float/double literals."),
         };
     }
 

@@ -14,7 +14,7 @@ namespace Concord.Harmony;
 ///     woven into the instruction stream Harmony builds, through one transpiler registered at the lowest
 ///     priority Harmony supports.
 /// </summary>
-public sealed class HarmonyBridge : IForeignPatchHost
+public sealed partial class HarmonyBridge : IForeignPatchHost
 {
     private const string BridgeOwner = "concord.bridge";
 
@@ -257,23 +257,9 @@ public sealed class HarmonyBridge : IForeignPatchHost
 #pragma warning restore CS0618
     }
 
-    private static bool HasForeignPatch(Patches patchInfo)
-    {
-        if (patchInfo == null)
-        {
-            return false;
-        }
+    private static partial bool HasForeignPatch(Patches patchInfo);
 
-        if (patchInfo.InnerPrefixes.Count > 0 || patchInfo.InnerPostfixes.Count > 0)
-        {
-            return true;
-        }
-
-        return HasForeignEntry(patchInfo.Prefixes) ||
-               HasForeignEntry(patchInfo.Postfixes) ||
-               HasForeignEntry(patchInfo.Transpilers) ||
-               HasForeignEntry(patchInfo.Finalizers);
-    }
+    private static partial IReadOnlyList<string> CollectForeignOwners(MethodBase target);
 
     private static bool HasForeignEntry(IReadOnlyList<Patch> patches)
     {
@@ -286,25 +272,6 @@ public sealed class HarmonyBridge : IForeignPatchHost
         }
 
         return false;
-    }
-
-    private static IReadOnlyList<string> CollectForeignOwners(MethodBase target)
-    {
-        Patches patchInfo = PatchProcessor.GetPatchInfo(target);
-        if (patchInfo == null)
-        {
-            return Array.Empty<string>();
-        }
-
-        HashSet<string> owners = new HashSet<string>();
-        CollectForeignOwners(patchInfo.Prefixes, owners);
-        CollectForeignOwners(patchInfo.Postfixes, owners);
-        CollectForeignOwners(patchInfo.Transpilers, owners);
-        CollectForeignOwners(patchInfo.Finalizers, owners);
-        CollectForeignOwners(patchInfo.InnerPrefixes, owners);
-        CollectForeignOwners(patchInfo.InnerPostfixes, owners);
-
-        return new List<string>(owners);
     }
 
     private static void CollectForeignOwners(IReadOnlyList<Patch> patches, HashSet<string> owners)

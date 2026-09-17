@@ -3,6 +3,11 @@
   present (runtime-specific adapters and test mods reference target runtime assemblies
   via a local TargetRuntimeDir, so they are excluded from CI). The full developer solution remains
   Concord.slnx; this filter only gates what continuous integration exercises.
+
+  Concord.HarmonyX and its tests are net472-only and stay out on purpose: CI runs the
+  solution with `-f net10.0`, which sets TargetFramework for every project in it, so a
+  net472-only project fails the whole run with NETSDK1005. The release workflow builds
+  and tests those two from their csproj paths instead.
 -->
 <Solution>
   <Folder Name="/src/">

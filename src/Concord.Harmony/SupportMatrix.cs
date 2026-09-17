@@ -9,7 +9,7 @@ using HarmonyLib;
 
 namespace Concord.Harmony
 {
-    internal static class SupportMatrix
+    internal static partial class SupportMatrix
     {
         private static readonly Dictionary<short, OpCode> OpCodesByValue = BuildOpCodeTable();
 
@@ -26,9 +26,10 @@ namespace Concord.Harmony
                 }
             }
 
-            if (HasInnerPatches(patchInfo))
+            string hostReason = ValidateHost(target, patchInfo);
+            if (hostReason != null)
             {
-                return $"Target {target.Name} has Harmony 2.4 inner patches (not composable with Concord detours)";
+                return hostReason;
             }
 
             // Harmony hands us the stream for the method it was asked to patch. That lines up with a
@@ -61,16 +62,6 @@ namespace Concord.Harmony
             }
 
             return null;
-        }
-
-        internal static bool HasInnerPatches(Patches patchInfo)
-        {
-            if (patchInfo == null)
-            {
-                return false;
-            }
-
-            return patchInfo.InnerPrefixes.Count > 0 || patchInfo.InnerPostfixes.Count > 0;
         }
 
         internal static bool CallsGetExecutingAssembly(MethodBase method)
@@ -116,6 +107,8 @@ namespace Concord.Harmony
                 return true;
             }
         }
+
+        private static partial string ValidateHost(MethodBase target, Patches patchInfo);
 
         /// <summary>
         ///     Resolves an InlineMethod operand token and reports whether it names

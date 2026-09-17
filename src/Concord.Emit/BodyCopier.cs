@@ -580,9 +580,9 @@ internal static class BodyCopier {
         }
 
         throw new ConcordEmitException(
-            "CONC135",
-            "No state slot was allocated for injection '" + site.InjectionMethod.DeclaringType?.Name + "." + site.InjectionMethod.Name +
-            "'; its declaring type was not scanned for state calls during composition.");
+            "CONC142",
+            "Concord bug: no state slot exists for injection '" + site.InjectionMethod.DeclaringType?.Name + "." + site.InjectionMethod.Name +
+            "' even though it calls SetState/GetState. Nothing in the patch declaration causes this; report it with the declaration.");
     }
 
     private static List<Instruction> LowerReturn(InjectionLoweringSite site) {

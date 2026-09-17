@@ -72,6 +72,9 @@ jobs:
       - name: Pack Harmony host
         run: dotnet pack src/Concord.Harmony/Concord.Harmony.csproj -c Release -o artifacts
 
+      - name: Pack HarmonyX host
+        run: dotnet pack src/Concord.HarmonyX/Concord.HarmonyX.csproj -c Release -o artifacts
+
       - name: Upload runtime assembly
         uses: actions/upload-artifact@v4
         with:
@@ -153,6 +156,7 @@ jobs:
             /d:sonar.coverage.exclusions="tests/**,bench/**" \
             /d:sonar.qualitygate.wait=true
           dotnet build Concord.ci.slnx -c Release
+          dotnet build src/Concord.HarmonyX/Concord.HarmonyX.csproj -c Release
           dotnet test Concord.ci.slnx -c Release --no-build -f net10.0 \
             --collect:"XPlat Code Coverage;Format=opencover" \
             --results-directory coverage
@@ -214,6 +218,7 @@ jobs:
           dotnet test tests/Concord.Emit.Tests/Concord.Emit.Tests.csproj -c Release --no-restore -f net472
           dotnet test tests/Concord.AttachedData.Tests/Concord.AttachedData.Tests.csproj -c Release --no-restore -f net472
           dotnet test tests/Concord.Orchestration.Tests/Concord.Orchestration.Tests.csproj -c Release --no-restore -f net472
+          dotnet test tests/Concord.HarmonyX.Tests/Concord.HarmonyX.Tests.csproj -c Release -f net472
 
       - name: Upload test results
         if: always()
@@ -250,7 +255,9 @@ jobs:
         run: dotnet restore Concord.ci.slnx
 
       - name: Build net472 test assemblies
-        run: dotnet build Concord.ci.slnx -c Release --no-restore
+        run: |
+          dotnet build Concord.ci.slnx -c Release --no-restore
+          dotnet build tests/Concord.HarmonyX.Tests/Concord.HarmonyX.Tests.csproj -c Release
 
       - name: Run suites under mono
         run: |
@@ -259,7 +266,7 @@ jobs:
           # left in the cache would make mono fail to load the tests' xunit.assert 2.9.3 with
           # a FileNotFoundException; sort -V | tail -1 selects the version the restore pulled.
           RUNNER=$(find ~/.nuget/packages/xunit.runner.console -name xunit.console.exe -path '*net472*' | sort -V | tail -1)
-          for dll in Detour Emit AttachedData Orchestration; do
+          for dll in Detour Emit AttachedData Orchestration HarmonyX; do
             mono "$RUNNER" "tests/Concord.$dll.Tests/bin/Release/net472/Concord.$dll.Tests.dll"
           done
 
@@ -328,6 +335,7 @@ jobs:
           dotnet pack src/Concord.Analyzers/Concord.Analyzers.csproj -c Release -o artifacts
           dotnet pack src/Concord.Generators/Concord.Generators.csproj -c Release -o artifacts
           dotnet pack src/Concord.Harmony/Concord.Harmony.csproj -c Release -o artifacts
+          dotnet pack src/Concord.HarmonyX/Concord.HarmonyX.csproj -c Release -o artifacts
           dotnet pack src/Concord/Concord.csproj -c Release -o artifacts
 
       - name: NuGet login

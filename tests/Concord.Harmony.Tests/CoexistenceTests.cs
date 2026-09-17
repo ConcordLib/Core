@@ -608,7 +608,7 @@ namespace Concord.Harmony.Tests
                 Assert.Equal(7, DiscordSequenceTarget.Foo());
                 Assert.Equal(new List<string> { "head", "body", "postfixA", "postfixB" }, DiscordSequenceLog.Entries);
 
-                harmonyA.UnpatchAll("test.modA");
+                TestUnpatch.Own(harmonyA, "test.modA");
 
                 DiscordSequenceLog.Entries.Clear();
                 Assert.Equal(7, DiscordSequenceTarget.Foo());
@@ -617,8 +617,8 @@ namespace Concord.Harmony.Tests
             finally
             {
                 result?.Handle?.Dispose();
-                harmonyA.UnpatchAll("test.modA");
-                harmonyB.UnpatchAll("test.modB");
+                TestUnpatch.Own(harmonyA, "test.modA");
+                TestUnpatch.Own(harmonyB, "test.modB");
             }
         }
 
@@ -694,7 +694,7 @@ namespace Concord.Harmony.Tests
             finally
             {
                 result?.Handle?.Dispose();
-                harmonyForeign.UnpatchAll("test.foreign.before");
+                TestUnpatch.Own(harmonyForeign, "test.foreign.before");
             }
         }
 
@@ -725,7 +725,7 @@ namespace Concord.Harmony.Tests
             finally
             {
                 result?.Handle?.Dispose();
-                harmonyForeign.UnpatchAll("test.foreign.after");
+                TestUnpatch.Own(harmonyForeign, "test.foreign.after");
             }
         }
 
@@ -758,7 +758,7 @@ namespace Concord.Harmony.Tests
             finally
             {
                 result?.Handle?.Dispose();
-                harmonyForeign.UnpatchAll("test.prefix.foreign");
+                TestUnpatch.Own(harmonyForeign, "test.prefix.foreign");
             }
         }
 
@@ -790,7 +790,7 @@ namespace Concord.Harmony.Tests
             finally
             {
                 result?.Handle?.Dispose();
-                harmonyForeign.UnpatchAll("test.around.foreign");
+                TestUnpatch.Own(harmonyForeign, "test.around.foreign");
             }
         }
 
@@ -853,7 +853,7 @@ namespace Concord.Harmony.Tests
             finally
             {
                 result?.Handle?.Dispose();
-                harmonyForeign.UnpatchAll("test.constant.foreign");
+                TestUnpatch.Own(harmonyForeign, "test.constant.foreign");
             }
         }
 
@@ -906,7 +906,7 @@ namespace Concord.Harmony.Tests
             finally
             {
                 result?.Handle?.Dispose();
-                harmonyForeign.UnpatchAll("test.foreignowners.foreign");
+                TestUnpatch.Own(harmonyForeign, "test.foreignowners.foreign");
             }
         }
 
@@ -1006,7 +1006,7 @@ namespace Concord.Harmony.Tests
             }
             finally
             {
-                harmonyForeign.UnpatchAll("test.disposal.foreign");
+                TestUnpatch.Own(harmonyForeign, "test.disposal.foreign");
             }
         }
 
@@ -1275,7 +1275,7 @@ namespace Concord.Harmony.Tests
                 TranspilerParticipant.Registry.Clear(MethodIdentity.Normalize(target));
                 TranspilerParticipant.LastStreamFailure = null;
                 TranspilerParticipant.Log = null;
-                harmonyForeign.UnpatchAll("test.composefailure.foreign");
+                TestUnpatch.Own(harmonyForeign, "test.composefailure.foreign");
             }
         }
 
@@ -1365,7 +1365,7 @@ namespace Concord.Harmony.Tests
             finally
             {
                 result?.Handle?.Dispose();
-                harmonyForeign.UnpatchAll("test.around.structlocal");
+                TestUnpatch.Own(harmonyForeign, "test.around.structlocal");
             }
         }
     }

@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <AssemblyName>Concord.HarmonyX</AssemblyName>
+    <RootNamespace>Concord.Harmony</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Concord.HarmonyX</PackageId>
+    <Description>HarmonyX coexistence host for Concord. Lets Concord patches share a method with HarmonyX patches on BepInEx games instead of fighting over the entry point.</Description>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <WarningsNotAsErrors>NU5128</WarningsNotAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../Concord.Harmony/*.cs" Exclude="../Concord.Harmony/HarmonyBridge.Owners.cs;../Concord.Harmony/SupportMatrix.Host.cs" Link="%(Filename)%(Extension)"/>
+    <Compile Include="*.cs"/>
+    <Compile Include="../Shared/Polyfills.cs" Link="Polyfills.cs"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="HarmonyX" Version="[2.10.2]" ExcludeAssets="runtime"/>
+    <PackageReference Include="Mono.Cecil" Version="0.11.6" ExcludeAssets="runtime"/>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Concord.Ref/Concord.Ref.csproj" PrivateAssets="all"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Concord.HarmonyX.Tests"/>
+  </ItemGroup>
+
+</Project>

@@ -53,8 +53,8 @@ public class PromotionTests
         }
         finally
         {
-            foreign.UnpatchAll("test.foreign.promotion");
-            UpdateWrapperHook.Uninstall();
+            TestUnpatch.Own(foreign, "test.foreign.promotion");
+            UpdateWrapperHook.DetachObserver();
         }
     }
 
@@ -80,7 +80,7 @@ public class PromotionTests
                 prefix: new HarmonyMethod(typeof(PromotionMods).GetMethod(nameof(PromotionMods.UnpatchForeignPrefix))));
             Assert.Equal(RouteState.Bridge, router.GetRoute(target));
 
-            foreign.UnpatchAll("test.foreign.unpatch");
+            TestUnpatch.Own(foreign, "test.foreign.unpatch");
 
             // Route state is monotonic: once bridged, it stays bridged for the session.
             Assert.Equal(RouteState.Bridge, router.GetRoute(target));
@@ -91,8 +91,8 @@ public class PromotionTests
         }
         finally
         {
-            foreign.UnpatchAll("test.foreign.unpatch");
-            UpdateWrapperHook.Uninstall();
+            TestUnpatch.Own(foreign, "test.foreign.unpatch");
+            UpdateWrapperHook.DetachObserver();
         }
     }
 
@@ -118,8 +118,8 @@ public class PromotionTests
         }
         finally
         {
-            foreign.UnpatchAll("test.foreign.recursion");
-            UpdateWrapperHook.Uninstall();
+            TestUnpatch.Own(foreign, "test.foreign.recursion");
+            UpdateWrapperHook.DetachObserver();
         }
     }
 
