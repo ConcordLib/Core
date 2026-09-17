@@ -70,7 +70,7 @@ namespace Concord.Harmony.Tests
         }
 
         [Fact]
-        public void RejectsConstructorWithAround()
+        public void AllowsConstructorWithAround()
         {
             MethodBase target = CtorMethod();
             MethodBase injectionMethod = typeof(SupportMatrixTestInjections).GetMethod(nameof(SupportMatrixTestInjections.SimplePrefix));
@@ -80,9 +80,7 @@ namespace Concord.Harmony.Tests
             };
 
             string reason = SupportMatrix.Validate(target, injections, null);
-            Assert.NotNull(reason);
-            Assert.Contains("Constructor", reason);
-            Assert.Contains("Around", reason);
+            Assert.Null(reason);
         }
 
         [Fact]
@@ -235,7 +233,7 @@ namespace Concord.Harmony.Tests
     public sealed class SupportMatrixRoutingTests
     {
         [Fact]
-        public void TryRouteRejectsConstructorAround()
+        public void TryRouteRejectsMisshapedConstructorAroundAtEmitLayer()
         {
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
             MethodBase target = typeof(object).GetConstructor(Type.EmptyTypes);
@@ -247,11 +245,11 @@ namespace Concord.Harmony.Tests
 
             ForeignRouteResult result = bridge.TryRoute(target, injections, forceRoute: true);
             Assert.Equal(ForeignRouteKind.Rejected, result.Kind);
-            Assert.Contains("Constructor", result.Reason);
+            Assert.Contains("CONC111", result.Reason);
         }
 
         [Fact]
-        public void ApplyToRoutedRejectsConstructorAround()
+        public void ApplyToRoutedRejectsMisshapedConstructorAroundAtEmitLayer()
         {
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
             MethodBase target = typeof(object).GetConstructor(Type.EmptyTypes);
@@ -269,7 +267,7 @@ namespace Concord.Harmony.Tests
 
             InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
                 bridge.ApplyToRouted(target, additionalInjections));
-            Assert.Contains("Constructor", ex.Message);
+            Assert.Contains("CONC111", ex.Message);
         }
     }
 

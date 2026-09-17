@@ -15,17 +15,6 @@ namespace Concord.Harmony
 
         internal static string Validate(MethodBase target, IReadOnlyList<Injection> added, Patches patchInfo)
         {
-            if (target.IsConstructor)
-            {
-                foreach (Injection injection in added)
-                {
-                    if (injection.At is InjectAt.Around)
-                    {
-                        return $"Constructor {target.Name} cannot receive whole-method Around patch (uninitialized this under Harmony)";
-                    }
-                }
-            }
-
             string hostReason = ValidateHost(target, patchInfo);
             if (hostReason != null)
             {
