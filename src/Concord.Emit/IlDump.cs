@@ -1,6 +1,8 @@
+using System.Reflection;
 using System.Text;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
+using MonoMod.Utils;
 using MethodBody = Mono.Cecil.Cil.MethodBody;
 
 namespace Concord.Emit;
@@ -75,6 +77,101 @@ internal static class IlDump {
 
         sb.Append("verify:\n");
         sb.Append(Verify(method));
+
+        sb.Append(FormatAssemblies(method));
+
+        return sb.ToString();
+    }
+
+    // Every assembly the body resolves against, next to every loaded assembly with the same
+    // simple name. Two rows under one name means the runtime holds two copies, and a value-type
+    // local from one copy will not accept a value from the other.
+    internal static string FormatAssemblies(MethodDefinition method) {
+        MethodBody body = method.Body;
+        Dictionary<string, HashSet<Assembly>> resolved = new Dictionary<string, HashSet<Assembly>>(StringComparer.Ordinal);
+        List<TypeReference> types = new List<TypeReference>();
+        foreach (VariableDefinition v in body.Variables) {
+            CollectTypes(v.VariableType, types);
+        }
+
+        foreach (Instruction instruction in body.Instructions) {
+            switch (instruction.Operand) {
+                case TypeReference type:
+                    CollectTypes(type, types);
+                    break;
+                case MethodReference call:
+                    CollectTypes(call.DeclaringType, types);
+                    CollectTypes(call.ReturnType, types);
+                    break;
+                case MemberReference member when member.DeclaringType is not null:
+                    CollectTypes(member.DeclaringType, types);
+                    break;
+            }
+        }
+
+        foreach (ExceptionHandler handler in body.ExceptionHandlers) {
+            if (handler.CatchType is not null) {
+                CollectTypes(handler.CatchType, types);
+            }
+        }
+
+        List<(TypeReference Reference, Assembly Assembly)> perType = new List<(TypeReference, Assembly)>();
+        foreach (TypeReference type in types) {
+            Assembly? assembly;
+            try {
+                assembly = type.ResolveReflection()?.Assembly;
+            } catch (Exception) {
+                assembly = null;
+            }
+
+            if (assembly is null) {
+                continue;
+            }
+
+            perType.Add((type, assembly));
+            string name = assembly.GetName().Name ?? assembly.FullName ?? "?";
+            if (!resolved.TryGetValue(name, out HashSet<Assembly>? set)) {
+                set = new HashSet<Assembly>();
+                resolved[name] = set;
+            }
+
+            set.Add(assembly);
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.Append("assemblies[").Append(resolved.Count).Append("]:\n");
+        Assembly[] loaded = AppDomain.CurrentDomain.GetAssemblies();
+        foreach (KeyValuePair<string, HashSet<Assembly>> entry in resolved.OrderBy(e => e.Key, StringComparer.Ordinal)) {
+            HashSet<Assembly> seen = new HashSet<Assembly>();
+            foreach (Assembly candidate in loaded) {
+                if (candidate.GetName().Name == entry.Key) {
+                    seen.Add(candidate);
+                    AppendAssemblyRow(sb, entry.Key, candidate, entry.Value.Contains(candidate), false);
+                }
+            }
+
+            foreach (Assembly used in entry.Value) {
+                if (seen.Add(used)) {
+                    AppendAssemblyRow(sb, entry.Key, used, true, true);
+                }
+            }
+
+            if (seen.Count > 1) {
+                sb.Append("  <<< ").Append(seen.Count).Append(" assemblies named ").Append(entry.Key).Append(" are loaded\n");
+                HashSet<string> printed = new HashSet<string>(StringComparer.Ordinal);
+                foreach ((TypeReference reference, Assembly assembly) in perType) {
+                    if (!entry.Value.Contains(assembly)) {
+                        continue;
+                    }
+
+                    string scope = reference.Scope is AssemblyNameReference asmRef ? asmRef.GetRuntimeHashedFullName() : reference.Scope?.Name ?? "?";
+                    string row = "      " + reference.FullName + " ref=" + scope + " -> hash=" + assembly.GetHashCode() + "\n";
+                    if (printed.Add(row)) {
+                        sb.Append(row);
+                    }
+                }
+            }
+        }
 
         return sb.ToString();
     }
@@ -354,5 +451,44 @@ internal static class IlDump {
         }
 
         return reference.ReturnType.FullName == "System.Void" ? 0 : 1;
+    }
+
+    private static string DescribeLocation(Assembly assembly) {
+        try {
+            string location = assembly.Location;
+            return string.IsNullOrEmpty(location) ? "<memory>" : location;
+        } catch (Exception) {
+            return "<unknown>";
+        }
+    }
+
+    // Generic arguments count too: a List<Ability>.Enumerator local lives in mscorlib, but the
+    // Ability inside it is what has to match the game assembly the body was read from.
+    private static void CollectTypes(TypeReference type, List<TypeReference> into) {
+        into.Add(type);
+        if (type is GenericInstanceType generic) {
+            foreach (TypeReference argument in generic.GenericArguments) {
+                CollectTypes(argument, into);
+            }
+        }
+
+        if (type is TypeSpecification spec && spec is not GenericInstanceType) {
+            CollectTypes(spec.ElementType, into);
+        }
+    }
+
+    private static void AppendAssemblyRow(StringBuilder sb, string name, Assembly assembly, bool used, bool hidden) {
+        sb.Append("  ").Append(name);
+        sb.Append(" hash=").Append(assembly.GetHashCode());
+        sb.Append(used ? " used" : " unused");
+        if (hidden) {
+            sb.Append(" hidden-from-GetAssemblies");
+        }
+
+        if (assembly.ReflectionOnly) {
+            sb.Append(" refonly");
+        }
+
+        sb.Append(" location=").Append(DescribeLocation(assembly)).Append('\n');
     }
 }

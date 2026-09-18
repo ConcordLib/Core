@@ -187,9 +187,18 @@ internal sealed class TargetDetourRegistry {
             old?.Dispose();
 
             if (composed is not null) {
-                WrapperPrecompile.Compile(composed.Wrapper);
-                Root(composed.Wrapper);
-                detour = MonoModHost.Factory.CreateDetour(target, composed.Wrapper);
+                try {
+                    WrapperPrecompile.Compile(composed.Wrapper);
+                    Root(composed.Wrapper);
+                    detour = MonoModHost.Factory.CreateDetour(target, composed.Wrapper);
+                } catch (InvalidProgramException rejected) {
+                    throw new ConcordEmitException(
+                        "CONC144",
+                        $"The runtime rejected the composed body for '{target.DeclaringType?.FullName}.{target.Name}': {rejected.Message}. " +
+                        "Read the assemblies section below. Two rows under one name means two copies of that assembly are loaded.\n" +
+                        WrapperComposer.ComposeDump(target, ordered));
+                }
+
                 MethodIdentity.Remember(composed.Wrapper, target, wrapperKeys);
             }
         }

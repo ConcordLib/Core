@@ -22,8 +22,9 @@ public static class PatchDeclarationScanner {
     /// <param name="assembly">The assembly to scan.</param>
     /// <param name="patches">The applier that applies patches.</param>
     /// <param name="props">The registry that registers attached-properties.</param>
-    public static void ScanAssembly(Assembly assembly, IPatchApplier patches, IAttachedPropertyRegistry props) {
-        ScanDeclarations(assembly.GetTypes(), patches, props);
+    /// <param name="log">Receives each per-declaration error. Defaults to stderr and the debug listener.</param>
+    public static void ScanAssembly(Assembly assembly, IPatchApplier patches, IAttachedPropertyRegistry props, Action<string>? log = null) {
+        ScanDeclarations(assembly.GetTypes(), patches, props, log);
     }
 
     /// <summary>
@@ -33,13 +34,19 @@ public static class PatchDeclarationScanner {
     /// <param name="declarations">The declaration types to scan.</param>
     /// <param name="patches">The applier that applies patches.</param>
     /// <param name="props">The registry that registers attached-properties.</param>
-    public static void ScanDeclarations(IEnumerable<Type> declarations, IPatchApplier patches, IAttachedPropertyRegistry props) {
+    /// <param name="log">Receives each per-declaration error. Defaults to stderr and the debug listener.</param>
+    public static void ScanDeclarations(IEnumerable<Type> declarations, IPatchApplier patches, IAttachedPropertyRegistry props, Action<string>? log = null) {
         foreach (Type type in declarations) {
             try {
                 ScanType(type, patches, props);
             } catch (ConcordDeclarationException ex) {
-                Debug.WriteLine("[Concord] declaration error in " + type.FullName + ": " + ex.Message);
-                Console.Error.WriteLine("[Concord] declaration error in " + type.FullName + ": " + ex.Message);
+                string message = "[Concord] declaration error in " + type.FullName + ": " + ex.Message;
+                if (log is null) {
+                    Debug.WriteLine(message);
+                    Console.Error.WriteLine(message);
+                } else {
+                    log(message);
+                }
             }
         }
     }
@@ -121,7 +128,7 @@ public static class PatchDeclarationScanner {
         foreach ((MethodBase target, Injection injection) in resolved) {
             try {
                 patches.ApplyPatch(target, injection);
-            } catch (ConcordEmitException ex) when (IsTranspilerFailureCode(ex.Code)) {
+            } catch (ConcordEmitException ex) when (IsDeclarationScopedCode(ex.Code)) {
                 throw new ConcordDeclarationException(InjectOnPrefix + declaration.FullName + ": " + ex.Message);
             }
         }
@@ -466,7 +473,7 @@ public static class PatchDeclarationScanner {
         return ns == "System" || ns.StartsWith("System.", StringComparison.Ordinal);
     }
 
-    private static bool IsTranspilerFailureCode(string code) {
-        return code is "CONC116" or "CONC117" or "CONC118" or "CONC119" or "CONC120";
+    private static bool IsDeclarationScopedCode(string code) {
+        return code is "CONC116" or "CONC117" or "CONC118" or "CONC119" or "CONC120" or "CONC144";
     }
 }
