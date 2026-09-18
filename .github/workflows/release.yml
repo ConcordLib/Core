@@ -228,13 +228,15 @@ jobs:
               continue
             }
             if ($suite.Restore) {
-              dotnet test $suite.Project -c Release -f net472
+              dotnet test $suite.Project -c Release -f net472 --blame --results-directory net472-blame
             } else {
               dotnet test $suite.Project -c Release --no-restore -f net472
             }
             if ($LASTEXITCODE -ne 0) { $failed += $suite.Project }
           }
           if ($failed.Count -gt 0) {
+            Get-ChildItem -Path net472-blame -Filter 'Sequence*.xml' -Recurse -ErrorAction SilentlyContinue |
+              ForEach-Object { Write-Host "--- $($_.FullName)"; Get-Content $_.FullName }
             Write-Host "::error::net472 suites failed: $($failed -join ', ')"
             exit 1
           }
