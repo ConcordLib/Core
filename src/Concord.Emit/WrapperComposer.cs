@@ -1237,7 +1237,8 @@ public static class WrapperComposer {
         if (allExits.Count == 0) {
             throw new ConcordEmitException(
                 "CONC034",
-                $"Return injection on '{target.DeclaringType?.Name}.{target.Name}' found no return in the target body.");
+                $"Return injection on '{target.DeclaringType?.Name}.{target.Name}' found no return instruction in the target body, so there is nowhere to run it. " +
+                    "The method always throws or never exits. Use At.Finally to run when the method exits by any path, or At.Head.");
         }
 
         List<Instruction> exits = SelectReturnExits(allExits, returnSite.By, target);
@@ -1269,7 +1270,8 @@ public static class WrapperComposer {
             if (allExits.Count == 0) {
                 throw new ConcordEmitException(
                     "CONC034",
-                    $"Return injection on '{target.DeclaringType?.Name}.{target.Name}' found no return in the target body.");
+                    $"Return injection on '{target.DeclaringType?.Name}.{target.Name}' found no return instruction in the target body, so there is nowhere to run it. " +
+                    "The method always throws or never exits. Use At.Finally to run when the method exits by any path, or At.Head.");
             }
 
             List<Instruction> exits = SelectReturnExits(allExits, returnSite.By, target);
@@ -2136,7 +2138,8 @@ public static class WrapperComposer {
         if (by > allExits.Count) {
             throw new ConcordEmitException(
                 "CONC035",
-                $"Return injection on '{target.DeclaringType?.Name}.{target.Name}' targets occurrence {by}, but only {allExits.Count} return(s) exist in the method body.");
+                $"Return injection on '{target.DeclaringType?.Name}.{target.Name}' targets return occurrence {by}, but the body has only {allExits.Count}. " +
+                    "Occurrences count from 1 in body order. Pass a lower by, or drop by to attach to every return.");
         }
 
         return [allExits[(int)(by - 1)]];
