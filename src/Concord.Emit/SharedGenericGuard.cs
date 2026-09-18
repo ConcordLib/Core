@@ -7,7 +7,7 @@ namespace Concord.Emit;
 ///     Runtime helper for the receiver check a composed wrapper emits when its target is a
 ///     reference-type generic instantiation. The runtime shares one compiled body across every
 ///     reference-type instantiation, so calls arriving on a different instantiation reach the same
-///     wrapper; this check lets the wrapper run its injections only for the requested one.
+///     wrapper. This check lets the wrapper run its injections only for the requested one.
 /// </summary>
 public static class SharedGenericGuard {
     /// <summary>

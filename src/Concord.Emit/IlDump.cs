@@ -81,7 +81,7 @@ internal static class IlDump {
 
     /// <summary>
     ///     Pop count for an instruction inspected outside a known method body. <c>ret</c> reports 0
-    ///     because its real pop count depends on the enclosing return type; callers that walk a body
+    ///     because its real pop count depends on the enclosing return type. Callers that walk a body
     ///     treat <c>ret</c> as a terminator instead.
     /// </summary>
     internal static int PopCount(Instruction instruction) {
@@ -181,7 +181,7 @@ internal static class IlDump {
         }
     }
 
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S107", Justification = "Internal IL-verification walk state; these are the working buffers of a single stack-depth pass and do not form a reusable bundle.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S107", Justification = "Internal IL-verification walk state. These are the working buffers of a single stack-depth pass and do not form a reusable bundle.")]
     private static void ProcessVerifyInstruction(
         int idx,
         MethodDefinition method,

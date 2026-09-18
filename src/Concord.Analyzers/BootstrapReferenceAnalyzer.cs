@@ -23,7 +23,7 @@ public sealed class BootstrapReferenceAnalyzer : DiagnosticAnalyzer {
     private static readonly DiagnosticDescriptor Rule = new(
         DiagnosticId,
         "Bootstrap assembly must not hard-reference the Concord Assembly or runtime adapter",
-        "Bootstrap assembly has a hard reference to '{0}'; use reflection or move this code into the runtime adapter",
+        "Bootstrap assembly has a hard reference to '{0}'. Use reflection or move this code into the runtime adapter.",
         "Concord.Bootstrap",
         DiagnosticSeverity.Error,
         true,

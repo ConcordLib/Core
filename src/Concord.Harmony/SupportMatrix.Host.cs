@@ -38,7 +38,7 @@ namespace Concord.Harmony
                 object innerTarget = InnerTargetField?.GetValue(patch);
                 if (innerTarget != null)
                 {
-                    return $"Target {target.Name} has a Harmony inner patch on a non-method operation ({innerTarget}); Concord cannot prove its composed body leaves that operation's count unchanged";
+                    return $"Target {target.Name} has a Harmony inner patch on a non-method operation ({innerTarget}). Concord cannot prove its composed body leaves that operation's count unchanged";
                 }
 
                 MethodBase inner;

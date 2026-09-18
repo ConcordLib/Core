@@ -221,7 +221,7 @@ public sealed class CodeMatcher {
     /// <summary>
     ///     Removes the current instruction. Any labels it carried are moved onto the following instruction
     ///     (or the preceding one, if the removal reached the end of the list) so branch targets stay
-    ///     resolvable. Exception-block boundaries only move onto a following instruction; removing the
+    ///     resolvable. Exception-block boundaries only move onto a following instruction. Removing the
     ///     boundary at the very end of the list with nothing left to carry it forward drops it, which
     ///     surfaces as <c>CONC118</c> (unbalanced exception blocks) when the rewritten body is composed,
     ///     rather than silently producing a malformed region. A no-op while invalid.
@@ -242,7 +242,7 @@ public sealed class CodeMatcher {
     ///     Removes up to <paramref name="count" /> instructions starting at the cursor, clamped to the
     ///     instructions actually remaining. Labels carried by the removed range are moved onto the following
     ///     instruction (or the preceding one, if the removal reached the end of the list). Exception-block
-    ///     boundaries only move onto a following instruction; a boundary stranded at the very end of the
+    ///     boundaries only move onto a following instruction. A boundary stranded at the very end of the
     ///     list is dropped, which surfaces as <c>CONC118</c> when the rewritten body is composed rather than
     ///     silently producing a malformed region. A no-op while invalid.
     /// </summary>
@@ -360,7 +360,7 @@ public sealed class CodeMatch {
     /// <exception cref="ConcordEmitException">Thrown with code <c>CONC120</c> when <paramref name="predicate" /> is <see langword="null" />.</exception>
     public CodeMatch(Predicate<CodeInstruction> predicate, string? name = null) {
         if (predicate is null) {
-            throw new ConcordEmitException("CONC120", "CodeMatch was constructed with a null predicate; a predicate-based match requires a non-null test.");
+            throw new ConcordEmitException("CONC120", "CodeMatch was constructed with a null predicate. A predicate-based match requires a non-null test.");
         }
 
         this.predicate = predicate;

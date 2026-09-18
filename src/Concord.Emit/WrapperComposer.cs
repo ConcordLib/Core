@@ -148,8 +148,8 @@ public static class WrapperComposer {
     ///     Resolves async and iterator entry methods to their generated state-machine <c>MoveNext</c> method.
     /// </summary>
     /// <param name="target">The method to inspect.</param>
-    /// <returns>The state-machine <c>MoveNext</c> method when present; otherwise <paramref name="target" />.</returns>
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S3011", Justification = "Concord reaches the private state-machine MoveNext by design; validated at resolve time.")]
+    /// <returns>The state-machine <c>MoveNext</c> method when present. Otherwise <paramref name="target" />.</returns>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S3011", Justification = "Concord reaches the private state-machine MoveNext by design. Validated at resolve time.")]
     public static MethodBase ResolveStateMachineTarget(MethodBase target) {
         Type? stateMachineType = ReadStateMachineType(target);
         if (stateMachineType is null) {
@@ -174,7 +174,7 @@ public static class WrapperComposer {
     /// <returns>
     ///     The state-machine <c>MoveNext</c> when <paramref name="body" /> is
     ///     <see cref="PatchBody.StateMachine" /> and <paramref name="target" /> is an async or iterator
-    ///     method; otherwise <paramref name="target" /> unchanged.
+    ///     method. Otherwise <paramref name="target" /> unchanged.
     /// </returns>
     public static MethodBase ResolveBodyTarget(MethodBase target, PatchBody body) {
         return body == PatchBody.StateMachine ? ResolveStateMachineTarget(target) : target;
@@ -582,7 +582,7 @@ public static class WrapperComposer {
                 $"Injection '{injection.InjectionMethod.DeclaringType?.Name}.{injection.InjectionMethod.Name}' on " +
                 $"'{target.DeclaringType?.Name}.{target.Name}' declares a [Capture] parameter, but its position {reason}. " +
                 "[Capture] binds an argument of a call matched inside the target body, so it needs an Invoke or NewObj " +
-                "injection shifted to At.Head or At.Tail; At.Around and At.Argument already receive the call's arguments.");
+                "injection shifted to At.Head or At.Tail. At.Around and At.Argument already receive the call's arguments.");
         }
     }
 
@@ -721,7 +721,7 @@ public static class WrapperComposer {
             throw new ConcordEmitException(
                 "CONC110",
                 $"Whole-method Around on '{originalTarget.DeclaringType?.Name}.{originalTarget.Name}' targets an async or iterator method. " +
-                "State-machine methods are not supported by the Operation handle; patch at Head instead.");
+                "State-machine methods are not supported by the Operation handle. Patch at Head instead.");
         }
     }
 
@@ -937,7 +937,7 @@ public static class WrapperComposer {
         if (finallyBody.Count > 0 && hasAround) {
             throw new ConcordEmitException(
                 "CONC138",
-                $"Target '{target.DeclaringType?.Name}.{target.Name}' has both an At.Finally injection and a whole-method Around. An Around already owns the whole body; write the finally inside it.");
+                $"Target '{target.DeclaringType?.Name}.{target.Name}' has both an At.Finally injection and a whole-method Around. An Around already owns the whole body. Write the finally inside it.");
         }
 
         List<Instruction> assembled = AssembleFinalBody(
@@ -964,7 +964,7 @@ public static class WrapperComposer {
             if (injection.At is not InjectAt.Head && ControlHandleLowering.ReturnsControl(injection.InjectionMethod)) {
                 throw new ConcordEmitException(
                     "CONC015",
-                    $"Injection '{injection.InjectionMethod.DeclaringType?.Name}.{injection.InjectionMethod.Name}' returns Control; a Control return is only valid on a head injection.");
+                    $"Injection '{injection.InjectionMethod.DeclaringType?.Name}.{injection.InjectionMethod.Name}' returns Control. A Control return is only valid on a head injection.");
             }
         }
     }
@@ -1097,7 +1097,7 @@ public static class WrapperComposer {
         if (aroundInjection is not null) {
             throw new ConcordEmitException(
                 "CONC051",
-                $"Multiple Around injections on '{target.DeclaringType?.Name}.{target.Name}' are not supported; only one Around injection per target is allowed.");
+                $"Multiple Around injections on '{target.DeclaringType?.Name}.{target.Name}' are not supported. Only one Around injection per target is allowed.");
         }
 
         return injection;
@@ -1302,7 +1302,7 @@ public static class WrapperComposer {
         }
     }
 
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Minor Code Smell", "S3267", Justification = "Loop body copies IL, redirects branches, and splices into two collections; projecting to Select would obscure it.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Minor Code Smell", "S3267", Justification = "Loop body copies IL, redirects branches, and splices into two collections. Projecting to Select would obscure it.")]
     private static void SpliceTailInjectionsIntoSpineCopy(
         SpineCopy spineCopy,
         List<Instruction> aroundBody,
@@ -1487,7 +1487,7 @@ public static class WrapperComposer {
     /// <param name="site">The injection, wrapper, target, and protocol locals being composed.</param>
     /// <param name="match">The matched call or construction instruction.</param>
     /// <param name="newObj">Whether <paramref name="match" /> is a <c>newobj</c> instruction.</param>
-    /// <param name="spine">The copied target body the match lives in; spills are inserted into it.</param>
+    /// <param name="spine">The copied target body the match lives in. Spills are inserted into it.</param>
     /// <returns>Maps an injection argument index to the local holding its captured value, or null when nothing is captured.</returns>
     private static Dictionary<int, VariableDefinition>? EmitCaptureSpills(
         InjectionSiteContext site,
@@ -1689,7 +1689,7 @@ public static class WrapperComposer {
             if (found >= 0) {
                 throw new ConcordEmitException(
                     CodeCONC039,
-                    $"Argument injection on '{target.DeclaringType?.Name}.{target.Name}' matches more than one '{valueType.Name}' argument; pass arg: to select one.");
+                    $"Argument injection on '{target.DeclaringType?.Name}.{target.Name}' matches more than one '{valueType.Name}' argument. Pass arg: to select one.");
             }
 
             found = i;
@@ -1699,7 +1699,7 @@ public static class WrapperComposer {
             throw new ConcordEmitException(
                 CodeCONC039,
                 $"Argument injection on '{target.DeclaringType?.Name}.{target.Name}' matches no '{valueType.Name}' argument. " +
-                "The injection method's parameter type must equal one of the call site's parameter types exactly; change the parameter type, or pass arg: to pick a specific argument.");
+                "The injection method's parameter type must equal one of the call site's parameter types exactly. Change the parameter type, or pass arg: to pick a specific argument.");
         }
 
         return found;
@@ -1777,7 +1777,7 @@ public static class WrapperComposer {
         if (aroundBody is not null) {
             throw new ConcordEmitException(
                 "CONC051",
-                $"Multiple Around injections on '{site.Target.DeclaringType?.Name}.{site.Target.Name}' are not supported; only one Around injection per target is allowed.");
+                $"Multiple Around injections on '{site.Target.DeclaringType?.Name}.{site.Target.Name}' are not supported. Only one Around injection per target is allowed.");
         }
 
         ValidateWholeMethodOperationOnly(site.Injection.InjectionMethod, site.Target);
@@ -1904,7 +1904,7 @@ public static class WrapperComposer {
                 throw new ConcordEmitException(
                     "CONC113",
                     "The Operation handle Invoke(...) call in injection '" + injectionMethod.DeclaringType?.Name + "." + injectionMethod.Name +
-                    "' is inside a loop; the original body can only be spliced once.");
+                    "' is inside a loop. The original body can only be spliced once.");
             }
         }
     }
@@ -1919,7 +1919,7 @@ public static class WrapperComposer {
         throw new ConcordEmitException(
             "CONC112",
             $"Whole-method Around injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' on constructor '{target.DeclaringType?.Name}.{target.Name}' " +
-            "never calls Invoke(...); a constructor Around must invoke the original constructor exactly once.");
+            "never calls Invoke(...). A constructor Around must invoke the original constructor exactly once.");
     }
 
     private static bool BranchTargetsAtOrBefore(Instruction branch, List<Instruction> instructions, int index) {
@@ -1964,7 +1964,7 @@ public static class WrapperComposer {
                 throw new ConcordEmitException(
                     "CONC107",
                     "The Operation handle Invoke(...) call in injection '" + injectionMethod.DeclaringType?.Name + "." + injectionMethod.Name +
-                    "' is used mid-expression on a target with exception handlers; splicing the original body clears the evaluation stack on any protected-region exit. " +
+                    "' is used mid-expression on a target with exception handlers. Splicing the original body clears the evaluation stack on any protected-region exit. " +
                     "Use Invoke(...) only as a statement, a direct assignment, or a direct return.");
             }
         }
@@ -2256,13 +2256,13 @@ public static class WrapperComposer {
         List<Instruction> instructions = new List<Instruction> {
             Instruction.Create(OpCodes.Ldloc, locals.CtorBodyRanTwice!),
             Instruction.Create(OpCodes.Brfalse, afterTwiceCheck),
-            Instruction.Create(OpCodes.Ldstr, "Constructor Around invoked the original constructor body more than once; the pre-entry guard blocked the second attempt."),
+            Instruction.Create(OpCodes.Ldstr, "Constructor Around invoked the original constructor body more than once. The pre-entry guard blocked the second attempt."),
             Instruction.Create(OpCodes.Newobj, exceptionCtor),
             Instruction.Create(OpCodes.Throw),
             afterTwiceCheck,
             Instruction.Create(OpCodes.Ldloc, locals.CtorBodyRan!),
             Instruction.Create(OpCodes.Brtrue, afterZeroCheck),
-            Instruction.Create(OpCodes.Ldstr, "Constructor Around never invoked the original constructor body; the object was not fully constructed."),
+            Instruction.Create(OpCodes.Ldstr, "Constructor Around never invoked the original constructor body. The object was not fully constructed."),
             Instruction.Create(OpCodes.Newobj, exceptionCtor),
             Instruction.Create(OpCodes.Throw),
             afterZeroCheck,
@@ -2448,7 +2448,7 @@ public static class WrapperComposer {
         if (cancels && !ControlHandleLowering.InjectionMethodSetsReturnValue(injectionMethodBody)) {
             throw new ConcordEmitException(
                 "CONC012",
-                $"Injection on non-void target '{target.DeclaringType?.Name}.{target.Name}' cancels without setting ReturnValue; a return value is required when the original method is skipped.");
+                $"Injection on non-void target '{target.DeclaringType?.Name}.{target.Name}' cancels without setting ReturnValue. A return value is required when the original method is skipped.");
         }
     }
 

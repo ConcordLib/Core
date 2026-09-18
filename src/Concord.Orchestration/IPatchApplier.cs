@@ -5,7 +5,7 @@ namespace Concord.Orchestration;
 
 /// <summary>
 ///     Runtime-adapter-supplied applier that applies an injection for a target method. Concord's scanner
-///     calls this; the runtime adapter owns wrapper composition and detour application, so the scanner
+///     calls this. The runtime adapter owns wrapper composition and detour application, so the scanner
 ///     stays target-runtime-agnostic.
 /// </summary>
 public interface IPatchApplier {

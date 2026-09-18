@@ -599,7 +599,7 @@ internal static class BodyCopier {
         throw new ConcordEmitException(
             "CONC142",
             "Concord bug: no state slot exists for injection '" + site.InjectionMethod.DeclaringType?.Name + "." + site.InjectionMethod.Name +
-            "' even though it calls SetState/GetState. Nothing in the patch declaration causes this; report it with the declaration.");
+            "' even though it calls SetState/GetState. Nothing in the patch declaration causes this. Report it with the declaration.");
     }
 
     private static List<Instruction> LowerReturn(InjectionLoweringSite site) {
@@ -639,7 +639,7 @@ internal static class BodyCopier {
         if (isAddressOfValue || isReassignValue) {
             throw new ConcordEmitException(
                 "CONC039",
-                $"Value injection cannot take the address of or reassign its 'original' parameter; only by-value reads are supported.");
+                $"Value injection cannot take the address of or reassign its 'original' parameter. Only by-value reads are supported.");
         }
 
         if (source.OpCode == OpCodes.Ret) {
@@ -800,7 +800,7 @@ internal static class BodyCopier {
                 throw new ConcordEmitException(
                     "CONC014",
                     "The original-body call in injection '" + injectionMethod.DeclaringType?.Name + "." + injectionMethod.Name +
-                    "' must forward its arguments verbatim (plain parameter loads); computed or modified arguments are not supported.");
+                    "' must forward its arguments verbatim (plain parameter loads). Computed or modified arguments are not supported.");
             }
 
             cursor = cursor.Previous;

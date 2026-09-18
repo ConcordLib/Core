@@ -2,7 +2,7 @@ namespace Concord;
 
 /// <summary>
 ///     Runtime-adapter-supplied storage for the extended enum id-to-value map. Concord owns the model
-///     and the allocation rules; the adapter owns where the map lives.
+///     and the allocation rules. The adapter owns where the map lives.
 /// </summary>
 public interface IEnumValueStore {
     /// <summary>

@@ -30,7 +30,7 @@ internal static class UpdateWrapperHook
     private static IDetourHandle hookHandle;
 
     /// <summary>
-    ///     Installs the notifier. Safe to call more than once; later calls only re-point the observer,
+    ///     Installs the notifier. Safe to call more than once. Later calls only re-point the observer,
     ///     because the detour itself is never removed once it lands.
     /// </summary>
     /// <param name="target">The observer to notify before each Harmony rebuild.</param>
@@ -49,7 +49,7 @@ internal static class UpdateWrapperHook
         MethodInfo updateWrapper = ResolveUpdateWrapper();
         if (updateWrapper == null)
         {
-            log(CoexistenceLogMarkers.HookUnavailable + " HarmonyLib.PatchFunctions.UpdateWrapper was not found; late contention stays unrecoverable");
+            log(CoexistenceLogMarkers.HookUnavailable + " HarmonyLib.PatchFunctions.UpdateWrapper was not found. Late contention stays unrecoverable");
             return false;
         }
 

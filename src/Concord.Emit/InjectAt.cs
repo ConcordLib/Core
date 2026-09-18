@@ -21,14 +21,14 @@ public abstract record InjectAt {
     /// <summary>
     ///     Inserts the injection before the last <c>return</c> in the target body (Mixin <c>@At("TAIL")</c>
     ///     semantics). A protected-region <c>leave</c> that reaches that return runs the injection, including after
-    ///     a caught exception. Exceptions that escape the target do not. Early returns are not affected; use
+    ///     a caught exception. Exceptions that escape the target do not. Early returns are not affected. Use
     ///     <see cref="Return" /> to target every return site.
     /// </summary>
     public sealed record Tail : InjectAt;
 
     /// <summary>
     ///     Wraps the entire target method. The injection method declares an <see cref="Operation" /> family
-    ///     handle and calls <c>original.Invoke(args)</c> to run the original body; omitting the call skips
+    ///     handle and calls <c>original.Invoke(args)</c> to run the original body. Omitting the call skips
     ///     the body. Operation-only (no <see cref="ControlHandle" />).
     /// </summary>
     public sealed record Around : InjectAt;

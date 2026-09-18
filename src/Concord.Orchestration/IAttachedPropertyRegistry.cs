@@ -4,7 +4,7 @@ namespace Concord.Orchestration;
 
 /// <summary>
 ///     Runtime-adapter-supplied registry that receives every <c>[Attached]</c> field declared on a patch.
-///     Concord owns the storage; the adapter decides what else to do with it, such as persisting it.
+///     Concord owns the storage. The adapter decides what else to do with it, such as persisting it.
 /// </summary>
 public interface IAttachedPropertyRegistry {
     /// <summary>

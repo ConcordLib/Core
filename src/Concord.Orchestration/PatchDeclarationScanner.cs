@@ -269,7 +269,7 @@ public static class PatchDeclarationScanner {
     private static void ValidateInjectAttribute(Type declaration, InjectAttribute inject) {
         if (inject.HasConstant && inject.At != Concord.At.Constant) {
             throw new ConcordDeclarationException(
-                InjectOnPrefix + declaration.FullName + " passes a constant but position " + inject.At + "; constant injections require At.Constant.");
+                InjectOnPrefix + declaration.FullName + " passes a constant but position " + inject.At + ". Constant injections require At.Constant.");
         }
 
         if (!inject.HasConstant &&
@@ -383,7 +383,7 @@ public static class PatchDeclarationScanner {
                 declaration.FullName +
                 " target '" +
                 targetMethod +
-                "' is ambiguous (multiple overloads); use the parameterTypes overload to disambiguate.");
+                "' is ambiguous (multiple overloads). Use the parameterTypes overload to disambiguate.");
         }
 
         if (byName == null) {

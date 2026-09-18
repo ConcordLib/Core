@@ -24,7 +24,7 @@ public sealed class ShadowMemberGenerator : IIncrementalGenerator {
     internal static readonly DiagnosticDescriptor AmbiguousMember = new DiagnosticDescriptor(
         "CONC101",
         "Shadow member ambiguous",
-        "Target member '{0}.{1}' has {2} overloads; disambiguate with parameter types on [Shadow]",
+        "Target member '{0}.{1}' has {2} overloads. Disambiguate with parameter types on [Shadow].",
         DiagnosticCategory,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
@@ -40,7 +40,7 @@ public sealed class ShadowMemberGenerator : IIncrementalGenerator {
     internal static readonly DiagnosticDescriptor TargetUnresolvable = new DiagnosticDescriptor(
         "CONC103",
         "Shadow target unresolvable",
-        "Target type of declaration '{0}' cannot be resolved at compile time; shadow generation skipped",
+        "Target type of declaration '{0}' cannot be resolved at compile time. Shadow generation skipped.",
         DiagnosticCategory,
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true);

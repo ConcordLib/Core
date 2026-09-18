@@ -45,7 +45,7 @@ internal static class CallSiteQuery {
 
     /// <summary>
     ///     Bounds a search to the instructions between two member-access anchors. The anchors are counted
-    ///     across the whole body; only the injection's own <c>By</c> counts inside the result.
+    ///     across the whole body. Only the injection's own <c>By</c> counts inside the result.
     /// </summary>
     /// <remarks>
     ///     The result is a subset of <paramref name="spine" /> holding the same <see cref="Instruction" />

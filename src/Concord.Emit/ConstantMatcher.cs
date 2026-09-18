@@ -11,7 +11,7 @@ internal static class ConstantMatcher {
     /// </summary>
     /// <param name="spine">The wrapper's copied instruction spine to search.</param>
     /// <param name="value">The literal to match. Supported kinds: int, long, float, double, string.</param>
-    /// <remarks>Float and double comparisons use exact <see cref="object.Equals(object)" /> representation; NaN is unsupported.</remarks>
+    /// <remarks>Float and double comparisons use exact <see cref="object.Equals(object)" /> representation. NaN is unsupported.</remarks>
     internal static List<Instruction> FindMatches(IReadOnlyList<Instruction> spine, object value) {
         List<Instruction> matches = new List<Instruction>();
         for (int i = 0; i < spine.Count; i++) {
@@ -32,7 +32,7 @@ internal static class ConstantMatcher {
             string s => instruction.OpCode == OpCodes.Ldstr && (string)instruction.Operand == s,
             _ => throw new ConcordEmitException(
                 "CONC039",
-                $"Constant injections support int, long, float, double, and string; got '{value.GetType().Name}'."),
+                $"Constant injections support int, long, float, double, and string. Got '{value.GetType().Name}'."),
         };
     }
 

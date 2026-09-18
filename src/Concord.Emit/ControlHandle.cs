@@ -11,7 +11,7 @@ public sealed class ControlHandle {
     /// <summary>
     ///     Marks the current injection as cancelling the original target invocation.
     /// </summary>
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822", Justification = "Lowering matches Call/Callvirt on a ControlHandle instance; making this static would change the emitted call shape and stop ControlHandleLowering from recognising the site.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822", Justification = "Lowering matches Call/Callvirt on a ControlHandle instance. Making this static would change the emitted call shape and stop ControlHandleLowering from recognising the site.")]
     public void Cancel() { } // NOSONAR recognized control call; concord lowers this into wrapper IL, body is never executed as-is
 
     /// <summary>
@@ -20,7 +20,7 @@ public sealed class ControlHandle {
     /// </summary>
     /// <typeparam name="T">The slot's type. Every injection in one declaration must agree on it.</typeparam>
     /// <param name="value">The value to store.</param>
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822", Justification = "Lowering matches Call/Callvirt on a ControlHandle instance; making this static would change the emitted call shape and stop ControlHandleLowering from recognising the site.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822", Justification = "Lowering matches Call/Callvirt on a ControlHandle instance. Making this static would change the emitted call shape and stop ControlHandleLowering from recognising the site.")]
     public void SetState<T>(T value) { } // NOSONAR recognized control call; concord lowers this into wrapper IL, body is never executed as-is
 
     /// <summary>
@@ -28,6 +28,6 @@ public sealed class ControlHandle {
     /// </summary>
     /// <typeparam name="T">The slot's type. Every injection in one declaration must agree on it.</typeparam>
     /// <returns>The stored value.</returns>
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822", Justification = "Lowering matches Call/Callvirt on a ControlHandle instance; making this static would change the emitted call shape and stop ControlHandleLowering from recognising the site.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822", Justification = "Lowering matches Call/Callvirt on a ControlHandle instance. Making this static would change the emitted call shape and stop ControlHandleLowering from recognising the site.")]
     public T GetState<T>() => default!; // NOSONAR recognized control call; concord lowers this into wrapper IL, body is never executed as-is
 }

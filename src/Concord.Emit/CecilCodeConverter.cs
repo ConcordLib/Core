@@ -252,11 +252,11 @@ internal static class CecilCodeConverter {
     }
 
     private static FieldInfo ResolveField(FieldReference fieldReference) {
-        return fieldReference.ResolveReflection() ?? throw new ConcordEmitException(CodeConversionFailed, $"Could not resolve CLR field for '{fieldReference.FullName}'. Pass a FieldInfo from a loaded type; a name-only reference is not enough.");
+        return fieldReference.ResolveReflection() ?? throw new ConcordEmitException(CodeConversionFailed, $"Could not resolve CLR field for '{fieldReference.FullName}'. Pass a FieldInfo from a loaded type. A name-only reference is not enough.");
     }
 
     private static MethodBase ResolveMethod(MethodReference methodReference) {
-        return methodReference.ResolveReflection() ?? throw new ConcordEmitException(CodeConversionFailed, $"Could not resolve CLR method for '{methodReference.FullName}'. Pass a MethodInfo or ConstructorInfo from a loaded type; a name-only reference is not enough.");
+        return methodReference.ResolveReflection() ?? throw new ConcordEmitException(CodeConversionFailed, $"Could not resolve CLR method for '{methodReference.FullName}'. Pass a MethodInfo or ConstructorInfo from a loaded type. A name-only reference is not enough.");
     }
 
     private static void AttachExceptionBlocks(MethodBody body, Dictionary<Instruction, CodeInstruction> byInstruction, TranspilerContext context) {

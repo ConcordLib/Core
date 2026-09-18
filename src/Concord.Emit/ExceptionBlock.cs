@@ -23,7 +23,7 @@ public enum ExceptionBlockType {
 
 /// <summary>
 ///     An exception-handling boundary attached to a CodeInstruction. Member names are
-///     lowercase to match Harmony so migrating transpiler bodies compile unchanged; do not rename them
+///     lowercase to match Harmony so migrating transpiler bodies compile unchanged. Do not rename them
 ///     to house style.
 /// </summary>
 public sealed class ExceptionBlock {

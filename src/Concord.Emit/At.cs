@@ -46,7 +46,7 @@ public enum At {
     ///     <para>
     ///         Adding or removing a <c>ret</c>, an inlined literal, or a call shifts the occurrences that
     ///         other mods' <c>At.Return(By:)</c>, <c>At.Constant(By:)</c> and <c>At.Invoke(By:)</c>
-    ///         injections select against. Concord does not detect this and reports no diagnostic; the
+    ///         injections select against. Concord does not detect this and reports no diagnostic. The
     ///         failure surfaces in the other mod.
     ///     </para>
     ///     <para>

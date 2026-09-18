@@ -5,7 +5,7 @@ namespace Concord.Detour;
 /// <summary>
 ///     Reports methods where Concord's injections are not running because a foreign patcher owns the
 ///     entry point. With the notifier hook installed this should only ever be a target whose promotion
-///     failed; without it, every late foreign patch lands here and nothing can recover them.
+///     failed. Without it, every late foreign patch lands here and nothing can recover them.
 /// </summary>
 public sealed class ContentionWatcher {
     private readonly Func<IReadOnlyCollection<MethodBase>> rawPinnedTargets;

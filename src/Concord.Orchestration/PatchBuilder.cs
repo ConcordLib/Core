@@ -398,7 +398,7 @@ public sealed class PatchBuilder {
 
     internal PatchBuilder Inject(InjectAt at, MethodInfo injectionMethod) {
         if (injectionMethod.DeclaringType is null) {
-            throw new ConcordDeclarationException("Injection method '" + injectionMethod.Name + "' has no declaring type; only methods declared on a type can be used as injections.");
+            throw new ConcordDeclarationException("Injection method '" + injectionMethod.Name + "' has no declaring type. Only methods declared on a type can be used as injections.");
         }
 
         injections.Add(new Injection(injectionMethod, at, injectionMethod.DeclaringType.FullName!, 0) { Body = body });

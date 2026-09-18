@@ -10,7 +10,7 @@ using HarmonyLib;
 namespace Concord.Harmony;
 
 /// <summary>
-///     Shares a method between Concord and Harmony. Harmony keeps the entry point; Concord's injections are
+///     Shares a method between Concord and Harmony. Harmony keeps the entry point. Concord's injections are
 ///     woven into the instruction stream Harmony builds, through one transpiler registered at the lowest
 ///     priority Harmony supports.
 /// </summary>
@@ -150,7 +150,7 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
             if (!lockUnavailableLogged)
             {
                 lockUnavailableLogged = true;
-                log("PatchProcessor.locker not found - routing raw with watchdog coverage; contested-check race admitted");
+                log("PatchProcessor.locker not found - routing raw with watchdog coverage. Contested-check race admitted");
             }
 
             return ForeignRouteResult.NotContested();
@@ -458,7 +458,7 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
             log("removing the concord participant failed for " + target.Name + ": " + ex.Message);
         }
 
-        log("bridge participant lost for " + target.Name + "; its Concord injections are disabled: " + failure.Message);
+        log("bridge participant lost for " + target.Name + ". Its Concord injections are disabled: " + failure.Message);
     }
 
     private void RecoverSurvivors(MethodBase target, long[] droppedOwned)

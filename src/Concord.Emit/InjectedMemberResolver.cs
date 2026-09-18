@@ -11,11 +11,11 @@ internal static class InjectedMemberResolver {
     private const string InjectedPropertyDeclaration = "Injected property declaration '";
     private const string HasType = "' has type '";
 
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S3011", Justification = "Concord resolves private target members by design; signatures are validated at resolve time.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S3011", Justification = "Concord resolves private target members by design. Signatures are validated at resolve time.")]
     private const BindingFlags DeclaredMembers =
         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
 
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S3011", Justification = "Concord resolves private target members by design; signatures are validated at resolve time.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S3011", Justification = "Concord resolves private target members by design. Signatures are validated at resolve time.")]
     private const BindingFlags TargetMembers =
         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
 

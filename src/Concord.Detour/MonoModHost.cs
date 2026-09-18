@@ -30,7 +30,7 @@ internal static class MonoModHost {
     // MonoMod asserts the JIT reports one hardcoded guid per runtime major, and a forked CoreCLR build
     // can bump that guid. Everything MonoMod pokes is still stock-shaped, so take the JIT at its word
     // rather than losing every detour to the assert.
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Vulnerability", "S6640", Justification = "ICorJitCompiler is a C++ vtable; reading its version guid needs an unmanaged function pointer and has no managed equivalent.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Vulnerability", "S6640", Justification = "ICorJitCompiler is a C++ vtable. Reading its version guid needs an unmanaged function pointer and has no managed equivalent.")]
     private static unsafe void ReconcileJitVersion() {
         if (Environment.Version.Major != 10) {
             return;
@@ -63,7 +63,7 @@ internal static class MonoModHost {
         *expected = reported;
     }
 
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Vulnerability", "S6640", Justification = "getJit is a native export returning a C++ object pointer; calling it needs an unmanaged function pointer.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Vulnerability", "S6640", Justification = "getJit is a native export returning a C++ object pointer. Calling it needs an unmanaged function pointer.")]
     private static unsafe nint GetJitObject() {
         try {
             if (!NativeLibrary.TryLoad("clrjit", typeof(object).Assembly, null, out nint library)

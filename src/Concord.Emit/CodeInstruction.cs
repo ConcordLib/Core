@@ -5,7 +5,7 @@ namespace Concord;
 
 /// <summary>
 ///     One IL instruction in an author-facing transpiler stream. Member names are lowercase to match
-///     Harmony so migrating transpiler bodies compile unchanged; do not rename them to house style.
+///     Harmony so migrating transpiler bodies compile unchanged. Do not rename them to house style.
 /// </summary>
 public sealed class CodeInstruction {
     /// <summary>Creates an instruction.</summary>

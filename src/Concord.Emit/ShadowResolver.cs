@@ -19,7 +19,7 @@ internal static class ShadowResolver {
     ///     Thrown with <c>CONC002</c> when a field matches by name but the signatures differ, or with
     ///     <c>CONC003</c> when a field matches nothing on the target and carries no attribute saying what it is.
     /// </exception>
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S3011", Justification = "Concord reaches private target members by design; signatures are validated at resolve time.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S3011", Justification = "Concord reaches private target members by design. Signatures are validated at resolve time.")]
     public static Dictionary<string, FieldInfo> BuildFieldMap(Type declarationType, Type targetType, out Dictionary<string, AttachedFieldSlot> attached) {
         FieldInfo[] declarationFields = declarationType.GetFields(
             BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly);
@@ -42,7 +42,7 @@ internal static class ShadowResolver {
                     if (marked) {
                         throw new ConcordEmitException(
                             "CONC003",
-                            $"Field '{declarationField.Name}' on declaration '{declarationType.Name}' is static, so there is no instance to attach it to. Drop [Attached]; a static field on a declaration is just a static field.");
+                            $"Field '{declarationField.Name}' on declaration '{declarationType.Name}' is static, so there is no instance to attach it to. Drop [Attached]. A static field on a declaration is just a static field.");
                     }
 
                     continue;

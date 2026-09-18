@@ -26,7 +26,7 @@ public sealed class ControlHandle<T> {
     /// </summary>
     /// <typeparam name="TState">The slot's type. Every injection in one declaration must agree on it.</typeparam>
     /// <param name="value">The value to store.</param>
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822", Justification = "Lowering matches Call/Callvirt on a ControlHandle instance; making this static would change the emitted call shape and stop ControlHandleLowering from recognising the site.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822", Justification = "Lowering matches Call/Callvirt on a ControlHandle instance. Making this static would change the emitted call shape and stop ControlHandleLowering from recognising the site.")]
     public void SetState<TState>(TState value) { } // NOSONAR recognized control call; concord lowers this into wrapper IL, body is never executed as-is
 
     /// <summary>
@@ -34,6 +34,6 @@ public sealed class ControlHandle<T> {
     /// </summary>
     /// <typeparam name="TState">The slot's type. Every injection in one declaration must agree on it.</typeparam>
     /// <returns>The stored value.</returns>
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822", Justification = "Lowering matches Call/Callvirt on a ControlHandle instance; making this static would change the emitted call shape and stop ControlHandleLowering from recognising the site.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822", Justification = "Lowering matches Call/Callvirt on a ControlHandle instance. Making this static would change the emitted call shape and stop ControlHandleLowering from recognising the site.")]
     public TState GetState<TState>() => default!; // NOSONAR recognized control call; concord lowers this into wrapper IL, body is never executed as-is
 }

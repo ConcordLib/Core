@@ -87,6 +87,6 @@ public interface IForeignPatchHost {
     ///     The plain backend to install the hook with. This must not be the routing backend: routing the
     ///     foreign library's own internals through the foreign library is circular.
     /// </param>
-    /// <returns>True when the hook installed; false leaves Concord on poll-based detection.</returns>
+    /// <returns>True when the hook installed. False leaves Concord on poll-based detection.</returns>
     bool TryInstallNotifier(IForeignPatchObserver observer, IDetourBackend rawBackend);
 }

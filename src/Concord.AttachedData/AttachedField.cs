@@ -51,8 +51,8 @@ public sealed class AttachedField<TTarget, TVal>
     ///     Attempts to read the value attached to <paramref name="target" />.
     /// </summary>
     /// <param name="target">The instance to read from.</param>
-    /// <param name="value">The attached value when present; otherwise <c>default(TVal)</c>.</param>
-    /// <returns><c>true</c> when a value is attached; otherwise <c>false</c>.</returns>
+    /// <param name="value">The attached value when present. Otherwise <c>default(TVal)</c>.</param>
+    /// <returns><c>true</c> when a value is attached. Otherwise <c>false</c>.</returns>
     public bool TryGet(TTarget target, out TVal value) {
         if (_table.TryGetValue(target, out StrongBox<TVal>? box)) {
             value = box.Value!;

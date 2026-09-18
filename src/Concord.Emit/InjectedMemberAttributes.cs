@@ -65,7 +65,7 @@ public sealed class InjectMethodAttribute : Attribute {
 /// <summary>
 ///     Marks a declaration field as new state attached to each target instance. The target type has no
 ///     such field, so reads and writes are lowered to a weak side table keyed by the instance. A runtime
-///     adapter that supports persistence saves it; one that does not keeps it in memory.
+///     adapter that supports persistence saves it. One that does not keeps it in memory.
 /// </summary>
 [AttributeUsage(AttributeTargets.Field)]
 [JetBrains.Annotations.MeansImplicitUse(

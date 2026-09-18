@@ -116,7 +116,7 @@ public static class Patcher {
     /// </exception>
     public static IPatchHandle Patch(MethodBase target, MethodBase injectionMethod, At at) {
         if (injectionMethod.DeclaringType is null) {
-            throw new ConcordDeclarationException("Injection method '" + injectionMethod.Name + "' has no declaring type; only methods declared on a type can be used as injections.");
+            throw new ConcordDeclarationException("Injection method '" + injectionMethod.Name + "' has no declaring type. Only methods declared on a type can be used as injections.");
         }
 
         lock (Gate) {
@@ -364,7 +364,7 @@ public static class Patcher {
                 method +
                 "' on " +
                 type.FullName +
-                " is ambiguous (multiple overloads); use the parameterTypes overload to disambiguate.");
+                " is ambiguous (multiple overloads). Use the parameterTypes overload to disambiguate.");
         }
 
         if (resolved == null) {
@@ -399,7 +399,7 @@ public static class Patcher {
             throw new ConcordDeclarationException(
                 "No instance constructor with the specified parameter types was found on " +
                 type.FullName +
-                ". Only instance constructors are supported; static constructors (.cctor) cannot be patched.");
+                ". Only instance constructors are supported. Static constructors (.cctor) cannot be patched.");
         }
 
         return resolved;

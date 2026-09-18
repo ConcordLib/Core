@@ -6,7 +6,7 @@ namespace Concord.Emit;
 ///     Resolves property names to accessor method names where Concord accepts a method name.
 /// </summary>
 internal static class AccessorNameResolver {
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S3011", Justification = "Concord resolves private target members by design; signatures are validated at resolve time.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S3011", Justification = "Concord resolves private target members by design. Signatures are validated at resolve time.")]
     private const BindingFlags Declared = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
 
     /// <summary>
@@ -14,7 +14,7 @@ internal static class AccessorNameResolver {
     /// </summary>
     /// <param name="declaringType">The type the name is declared against.</param>
     /// <param name="name">The declared method or property name.</param>
-    /// <param name="injectionMethod">The injection method, used to disambiguate via its Operation parameter; may be <see langword="null" />.</param>
+    /// <param name="injectionMethod">The injection method, used to disambiguate via its Operation parameter. May be <see langword="null" />.</param>
     /// <param name="allowOperationDisambiguation">Whether an Operation parameter may pick the accessor (around-invoke only).</param>
     /// <returns>The effective method name.</returns>
     /// <exception cref="ConcordEmitException">Thrown with <c>CONC036</c> when a two-accessor property cannot be disambiguated.</exception>

@@ -16,7 +16,7 @@ public static class InjectionOrderer {
     /// Runtime ordering: an injection runs before every injection whose <see cref="Injection.Owner"/>
     /// appears in its <see cref="Injection.BeforeOwners"/>, and after every injection whose owner
     /// appears in its <see cref="Injection.AfterOwners"/>. Among unconstrained injections, lower
-    /// <see cref="Injection.Priority"/> runs earlier; among equal priorities, higher <c>Seq</c>
+    /// <see cref="Injection.Priority"/> runs earlier. Among equal priorities, higher <c>Seq</c>
     /// (later registration) runs earlier. Equivalently, in the returned array: higher priority
     /// composes earlier, and lower <c>Seq</c> composes earlier.
     ///

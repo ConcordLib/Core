@@ -30,7 +30,7 @@ public static class CoexistenceLogMarkers {
     public const string HookInstalled = "[Concord.Coex] hook-installed";
 
     /// <summary>
-    ///     The notifier hook could not install; Concord falls back to poll-based detection.
+    ///     The notifier hook could not install. Concord falls back to poll-based detection.
     /// </summary>
     public const string HookUnavailable = "[Concord.Coex] hook-unavailable";
 

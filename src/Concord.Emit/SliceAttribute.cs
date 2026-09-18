@@ -10,7 +10,7 @@ namespace Concord;
 public sealed class SliceAttribute : Attribute {
     /// <summary>
     ///     Declares a range that starts after the opening anchor and ends before the closing anchor.
-    ///     Leave both an anchor's type and its member null to extend to that end of the body; naming
+    ///     Leave both an anchor's type and its member null to extend to that end of the body. Naming
     ///     one without the other is an error.
     /// </summary>
     /// <param name="fromType">The declaring type of the opening anchor.</param>

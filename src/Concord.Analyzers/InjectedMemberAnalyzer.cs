@@ -216,7 +216,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     private static readonly DiagnosticDescriptor UnresolvedPatchTargetRule = new(
         UnresolvedPatchTargetDiagnosticId,
         "Patch target could not be resolved",
-        "Patch target '{0}' could not be resolved; Concord analyzers cannot validate this declaration",
+        "Patch target '{0}' could not be resolved. Concord analyzers cannot validate this declaration.",
         ConcordPatchesNamespace,
         DiagnosticSeverity.Warning,
         true,
@@ -234,7 +234,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     private static readonly DiagnosticDescriptor AmbiguousInjectionTargetRule = new(
         AmbiguousInjectionTargetDiagnosticId,
         "Injection target is ambiguous",
-        "[Inject] declaration '{0}' target '{1}' on '{2}' is ambiguous; specify parameterTypes",
+        "[Inject] declaration '{0}' target '{1}' on '{2}' is ambiguous. Specify parameterTypes.",
         ConcordPatchesNamespace,
         DiagnosticSeverity.Error,
         true,
@@ -261,7 +261,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     private static readonly DiagnosticDescriptor AttachedFieldCouldBeInjectFieldRule = new(
         AttachedFieldCouldBeInjectFieldDiagnosticId,
         "Patch field matches a target field but is not [InjectField]",
-        "Patch field '{0}' matches a target field on '{1}' and will become attached data; add [InjectField] if it should access the target field",
+        "Patch field '{0}' matches a target field on '{1}' and will become attached data. Add [InjectField] if it should access the target field.",
         ConcordPatchesNamespace,
         DiagnosticSeverity.Warning,
         true,
@@ -288,7 +288,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     private static readonly DiagnosticDescriptor PreferTypeofPatchTargetRule = new(
         PreferTypeofPatchTargetDiagnosticId,
         "Patch target should use typeof",
-        "Patch target '{0}' is available at compile time; use typeof({0}) instead of a string target",
+        "Patch target '{0}' is available at compile time. Use typeof({0}) instead of a string target.",
         ConcordPatchesNamespace,
         DiagnosticSeverity.Warning,
         true,
@@ -297,7 +297,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     private static readonly DiagnosticDescriptor PreferNameofMemberTargetRule = new(
         PreferNameofMemberTargetDiagnosticId,
         "Member target should use nameof",
-        "Target member '{0}' on '{1}' is available at compile time; use nameof(...) instead of a string literal",
+        "Target member '{0}' on '{1}' is available at compile time. Use nameof(...) instead of a string literal.",
         ConcordPatchesNamespace,
         DiagnosticSeverity.Warning,
         true,
@@ -306,7 +306,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     private static readonly DiagnosticDescriptor PreferInheritedPatchTargetRule = new(
         PreferInheritedPatchTargetDiagnosticId,
         "Patch target should be inherited",
-        "Patch target '{0}' can be inherited; derive the patch declaration from '{0}' and use [Patch] instead of [Patch(typeof(...))]",
+        "Patch target '{0}' can be inherited. Derive the patch declaration from '{0}' and use [Patch] instead of [Patch(typeof(...))].",
         ConcordPatchesNamespace,
         DiagnosticSeverity.Warning,
         true,
@@ -315,7 +315,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     private static readonly DiagnosticDescriptor ControlReturnPositionRule = new(
         ControlReturnPositionDiagnosticId,
         "Control return is only valid on head injections",
-        "[Inject] method '{0}' returns Control at the {1} position; a Control return is only valid on a head injection",
+        "[Inject] method '{0}' returns Control at the {1} position. A Control return is only valid on a head injection.",
         ConcordPatchesNamespace,
         DiagnosticSeverity.Error,
         true,
@@ -351,7 +351,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     private static readonly DiagnosticDescriptor AmbiguousArgumentInjectionRule = new(
         AmbiguousArgumentInjectionDiagnosticId,
         "Argument injection cannot infer a unique argument",
-        "[Inject] method '{0}' on call site '{1}' cannot infer a unique '{2}' argument; pass arg: to select one",
+        "[Inject] method '{0}' on call site '{1}' cannot infer a unique '{2}' argument. Pass arg: to select one.",
         ConcordPatchesNamespace,
         DiagnosticSeverity.Error,
         true,
@@ -360,7 +360,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     private static readonly DiagnosticDescriptor AmbiguousAccessorNameRule = new(
         AmbiguousAccessorNameDiagnosticId,
         "Accessor name is ambiguous",
-        "'{0}' is a property with both accessors and nothing selects one; write '{1}' or '{2}' explicitly",
+        "'{0}' is a property with both accessors and nothing selects one. Write '{1}' or '{2}' explicitly.",
         ConcordPatchesNamespace,
         DiagnosticSeverity.Error,
         true,
@@ -378,7 +378,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     private static readonly DiagnosticDescriptor TranspilerMustBeStaticRule = new(
         TranspilerMustBeStaticDiagnosticId,
         "Transpiler injection must be static",
-        "Transpiler injection method '{0}' must be static; a [Patch] declaration is abstract, so an instance transpiler can never be invoked",
+        "Transpiler injection method '{0}' must be static. A [Patch] declaration is abstract, so an instance transpiler can never be invoked.",
         ConcordPatchesNamespace,
         DiagnosticSeverity.Error,
         true,
@@ -396,7 +396,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     private static readonly DiagnosticDescriptor TranspilerInjectedMemberAccessRule = new(
         TranspilerInjectedMemberAccessDiagnosticId,
         "Transpiler must not reference injected members",
-        "Transpiler injection method '{0}' references '{1}', a [Shadow]/[InjectField]/[InjectProperty]/[InjectMethod] member; those members are abstract IL-copy sources that only exist for declarative injections, so an invoked transpiler can never reach them",
+        "Transpiler injection method '{0}' references '{1}', a [Shadow]/[InjectField]/[InjectProperty]/[InjectMethod] member. Those members are abstract IL-copy sources that only exist for declarative injections, so an invoked transpiler can never reach them.",
         ConcordPatchesNamespace,
         DiagnosticSeverity.Error,
         true,
@@ -405,7 +405,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     private static readonly DiagnosticDescriptor InjectedMemberOutsideInjectionRule = new(
         InjectedMemberOutsideInjectionDiagnosticId,
         "Injected member referenced outside an injection method",
-        "'{0}' references '{1}', a [Shadow]/[InjectField]/[InjectProperty]/[InjectMethod] member, but is not itself an [Inject] method; only an injection body is copied into the wrapper, so this reads the declaration's own field and gets null or default",
+        "'{0}' references '{1}', a [Shadow]/[InjectField]/[InjectProperty]/[InjectMethod] member, but is not itself an [Inject] method. Only an injection body is copied into the wrapper, so this reads the declaration's own field and gets null or default.",
         ConcordPatchesNamespace,
         DiagnosticSeverity.Error,
         true,
@@ -414,7 +414,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     private static readonly DiagnosticDescriptor ConflictingStateTypeRule = new(
         ConflictingStateTypeDiagnosticId,
         "Patch declaration uses two state types for one target",
-        "Patch declaration '{0}' uses state type '{1}' and '{2}' for the same slot on '{3}'; one declaration must use one state type per target",
+        "Patch declaration '{0}' uses state type '{1}' and '{2}' for the same slot on '{3}'. One declaration must use one state type per target.",
         ConcordPatchesNamespace,
         DiagnosticSeverity.Error,
         true,
@@ -423,7 +423,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     private static readonly DiagnosticDescriptor UnwrittenStateSlotRule = new(
         UnwrittenStateSlotDiagnosticId,
         "State slot is read but never written",
-        "Patch declaration '{0}' reads state as '{1}' on '{2}', but no injection in the declaration calls SetState<{1}>; the read yields default({1})",
+        "Patch declaration '{0}' reads state as '{1}' on '{2}', but no injection in the declaration calls SetState<{1}>. The read yields default({1}).",
         ConcordPatchesNamespace,
         DiagnosticSeverity.Warning,
         true,
@@ -477,7 +477,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     private static readonly DiagnosticDescriptor NonConstEnumMemberInitializerRule = new(
         NonConstEnumMemberInitializerDiagnosticId,
         "Extended enum member initializer is discarded",
-        "Member '{0}' has an initializer Concord cannot read and overwrites; declare it const to pin the value",
+        "Member '{0}' has an initializer Concord cannot read and overwrites. Declare it const to pin the value.",
         ConcordPatchesNamespace,
         DiagnosticSeverity.Warning,
         true,
@@ -837,7 +837,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             targetType.ToDisplayString() + "." + declaration.TargetMemberName);
     }
 
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Minor Code Smell", "S4158", Justification = "False positive: beforeOwners/afterOwners accumulate across loop iterations via owners.Add, so oppositeOwners is not empty on later iterations; the Contains check detects owners declared in both [PatchBefore] and [PatchAfter].")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Minor Code Smell", "S4158", Justification = "False positive: beforeOwners/afterOwners accumulate across loop iterations via owners.Add, so oppositeOwners is not empty on later iterations. The Contains check detects owners declared in both [PatchBefore] and [PatchAfter].")]
     private static void AnalyzePatchOrdering(
         SymbolAnalysisContext context,
         INamedTypeSymbol patchType,
@@ -1416,7 +1416,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
                 InvalidConstantPositionRule,
                 LocationOf(injection.Attribute, injection.Method, context.CancellationToken),
                 injection.Method.Name,
-                "passes a constant but position is not At.Constant; constant injections require At.Constant"));
+                "passes a constant but position is not At.Constant. Constant injections require At.Constant"));
             return;
         }
 
@@ -1729,8 +1729,8 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
                 target,
                 targetType,
                 IsByRef(targetParameter.RefKind)
-                    ? $"target parameter '{targetParameter.Name}' is passed by reference; declare it '{RefKeyword(targetParameter.RefKind)}' on the injection too"
-                    : $"target parameter '{targetParameter.Name}' is passed by value; drop the byref modifier on the injection");
+                    ? $"target parameter '{targetParameter.Name}' is passed by reference. Declare it '{RefKeyword(targetParameter.RefKind)}' on the injection too"
+                    : $"target parameter '{targetParameter.Name}' is passed by value. Drop the byref modifier on the injection");
         }
     }
 
@@ -1937,7 +1937,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
                     injection,
                     target,
                     targetType,
-                    "whole-method At.Around on a constructor never calls Invoke(...); a constructor Around must invoke the original constructor exactly once");
+                    "whole-method At.Around on a constructor never calls Invoke(...). A constructor Around must invoke the original constructor exactly once");
             }
         }
 
@@ -1981,7 +1981,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
                     injection,
                     target,
                     targetType,
-                    $"whole-method At.Around targets a byref parameter '{parameter.Name}'; byref parameters are not supported by the Operation handle");
+                    $"whole-method At.Around targets a byref parameter '{parameter.Name}'. Byref parameters are not supported by the Operation handle");
                 return;
             }
 
@@ -1991,7 +1991,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
                     injection,
                     target,
                     targetType,
-                    $"whole-method At.Around targets parameter '{parameter.Name}' of type '{parameter.Type.ToDisplayString()}', which is a pointer, function pointer, or byref-like type; these are not supported by the Operation handle");
+                    $"whole-method At.Around targets parameter '{parameter.Name}' of type '{parameter.Type.ToDisplayString()}', which is a pointer, function pointer, or byref-like type. These are not supported by the Operation handle");
                 return;
             }
         }
@@ -2002,7 +2002,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
                 injection,
                 target,
                 targetType,
-                "whole-method At.Around targets a method that returns by reference; ref returns are not supported by the Operation handle");
+                "whole-method At.Around targets a method that returns by reference. Ref returns are not supported by the Operation handle");
             return;
         }
 
@@ -2012,7 +2012,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
                 injection,
                 target,
                 targetType,
-                $"whole-method At.Around targets a method returning '{targetMethod.ReturnType.ToDisplayString()}', which is a pointer, function pointer, or byref-like type; these are not supported by the Operation handle");
+                $"whole-method At.Around targets a method returning '{targetMethod.ReturnType.ToDisplayString()}', which is a pointer, function pointer, or byref-like type. These are not supported by the Operation handle");
             return;
         }
 
@@ -2022,7 +2022,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
                 injection,
                 target,
                 targetType,
-                "whole-method At.Around targets an async or iterator method; state-machine methods are not supported by the Operation handle");
+                "whole-method At.Around targets an async or iterator method. State-machine methods are not supported by the Operation handle");
         }
     }
 
@@ -3367,7 +3367,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     }
 
     private sealed class InjectionInfo {
-        [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S107", Justification = "Immutable data carrier for a resolved injection; every parameter maps to a distinct read-only property, so bundling would only add indirection.")]
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S107", Justification = "Immutable data carrier for a resolved injection. Every parameter maps to a distinct read-only property, so bundling would only add indirection.")]
         public InjectionInfo(
             IMethodSymbol method,
             AttributeData attribute,
@@ -3579,7 +3579,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     }
 
     private sealed class InjectionDeclaration {
-        [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S107", Justification = "Immutable data carrier for a resolved injection position; every parameter maps to a distinct read-only property, so bundling would only add indirection.")]
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S107", Justification = "Immutable data carrier for a resolved injection position. Every parameter maps to a distinct read-only property, so bundling would only add indirection.")]
         public InjectionDeclaration(
             IMethodSymbol method,
             bool targetsCallSite,
