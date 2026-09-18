@@ -99,7 +99,7 @@ public class PromotionTests
     [Fact]
     public void SharedGenericInstantiation_RoutesThroughTheBridgeInsteadOfClobberingHarmony()
     {
-        if (!WrapperComposer.SharedGenericGuardSupported)
+        if (TestRuntime.IsNetFramework)
         {
             return;
         }

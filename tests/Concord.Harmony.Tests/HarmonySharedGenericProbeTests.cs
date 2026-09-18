@@ -102,7 +102,7 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void BridgeRoutedInjectionIsIsolatedToRequestedInstantiation()
         {
-            if (!WrapperComposer.SharedGenericGuardSupported)
+            if (TestRuntime.IsNetFramework)
             {
                 return;
             }
@@ -142,7 +142,7 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void BridgeKeepsBothInstantiationsPatchesOnOneSharedBody()
         {
-            if (!WrapperComposer.SharedGenericGuardSupported)
+            if (TestRuntime.IsNetFramework)
             {
                 return;
             }

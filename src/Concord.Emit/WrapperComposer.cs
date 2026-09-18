@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 using MonoMod.Utils;
@@ -15,6 +16,12 @@ public static class WrapperComposer {
 
     private static readonly Dictionary<MethodBase, bool> SharedBodyCache = new Dictionary<MethodBase, bool>();
     private static readonly object SharedBodyGate = new object();
+
+    /// <summary>
+    ///     Whether this runtime can host the shared generic receiver guard. .NET Framework refuses to
+    ///     prepare the canonical instantiation, so shared reference-type instantiations stay rejected there.
+    /// </summary>
+    public static bool SharedGenericGuardSupported { get; } = !RuntimeInformation.FrameworkDescription.StartsWith(".NET Framework", StringComparison.Ordinal);
 
     /// <summary>
     ///     Creates a wrapper method for a target and a copy of the original body.
@@ -273,6 +280,10 @@ public static class WrapperComposer {
     /// <param name="target">The method a detour is about to be installed for.</param>
     /// <returns><see langword="true" /> when the target shares a guardable body.</returns>
     public static bool SharesGenericBody(MethodBase target) {
+        if (!SharedGenericGuardSupported) {
+            return false;
+        }
+
         if (target.IsStatic || target.IsConstructor) {
             return false;
         }
