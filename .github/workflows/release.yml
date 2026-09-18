@@ -220,9 +220,13 @@ jobs:
             @{ Project = 'tests/Concord.Emit.Tests/Concord.Emit.Tests.csproj'; Restore = $false },
             @{ Project = 'tests/Concord.AttachedData.Tests/Concord.AttachedData.Tests.csproj'; Restore = $false },
             @{ Project = 'tests/Concord.Orchestration.Tests/Concord.Orchestration.Tests.csproj'; Restore = $false },
-            @{ Project = 'tests/Concord.HarmonyX.Tests/Concord.HarmonyX.Tests.csproj'; Restore = $true }
+            @{ Project = 'tests/Concord.HarmonyX.Tests/Concord.HarmonyX.Tests.csproj'; Restore = $true; SkipOnArm = $true }
           )
           foreach ($suite in $suites) {
+            if ($suite.SkipOnArm -and $env:RUNNER_ARCH -eq 'ARM64') {
+              Write-Host "Skipping $($suite.Project): MonoMod has no win-arm64 support"
+              continue
+            }
             if ($suite.Restore) {
               dotnet test $suite.Project -c Release -f net472
             } else {

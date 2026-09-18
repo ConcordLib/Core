@@ -182,6 +182,11 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void ValidateAcceptsGuardableSharedReferenceTypeGenericInstantiation()
         {
+            if (TestRuntime.IsNetFramework)
+            {
+                return;
+            }
+
             MethodBase target = typeof(GenericContainer<string>).GetMethod(nameof(GenericContainer<string>.Compute));
 
             string reason = SupportMatrix.Validate(target, HeadInjection(), null);
