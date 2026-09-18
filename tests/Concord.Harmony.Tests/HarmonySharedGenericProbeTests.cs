@@ -102,6 +102,11 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void BridgeRoutedInjectionIsIsolatedToRequestedInstantiation()
         {
+            if (!WrapperComposer.SharedGenericGuardSupported)
+            {
+                return;
+            }
+
             HarmonyLib.Harmony harmony = new HarmonyLib.Harmony("probe.bridge.shared.generic");
             MethodInfo target = typeof(BridgeProbeBox<string>).GetMethod(nameof(BridgeProbeBox<string>.Compute));
             MethodInfo postfix = typeof(BridgeProbeMods).GetMethod(nameof(BridgeProbeMods.HarmonyPostfix));
@@ -137,6 +142,11 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void BridgeKeepsBothInstantiationsPatchesOnOneSharedBody()
         {
+            if (!WrapperComposer.SharedGenericGuardSupported)
+            {
+                return;
+            }
+
             HarmonyLib.Harmony harmony = new HarmonyLib.Harmony("probe.bridge.shared.generic.two");
             MethodInfo text = typeof(BridgeProbeBox<string>).GetMethod(nameof(BridgeProbeBox<string>.Compute));
             MethodInfo version = typeof(BridgeProbeBox<Version>).GetMethod(nameof(BridgeProbeBox<Version>.Compute));

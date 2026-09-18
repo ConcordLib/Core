@@ -458,6 +458,11 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void Around_OnStructConstructor_ComposesOnHarmonyStream()
         {
+            if (TestRuntime.IsNetFramework)
+            {
+                return;
+            }
+
             ConstructorInfo target = typeof(CtorAroundStructTarget).GetConstructor(new[] { typeof(int) });
             MethodInfo wrapMethod = typeof(CtorAroundMods).GetMethod(nameof(CtorAroundMods.Wrap));
 

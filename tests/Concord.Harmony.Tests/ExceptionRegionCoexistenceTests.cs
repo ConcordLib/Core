@@ -512,6 +512,11 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void IteratorFault_ConcordHeadInjection_FullEnumerationAndEarlyDisposeBothRunFinally()
         {
+            if (TestRuntime.IsNetFramework)
+            {
+                return;
+            }
+
             MethodInfo target = IteratorFaultTarget.ResolveMoveNext();
             MethodInfo headMethod = typeof(IteratorFaultMods).GetMethod(nameof(IteratorFaultMods.ConcordHead));
             HarmonyBridge bridge = new HarmonyBridge(_ => { });

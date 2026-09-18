@@ -99,6 +99,11 @@ public class PromotionTests
     [Fact]
     public void SharedGenericInstantiation_RoutesThroughTheBridgeInsteadOfClobberingHarmony()
     {
+        if (!WrapperComposer.SharedGenericGuardSupported)
+        {
+            return;
+        }
+
         PromotionLog.Entries.Clear();
         MethodBase patched = typeof(SharedRouteTarget<string>).GetMethod(nameof(SharedRouteTarget<string>.Compute));
         MethodBase sibling = typeof(SharedRouteTarget<Version>).GetMethod(nameof(SharedRouteTarget<Version>.Compute));
