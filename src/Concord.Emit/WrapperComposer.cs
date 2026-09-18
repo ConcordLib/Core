@@ -1210,7 +1210,8 @@ public static class WrapperComposer {
         if (allExits.Count == 0) {
             throw new ConcordEmitException(
                 "CONC106",
-                $"Tail injection on '{target.DeclaringType?.Name}.{target.Name}' found no return in the target body, so there is nowhere to run it; " +
+                $"Tail injection '{injection.InjectionMethod.DeclaringType?.Name}.{injection.InjectionMethod.Name}' on " +
+                    $"'{target.DeclaringType?.Name}.{target.Name}' found no return in the target body, so there is nowhere to run it; " +
                     "the method always throws or never exits. Use At.Finally to run when the method exits by any path, or At.Head.");
         }
 
@@ -1237,11 +1238,12 @@ public static class WrapperComposer {
         if (allExits.Count == 0) {
             throw new ConcordEmitException(
                 "CONC034",
-                $"Return injection on '{target.DeclaringType?.Name}.{target.Name}' found no return instruction in the target body, so there is nowhere to run it. " +
+                $"Return injection '{injection.InjectionMethod.DeclaringType?.Name}.{injection.InjectionMethod.Name}' on " +
+                    $"'{target.DeclaringType?.Name}.{target.Name}' found no return instruction in the target body, so there is nowhere to run it. " +
                     "The method always throws or never exits. Use At.Finally to run when the method exits by any path, or At.Head.");
         }
 
-        List<Instruction> exits = SelectReturnExits(allExits, returnSite.By, target);
+        List<Instruction> exits = SelectReturnExits(allExits, returnSite.By, target, injection);
 
         InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
         using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
@@ -1270,11 +1272,12 @@ public static class WrapperComposer {
             if (allExits.Count == 0) {
                 throw new ConcordEmitException(
                     "CONC034",
-                    $"Return injection on '{target.DeclaringType?.Name}.{target.Name}' found no return instruction in the target body, so there is nowhere to run it. " +
+                    $"Return injection '{injection.InjectionMethod.DeclaringType?.Name}.{injection.InjectionMethod.Name}' on " +
+                    $"'{target.DeclaringType?.Name}.{target.Name}' found no return instruction in the target body, so there is nowhere to run it. " +
                     "The method always throws or never exits. Use At.Finally to run when the method exits by any path, or At.Head.");
             }
 
-            List<Instruction> exits = SelectReturnExits(allExits, returnSite.By, target);
+            List<Instruction> exits = SelectReturnExits(allExits, returnSite.By, target, injection);
 
             InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
             using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
@@ -1313,7 +1316,8 @@ public static class WrapperComposer {
             if (allExits.Count == 0) {
                 throw new ConcordEmitException(
                     "CONC106",
-                    $"Tail injection on '{target.DeclaringType?.Name}.{target.Name}' found no return in the target body, so there is nowhere to run it; " +
+                    $"Tail injection '{injection.InjectionMethod.DeclaringType?.Name}.{injection.InjectionMethod.Name}' on " +
+                    $"'{target.DeclaringType?.Name}.{target.Name}' found no return in the target body, so there is nowhere to run it; " +
                     "the method always throws or never exits. Use At.Finally to run when the method exits by any path, or At.Head.");
             }
 
@@ -2130,7 +2134,7 @@ public static class WrapperComposer {
         return exits;
     }
 
-    private static List<Instruction> SelectReturnExits(List<Instruction> allExits, uint by, MethodBase target) {
+    private static List<Instruction> SelectReturnExits(List<Instruction> allExits, uint by, MethodBase target, Injection injection) {
         if (by == 0) {
             return allExits;
         }
@@ -2138,7 +2142,8 @@ public static class WrapperComposer {
         if (by > allExits.Count) {
             throw new ConcordEmitException(
                 "CONC035",
-                $"Return injection on '{target.DeclaringType?.Name}.{target.Name}' targets return occurrence {by}, but the body has only {allExits.Count}. " +
+                $"Return injection '{injection.InjectionMethod.DeclaringType?.Name}.{injection.InjectionMethod.Name}' on " +
+                    $"'{target.DeclaringType?.Name}.{target.Name}' targets return occurrence {by}, but the body has only {allExits.Count}. " +
                     "Occurrences count from 1 in body order. Pass a lower by, or drop by to attach to every return.");
         }
 
