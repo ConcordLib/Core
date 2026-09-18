@@ -214,11 +214,26 @@ jobs:
       - name: Test (net472)
         if: startsWith(matrix.runner, 'windows')
         run: |
-          dotnet test tests/Concord.Detour.Tests/Concord.Detour.Tests.csproj -c Release --no-restore -f net472
-          dotnet test tests/Concord.Emit.Tests/Concord.Emit.Tests.csproj -c Release --no-restore -f net472
-          dotnet test tests/Concord.AttachedData.Tests/Concord.AttachedData.Tests.csproj -c Release --no-restore -f net472
-          dotnet test tests/Concord.Orchestration.Tests/Concord.Orchestration.Tests.csproj -c Release --no-restore -f net472
-          dotnet test tests/Concord.HarmonyX.Tests/Concord.HarmonyX.Tests.csproj -c Release -f net472
+          $failed = @()
+          $suites = @(
+            @{ Project = 'tests/Concord.Detour.Tests/Concord.Detour.Tests.csproj'; Restore = $false },
+            @{ Project = 'tests/Concord.Emit.Tests/Concord.Emit.Tests.csproj'; Restore = $false },
+            @{ Project = 'tests/Concord.AttachedData.Tests/Concord.AttachedData.Tests.csproj'; Restore = $false },
+            @{ Project = 'tests/Concord.Orchestration.Tests/Concord.Orchestration.Tests.csproj'; Restore = $false },
+            @{ Project = 'tests/Concord.HarmonyX.Tests/Concord.HarmonyX.Tests.csproj'; Restore = $true }
+          )
+          foreach ($suite in $suites) {
+            if ($suite.Restore) {
+              dotnet test $suite.Project -c Release -f net472
+            } else {
+              dotnet test $suite.Project -c Release --no-restore -f net472
+            }
+            if ($LASTEXITCODE -ne 0) { $failed += $suite.Project }
+          }
+          if ($failed.Count -gt 0) {
+            Write-Host "::error::net472 suites failed: $($failed -join ', ')"
+            exit 1
+          }
 
       - name: Upload test results
         if: always()

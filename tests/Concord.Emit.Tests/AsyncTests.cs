@@ -6,6 +6,7 @@ using Xunit;
 namespace Concord.Emit.Tests;
 
 public static class IteratorTarget {
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static IEnumerable<int> Iterate() {
         yield return 1;
         yield return 2;
@@ -15,6 +16,7 @@ public static class IteratorTarget {
 public class InstanceIteratorTarget {
     public int Seed = 10;
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public IEnumerable<int> Iterate() {
         yield return Seed;
         yield return Seed + 1;
