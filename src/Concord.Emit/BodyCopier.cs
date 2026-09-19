@@ -1029,7 +1029,10 @@ internal static class BodyCopier {
         Dictionary<VariableDefinition, VariableDefinition> map =
             new Dictionary<VariableDefinition, VariableDefinition>(source.Variables.Count);
         foreach (VariableDefinition variable in source.Variables) {
-            VariableDefinition copy = new VariableDefinition(module.ImportReference(variable.VariableType.ResolveReflection()));
+            // ResolveReflection drops the pin, and an unpinned copy lets the GC move the buffer a
+            // fixed statement is holding. Put the marker back.
+            TypeReference copiedType = module.ImportReference(variable.VariableType.ResolveReflection());
+            VariableDefinition copy = new VariableDefinition(variable.IsPinned ? new PinnedType(copiedType) : copiedType);
             destination.Variables.Add(copy);
             map[variable] = copy;
         }
