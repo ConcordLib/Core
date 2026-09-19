@@ -174,6 +174,11 @@ internal sealed class TargetDetourRegistry {
             }
 
             composed = WrapperComposer.Compose(target, ordered);
+            foreach (RejectedInjection rejection in composed.Rejected) {
+                PatchLog.Write(
+                    CoexistenceLogMarkers.InjectionEvicted + " " + target.DeclaringType?.FullName + "." + target.Name +
+                    " owner '" + rejection.Owner + "': " + rejection.Message);
+            }
         }
 
         using (WrapperPrecompile.Enter()) {

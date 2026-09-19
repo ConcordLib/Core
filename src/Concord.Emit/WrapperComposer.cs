@@ -14,6 +14,17 @@ namespace Concord.Emit;
 public static class WrapperComposer {
     private const string CodeCONC039 = "CONC039";
 
+    // Mirrors InjectedMemberAnalyzer.LocalPositionHelp. The two lists are deliberate twins: the
+    // analyzer cannot reference Concord.Emit, so changing one means changing the other.
+    // PublicSurfaceTests.PositionHelpMatchesTheAnalyzersTwin reads both by reflection and fails on drift.
+    private const string LocalPositionHelp = "[Local] is supported at At.Return, At.Tail, At.Finally, At.Local, and the At.Head and " +
+                                             "At.Tail shifts of At.Invoke and At.NewObj.";
+
+    // Mirrors InjectedMemberAnalyzer.LocalWriteHelp. The two lists are deliberate twins: the
+    // analyzer cannot reference Concord.Emit, so changing one means changing the other.
+    private const string LocalWriteHelp = "LocalHandle<T> is supported at At.Local and the At.Head and At.Tail shifts of " +
+                                          "At.Invoke and At.NewObj. Use a plain [Local] parameter to read a local at the other positions.";
+
     private static readonly Dictionary<MethodBase, bool> SharedBodyCache = new Dictionary<MethodBase, bool>();
     private static readonly object SharedBodyGate = new object();
 
@@ -33,26 +44,17 @@ public static class WrapperComposer {
     /// <param name="ordered">The injections to compose, ordered by their caller.</param>
     /// <returns>The generated wrapper method and original body copy.</returns>
     public static ComposeResult Compose(MethodBase target, IReadOnlyList<Injection> ordered) {
-        ValidateComposition(target, ordered);
-
-        MethodBase resolved = target;
-
-        using DynamicMethodDefinition source = new DynamicMethodDefinition(resolved);
-        Type returnType = ResolveReturnType(resolved);
-        Type[] parameterTypes = ResolveParameterTypes(resolved);
-
-        using DynamicMethodDefinition wrapper = new DynamicMethodDefinition(WrapperName(resolved), returnType, parameterTypes);
-        BodyCopier.CopySpine(source.Definition, wrapper.Definition, resolved.DeclaringType!);
-
-        PartitionTranspilers(ordered, out List<Injection> preTranspilers, out List<Injection> finalTranspilers, out List<Injection> declarative);
-
-        int rawLocalCount = wrapper.Definition.Body.Variables.Count;
-        RunTranspilers(wrapper.Definition, resolved, preTranspilers);
-
-        AssembleInto(wrapper.Definition, resolved, declarative, returnType, rawLocalCount);
-        RunTranspilers(wrapper.Definition, resolved, finalTranspilers);
-        MethodInfo wrapperMethod = wrapper.Generate();
-        return new ComposeResult(wrapperMethod, () => OriginalBody.Clone(resolved));
+        List<RejectedInjection> rejected = new List<RejectedInjection>();
+        IReadOnlyList<Injection> live = ordered;
+        while (true) {
+            try {
+                return ComposeOnce(target, live, rejected);
+            } catch (ConcordEmitException failure) when (CanEvict(failure, live)) {
+                live = Evict(live, failure, rejected);
+            } catch (ConcordEmitException failure) when (rejected.Count > 0) {
+                throw WithEarlierEvictions(failure, rejected);
+            }
+        }
     }
 
     /// <summary>
@@ -64,28 +66,21 @@ public static class WrapperComposer {
     /// <param name="ordered">The injections to compose.</param>
     /// <returns>A human-readable IL dump of the composed wrapper.</returns>
     public static string ComposeDump(MethodBase target, IReadOnlyList<Injection> ordered) {
-        MethodBase resolved = target;
-
-        using DynamicMethodDefinition source = new DynamicMethodDefinition(resolved);
-        Type returnType = ResolveReturnType(resolved);
-        Type[] parameterTypes = ResolveParameterTypes(resolved);
-
-        using DynamicMethodDefinition wrapper = new DynamicMethodDefinition(WrapperName(resolved), returnType, parameterTypes);
-        BodyCopier.CopySpine(source.Definition, wrapper.Definition, resolved.DeclaringType!);
-
-        PartitionTranspilers(ordered, out List<Injection> preTranspilers, out List<Injection> finalTranspilers, out List<Injection> declarative);
-
-        int rawLocalCount = wrapper.Definition.Body.Variables.Count;
-        RunTranspilers(wrapper.Definition, resolved, preTranspilers);
-
-        Assemble(wrapper.Definition, resolved, declarative, returnType, rawLocalCount);
-        RunTranspilers(wrapper.Definition, resolved, finalTranspilers);
-
-        return IlDump.Format(wrapper.Definition);
+        List<RejectedInjection> rejected = new List<RejectedInjection>();
+        IReadOnlyList<Injection> live = ordered;
+        while (true) {
+            try {
+                return ComposeDumpOnce(target, live);
+            } catch (ConcordEmitException failure) when (CanEvict(failure, live)) {
+                live = Evict(live, failure, rejected);
+            } catch (ConcordEmitException failure) when (rejected.Count > 0) {
+                throw WithEarlierEvictions(failure, rejected);
+            }
+        }
     }
 
     /// <summary>
-    ///     Creates a transpiler context for use with <see cref="TransformStream" />, in the virgin
+    ///     Creates a transpiler context for use with <see cref="TransformStream(MethodBase, IReadOnlyList{CodeInstruction}, IReadOnlyList{Injection}, ITranspilerContext)" />, in the virgin
     ///     local-numbering state a supplied stream expects: no locals declared yet, so a caller's
     ///     first <see cref="ITranspilerContext.DeclareLocal" /> call returns index 0, the second
     ///     returns index 1, and so on.
@@ -117,6 +112,11 @@ public static class WrapperComposer {
     ///     the indices they were declared in.
     /// </param>
     /// <returns>The composed instruction stream.</returns>
+    /// <remarks>
+    ///     This overload discards the eviction report. A bridge that wants to tell an author why its
+    ///     <c>[Local]</c> stopped resolving must call the overload that hands back
+    ///     <see cref="RejectedInjection" />s, because nothing else reports them.
+    /// </remarks>
     /// <exception cref="ConcordEmitException">
     ///     Thrown with code <c>CONC116</c> when <paramref name="context" /> was not obtained from
     ///     <see cref="CreateStreamContext" />.
@@ -126,25 +126,39 @@ public static class WrapperComposer {
         IReadOnlyList<CodeInstruction> source,
         IReadOnlyList<Injection> ordered,
         ITranspilerContext context) {
-        TranspilerContext writeContext = RequireConcreteContext(context);
-        MethodBase resolved = target;
-        Type returnType = ResolveReturnType(resolved);
-        Type[] parameterTypes = ResolveParameterTypes(resolved);
+        return TransformStream(target, source, ordered, context, out _);
+    }
 
-        using DynamicMethodDefinition wrapper = new DynamicMethodDefinition(WrapperName(resolved), returnType, parameterTypes);
-
-        Dictionary<Instruction, List<int>> provenance = CecilCodeConverter.WriteBack(wrapper.Definition, source, writeContext);
-        int firstFreshLabelId = writeContext.NextLabelId;
-
-        PartitionTranspilers(ordered, out List<Injection> preTranspilers, out List<Injection> finalTranspilers, out List<Injection> declarative);
-
-        int rawLocalCount = wrapper.Definition.Body.Variables.Count;
-        RunTranspilers(wrapper.Definition, resolved, preTranspilers);
-        AssembleInto(wrapper.Definition, resolved, declarative, returnType, rawLocalCount);
-        RunTranspilers(wrapper.Definition, resolved, finalTranspilers);
-
-        TranspilerContext readContext = new TranspilerContext(resolved);
-        return CecilCodeConverter.ToInstructions(wrapper.Definition, readContext, provenance, firstFreshLabelId);
+    /// <summary>
+    ///     Composes ordered injections onto a caller-supplied instruction stream, and reports every
+    ///     injection that was evicted to get there. A bridge should log <paramref name="rejected" />:
+    ///     it is the only place the owning mod learns that its <c>[Local]</c> stopped resolving.
+    /// </summary>
+    /// <param name="target">The method that defines the composed body's shape.</param>
+    /// <param name="source">The instruction stream to compose the injections onto.</param>
+    /// <param name="ordered">The injections to compose, ordered by their caller.</param>
+    /// <param name="context">The context <paramref name="source" /> was produced against.</param>
+    /// <param name="rejected">The injections dropped during composition. Empty on a clean compose.</param>
+    /// <returns>The composed instruction stream.</returns>
+    public static List<CodeInstruction> TransformStream(
+        MethodBase target,
+        IReadOnlyList<CodeInstruction> source,
+        IReadOnlyList<Injection> ordered,
+        ITranspilerContext context,
+        out IReadOnlyList<RejectedInjection> rejected) {
+        List<RejectedInjection> dropped = new List<RejectedInjection>();
+        IReadOnlyList<Injection> live = ordered;
+        while (true) {
+            try {
+                List<CodeInstruction> composed = TransformStreamOnce(target, source, live, context);
+                rejected = dropped;
+                return composed;
+            } catch (ConcordEmitException failure) when (CanEvict(failure, live)) {
+                live = Evict(live, failure, dropped);
+            } catch (ConcordEmitException failure) when (dropped.Count > 0) {
+                throw WithEarlierEvictions(failure, dropped);
+            }
+        }
     }
 
     /// <summary>
@@ -380,6 +394,8 @@ public static class WrapperComposer {
     internal static void ValidateComposition(MethodBase target, IReadOnlyList<Injection> ordered) {
         RejectMisplacedCaptures(ordered, target);
         RejectMisplacedSlices(ordered, target);
+        RejectMisplacedLocals(ordered, target);
+        RejectMisplacedLocalWrites(ordered, target);
 
         if (HasWholeMethodAround(ordered)) {
             ValidateWholeMethodAroundEligible(target);
@@ -591,14 +607,15 @@ public static class WrapperComposer {
 
     /// <summary>
     ///     Rejects <see cref="SliceAttribute" /> on any position that matches no call site, since a range
-    ///     only bounds the search that <see cref="InjectAt.Invoke" /> and <see cref="InjectAt.NewObj" /> perform.
+    ///     only bounds the search that <see cref="InjectAt.Invoke" />, <see cref="InjectAt.NewObj" /> and
+    ///     <see cref="InjectAt.Local" /> perform.
     /// </summary>
     /// <param name="ordered">The full injection list being composed for <paramref name="target" />.</param>
     /// <param name="target">The original method being patched, used for the diagnostic message.</param>
     private static void RejectMisplacedSlices(IReadOnlyList<Injection> ordered, MethodBase target) {
         for (int i = 0; i < ordered.Count; i++) {
             Injection injection = ordered[i];
-            if (injection.At is InjectAt.Invoke or InjectAt.NewObj) {
+            if (injection.At is InjectAt.Invoke or InjectAt.NewObj or InjectAt.Local) {
                 continue;
             }
 
@@ -612,6 +629,107 @@ public static class WrapperComposer {
                 $"'{target.DeclaringType?.Name}.{target.Name}' carries [Slice] at position '{PositionName(injection.At)}'. " +
                 "[Slice] applies to invoke and construction positions only.");
         }
+    }
+
+    /// <summary>
+    ///     Rejects <see cref="LocalAttribute" /> on any position that carries no local binding.
+    ///     <see cref="InjectAt.Head" /> runs before the target assigns anything, and a whole-method
+    ///     <see cref="InjectAt.Around" /> never executes the target's slots at all, so each gets its own code.
+    ///     Every other unsupported position lowers through a copier that never builds a binding map, which
+    ///     would read the wrong slot or a default instead of failing.
+    /// </summary>
+    /// <param name="ordered">The full injection list being composed for <paramref name="target" />.</param>
+    /// <param name="target">The original method being patched, used for the diagnostic message.</param>
+    private static void RejectMisplacedLocals(IReadOnlyList<Injection> ordered, MethodBase target) {
+        for (int i = 0; i < ordered.Count; i++) {
+            Injection injection = ordered[i];
+            if (!DeclaresLocal(injection.InjectionMethod) || SupportsLocalBinding(injection.At)) {
+                continue;
+            }
+
+            string who =
+                $"Injection '{injection.InjectionMethod.DeclaringType?.Name}.{injection.InjectionMethod.Name}' on " +
+                $"'{target.DeclaringType?.Name}.{target.Name}' declares a [Local] or LocalHandle<T> parameter";
+
+            // Mirrors InjectedMemberAnalyzer.LocalOnWholeMethodAroundRule's message and description.
+            // The two are deliberate twins: the analyzer is netstandard2.0 and reads At values from
+            // the user's compilation, this switches an InjectAt graph, so neither can call the other.
+            if (injection.At is InjectAt.Around) {
+                throw new ConcordEmitException(
+                    "CONC160",
+                    $"{who} at At.Around. The target's locals only exist inside the body copies this Around splices in at each " +
+                    "original.Invoke, so the Around method's own instructions never see one, and with more than one Invoke site " +
+                    "there is no single copy to bind. Move the parameter to an At.Return or At.Tail injection on the same target.");
+            }
+
+            throw injection.At is InjectAt.Head
+                ? new ConcordEmitException(
+                    "CONC146",
+                    $"{who} at At.Head, which runs before the target body assigns any local. {LocalPositionHelp}")
+                : new ConcordEmitException(
+                    "CONC158",
+                    $"{who} at '{PositionName(injection.At)}', which binds no local. {LocalPositionHelp}");
+        }
+    }
+
+    /// <summary>
+    ///     Rejects <see cref="LocalHandle{T}" /> at a position that can read a local but not usefully write
+    ///     one. Write-legal positions are a strict subset of <see cref="SupportsLocalBinding" />: by
+    ///     <see cref="InjectAt.Return" /> and <see cref="InjectAt.Tail" /> the target body has finished with
+    ///     its locals, so the write is dead, and <see cref="InjectAt.Finally" /> is the same plus unreachable
+    ///     on the throwing path. Every other unsupported position is already rejected by
+    ///     <see cref="RejectMisplacedLocals" />.
+    /// </summary>
+    /// <param name="ordered">The full injection list being composed for <paramref name="target" />.</param>
+    /// <param name="target">The original method being patched, used for the diagnostic message.</param>
+    private static void RejectMisplacedLocalWrites(IReadOnlyList<Injection> ordered, MethodBase target) {
+        for (int i = 0; i < ordered.Count; i++) {
+            Injection injection = ordered[i];
+            if (!LocalHandleLowering.DeclaresLocalHandle(injection.InjectionMethod) || SupportsLocalWrite(injection.At)) {
+                continue;
+            }
+
+            throw new ConcordEmitException(
+                "CONC156",
+                $"Injection '{injection.InjectionMethod.DeclaringType?.Name}.{injection.InjectionMethod.Name}' on " +
+                $"'{target.DeclaringType?.Name}.{target.Name}' declares a LocalHandle<T> parameter at " +
+                $"'{PositionName(injection.At)}', where the target body is done with its locals, so the write would " +
+                "never be read back. " + LocalWriteHelp);
+        }
+    }
+
+    // Twin of InjectedMemberAnalyzer.SupportsLocalWrite. Keep both in step; the analyzer targets
+    // netstandard2.0 with no reference to this assembly, so it cannot call this one.
+    private static bool SupportsLocalWrite(InjectAt at) {
+        return at switch {
+            InjectAt.Local => true,
+            InjectAt.Invoke invoke => invoke.Shift is At.Head or At.Tail,
+            InjectAt.NewObj newObj => newObj.Shift is At.Head or At.Tail,
+            _ => false,
+        };
+    }
+
+    // Twin of InjectedMemberAnalyzer.SupportsLocalBinding, which compares raw At ordinals because
+    // the analyzer cannot reference this assembly. Keep both in step.
+    private static bool SupportsLocalBinding(InjectAt at) {
+        return at switch {
+            InjectAt.Return or InjectAt.Tail or InjectAt.Finally or InjectAt.Local => true,
+            InjectAt.Invoke invoke => invoke.Shift is At.Head or At.Tail,
+            InjectAt.NewObj newObj => newObj.Shift is At.Head or At.Tail,
+            _ => false,
+        };
+    }
+
+    private static bool DeclaresLocal(MethodBase injectionMethod) {
+        ParameterInfo[] parameters = injectionMethod.GetParameters();
+        for (int i = 0; i < parameters.Length; i++) {
+            if (parameters[i].GetCustomAttribute<LocalAttribute>() is not null
+                || LocalHandleLowering.IsLocalHandleType(parameters[i].ParameterType)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool DeclaresCapture(MethodBase injectionMethod) {
@@ -636,11 +754,11 @@ public static class WrapperComposer {
     private static void RejectCallSiteInjectionsWithWholeMethodAround(IReadOnlyList<Injection> ordered, MethodBase target) {
         for (int i = 0; i < ordered.Count; i++) {
             InjectAt at = ordered[i].At;
-            if (at is InjectAt.Invoke or InjectAt.NewObj or InjectAt.Constant) {
+            if (at is InjectAt.Invoke or InjectAt.NewObj or InjectAt.Constant or InjectAt.Local) {
                 throw new ConcordEmitException(
                     "CONC115",
                     $"Whole-method Around on '{target.DeclaringType?.Name}.{target.Name}' cannot be combined with call-site " +
-                    "(Invoke/NewObj/Argument/Constant) injections on the same target. Call-site positions mutate the pre-Around spine, " +
+                    "(Invoke/NewObj/Argument/Constant/Local) injections on the same target. Call-site positions mutate the pre-Around spine, " +
                     "which does not compose with the per-copy splicing a whole-method Around performs.");
             }
         }
@@ -663,6 +781,9 @@ public static class WrapperComposer {
             "builds and returns the state machine. Set Body = PatchBody.StateMachine on the injection to reach the body as written.");
     }
 
+    // An Invoke or NewObj shift is spelled with its owning position in front of it, because a bare
+    // "At.Around" would read the same for a call-site Around shift and a whole-method Around, and
+    // several diagnostics name both.
     private static string PositionName(InjectAt at) {
         return at switch {
             InjectAt.Head => "At.Head",
@@ -671,8 +792,9 @@ public static class WrapperComposer {
             InjectAt.Around => "At.Around",
             InjectAt.Finally => "At.Finally",
             InjectAt.Constant => "At.Constant",
-            InjectAt.Invoke invoke => $"At.{invoke.Shift}",
-            InjectAt.NewObj newObj => $"At.{newObj.Shift}",
+            InjectAt.Invoke invoke => $"At.Invoke/At.{invoke.Shift}",
+            InjectAt.NewObj newObj => $"At.NewObj/At.{newObj.Shift}",
+            InjectAt.Local => "At.Local",
             InjectAt.Transpiler { Final: true } => "At.TranspilerFinal",
             InjectAt.Transpiler => "At.Transpiler",
             _ => at.GetType().Name,
@@ -874,6 +996,146 @@ public static class WrapperComposer {
         return iterator?.StateMachineType;
     }
 
+    // A [Local] that another mod's transpiler broke evicts its own injection and nothing else, so
+    // the mod that caused the break still applies and an undo of an unrelated handle still works.
+    // Composing is not incremental, so dropping one means starting over; only a failure pays that.
+    // Evicting the last injection would leave the owner with no error at all, so that one throws.
+    // Every other local-binding failure throws too: a selector that would have missed against the
+    // bare target body is the author's own typo, and dropping it turns an error into an injection
+    // that silently never runs.
+    private static bool CanEvict(ConcordEmitException failure, IReadOnlyList<Injection> live) {
+        if (failure.LocalBindingMethod is null || !failure.BrokenByAForeignEdit) {
+            return false;
+        }
+
+        int matched = 0;
+        foreach (Injection injection in live) {
+            if (Owns(failure, injection)) {
+                matched++;
+            }
+        }
+
+        return matched > 0 && matched < live.Count;
+    }
+
+    // Dispatch stamps the exact injection, so two selectors on one shared helper method do not fall
+    // together. Only a failure raised outside the dispatch loop falls back to the method.
+    private static bool Owns(ConcordEmitException failure, Injection injection) {
+        return failure.LocalBindingInjection is null
+            ? injection.InjectionMethod == failure.LocalBindingMethod
+            : ReferenceEquals(failure.LocalBindingInjection, injection);
+    }
+
+    private static List<Injection> Evict(
+        IReadOnlyList<Injection> live, ConcordEmitException failure, List<RejectedInjection> rejected) {
+        List<Injection> kept = new List<Injection>(live.Count);
+        foreach (Injection injection in live) {
+            if (Owns(failure, injection)) {
+                rejected.Add(new RejectedInjection(injection.Owner, failure.Code, failure.Message));
+            } else {
+                kept.Add(injection);
+            }
+        }
+
+        return kept;
+    }
+
+    // The last failure is the one that empties the set and throws, so an injection evicted earlier in
+    // the same compose would otherwise vanish. Carry those diagnostics along in the thrown message.
+    private static ConcordEmitException WithEarlierEvictions(ConcordEmitException failure, List<RejectedInjection> rejected) {
+        System.Text.StringBuilder message = new System.Text.StringBuilder(failure.Detail);
+        foreach (RejectedInjection earlier in rejected) {
+            message.Append("\nAlso evicted, owner '").Append(earlier.Owner).Append("': ").Append(earlier.Message);
+        }
+
+        return new ConcordEmitException(failure.Code, message.ToString());
+    }
+
+    private static ComposeResult ComposeOnce(MethodBase target, IReadOnlyList<Injection> ordered, List<RejectedInjection> rejected) {
+        ValidateComposition(target, ordered);
+
+        MethodBase resolved = target;
+
+        using DynamicMethodDefinition source = new DynamicMethodDefinition(resolved);
+        Type returnType = ResolveReturnType(resolved);
+        Type[] parameterTypes = ResolveParameterTypes(resolved);
+
+        using DynamicMethodDefinition wrapper = new DynamicMethodDefinition(WrapperName(resolved), returnType, parameterTypes);
+        BodyCopier.CopySpine(source.Definition, wrapper.Definition, resolved.DeclaringType!);
+
+        PartitionTranspilers(ordered, out List<Injection> preTranspilers, out List<Injection> finalTranspilers, out List<Injection> declarative);
+
+        int rawLocalCount = wrapper.Definition.Body.Variables.Count;
+        RunTranspilers(wrapper.Definition, resolved, preTranspilers);
+
+        AssembleInto(wrapper.Definition, resolved, declarative, returnType, rawLocalCount);
+        RunTranspilers(wrapper.Definition, resolved, finalTranspilers);
+        MethodInfo wrapperMethod = wrapper.Generate();
+        return new ComposeResult(wrapperMethod, () => OriginalBody.Clone(resolved), rejected);
+    }
+
+    private static string ComposeDumpOnce(MethodBase target, IReadOnlyList<Injection> ordered) {
+        MethodBase resolved = target;
+
+        using DynamicMethodDefinition source = new DynamicMethodDefinition(resolved);
+        Type returnType = ResolveReturnType(resolved);
+        Type[] parameterTypes = ResolveParameterTypes(resolved);
+
+        using DynamicMethodDefinition wrapper = new DynamicMethodDefinition(WrapperName(resolved), returnType, parameterTypes);
+        BodyCopier.CopySpine(source.Definition, wrapper.Definition, resolved.DeclaringType!);
+
+        PartitionTranspilers(ordered, out List<Injection> preTranspilers, out List<Injection> finalTranspilers, out List<Injection> declarative);
+
+        int rawLocalCount = wrapper.Definition.Body.Variables.Count;
+        RunTranspilers(wrapper.Definition, resolved, preTranspilers);
+
+        Assemble(wrapper.Definition, resolved, declarative, returnType, rawLocalCount);
+        RunTranspilers(wrapper.Definition, resolved, finalTranspilers);
+
+        return IlDump.Format(wrapper.Definition);
+    }
+
+    private static List<CodeInstruction> TransformStreamOnce(
+        MethodBase target,
+        IReadOnlyList<CodeInstruction> source,
+        IReadOnlyList<Injection> ordered,
+        ITranspilerContext context) {
+        TranspilerContext writeContext = RequireConcreteContext(context);
+        MethodBase resolved = target;
+        Type returnType = ResolveReturnType(resolved);
+        Type[] parameterTypes = ResolveParameterTypes(resolved);
+
+        using DynamicMethodDefinition wrapper = new DynamicMethodDefinition(WrapperName(resolved), returnType, parameterTypes);
+
+        Dictionary<Instruction, List<int>> provenance = CecilCodeConverter.WriteBack(wrapper.Definition, source, writeContext);
+        int firstFreshLabelId = writeContext.NextLabelId;
+
+        PartitionTranspilers(ordered, out List<Injection> preTranspilers, out List<Injection> finalTranspilers, out List<Injection> declarative);
+
+        int rawLocalCount = StreamRawLocalCount(resolved, wrapper.Definition.Body.Variables.Count);
+        RunTranspilers(wrapper.Definition, resolved, preTranspilers);
+        AssembleInto(wrapper.Definition, resolved, declarative, returnType, rawLocalCount);
+        RunTranspilers(wrapper.Definition, resolved, finalTranspilers);
+
+        TranspilerContext readContext = new TranspilerContext(resolved);
+        return CecilCodeConverter.ToInstructions(wrapper.Definition, readContext, provenance, firstFreshLabelId);
+    }
+
+    // On the stream route every local arrives declared through the context, the target's own included,
+    // so the written-back body cannot say which came from another mod's transpiler. The target's own
+    // IL can: anything past its slot count was added on the way in.
+    private static int StreamRawLocalCount(MethodBase target, int written) {
+        // No body to read means no baseline. Counting every slot as the target's own closes the
+        // eviction gate; counting none would open it for every failure on the route.
+        System.Reflection.MethodBody? own = target.GetMethodBody();
+        if (own is null) {
+            return written;
+        }
+
+        int count = own.LocalVariables.Count;
+        return count < written ? count : written;
+    }
+
     private static void Assemble(MethodDefinition wrapperDefinition, MethodBase target, IReadOnlyList<Injection> ordered, Type returnType, int rawLocalCount) {
         ValidateNonHeadInjectionsDoNotReturnControl(ordered);
 
@@ -889,10 +1151,13 @@ public static class WrapperComposer {
         // target's own slots plus whatever a pre-transpiler added.
         int searchLocalCount = body.Variables.Count;
 
+        HashSet<int> referencedSlots = SpineTemplate.ReferencedLocalIndices(body.Instructions, body.Variables);
+
         Dictionary<Type, VariableDefinition> stateLocals = AllocateStateLocals(ordered, wrapperDefinition, target);
         ProtocolLocals locals = DeclareLocals(body, module, returnType, isVoid, hasAround && !isVoid, needsCtorGuard, stateLocals) with {
             RawLocalCount = rawLocalCount,
             SearchLocalCount = searchLocalCount,
+            ReferencedSlots = referencedSlots,
         };
 
         List<Instruction> spine = new List<Instruction>(body.Instructions);
@@ -1019,58 +1284,79 @@ public static class WrapperComposer {
         aroundInjection = null;
         lastExit = null;
 
+        // At.Local, At.Constant, At.Invoke and At.NewObj all count By against this, never the live
+        // spine. A store splice ends in 'stloc slot' and a value injection opens with 'ldloc slot',
+        // so At.Local's splices always add an instruction of the kind it matches. The other three
+        // only do it when the author's body holds a matching literal, call or allocation, which is
+        // the ordinary case. Counting live lets one injection renumber the next one's occurrences.
+        // A match only reaches a splice site if the live spine still holds it, which At.Around's
+        // replacement does not guarantee; see SearchList. SpliceIndexOf makes that a throw rather
+        // than a silent splice at index 0.
+        List<Instruction> preSpliceSpine = new List<Instruction>(anchors.Spine);
+
         IReadOnlyList<Injection> ordered = context.Ordered;
         for (int i = ordered.Count - 1; i >= 0; i--) {
             Injection injection = ordered[i];
-
-            if (injection.At is InjectAt.Head) {
-                int firstHeadBody = buffers.HeadBodies.Count;
-                ProcessHeadInjection(new InjectionSiteContext(injection, context.WrapperDefinition, context.Target, context.Locals), anchors.GuardStart, context.IsVoid, ref hasHead, buffers.HeadBodies);
-                PrefixSharedGenericGuard(context.WrapperDefinition, injection, buffers.HeadBodies, firstHeadBody, anchors.GuardStart);
-                continue;
-            }
-
-            if (injection.At is InjectAt.Tail) {
-                int firstTailBody = buffers.TailBodies.Count;
-                lastExit = DispatchTailInjection(context, anchors, buffers, injection, lastExit);
-                if (lastExit is not null) {
-                    PrefixSharedGenericGuard(context.WrapperDefinition, injection, buffers.TailBodies, firstTailBody, lastExit);
+            try {
+                if (injection.At is InjectAt.Head) {
+                    int firstHeadBody = buffers.HeadBodies.Count;
+                    ProcessHeadInjection(new InjectionSiteContext(injection, context.WrapperDefinition, context.Target, context.Locals), anchors.GuardStart, context.IsVoid, ref hasHead, buffers.HeadBodies);
+                    PrefixSharedGenericGuard(context.WrapperDefinition, injection, buffers.HeadBodies, firstHeadBody, anchors.GuardStart);
+                    continue;
                 }
 
-                continue;
-            }
+                if (injection.At is InjectAt.Tail) {
+                    int firstTailBody = buffers.TailBodies.Count;
+                    lastExit = DispatchTailInjection(context, anchors, buffers, injection, lastExit);
+                    if (lastExit is not null) {
+                        PrefixSharedGenericGuard(context.WrapperDefinition, injection, buffers.TailBodies, firstTailBody, lastExit);
+                    }
 
-            if (injection.At is InjectAt.Return returnSite) {
-                DispatchReturnInjection(context, anchors, buffers, injection, returnSite);
-                continue;
-            }
+                    continue;
+                }
 
-            if (injection.At is InjectAt.Invoke invoke) {
-                ProcessInvokeInjection(injection, invoke, context.WrapperDefinition, context.Target, context.Locals, anchors.Spine);
-                continue;
-            }
+                if (injection.At is InjectAt.Return returnSite) {
+                    DispatchReturnInjection(context, anchors, buffers, injection, returnSite);
+                    continue;
+                }
 
-            if (injection.At is InjectAt.NewObj newObj) {
-                ProcessNewObjInjection(injection, newObj, context.WrapperDefinition, context.Target, context.Locals, anchors.Spine);
-                continue;
-            }
+                if (injection.At is InjectAt.Invoke invoke) {
+                    ProcessInvokeInjection(injection, invoke, context.WrapperDefinition, context.Target, context.Locals, anchors.Spine, preSpliceSpine);
+                    continue;
+                }
 
-            if (injection.At is InjectAt.Constant constant) {
-                ProcessConstantInjection(injection, constant, context.WrapperDefinition, context.Target, anchors.Spine);
-                continue;
-            }
+                if (injection.At is InjectAt.NewObj newObj) {
+                    ProcessNewObjInjection(injection, newObj, context.WrapperDefinition, context.Target, context.Locals, anchors.Spine, preSpliceSpine);
+                    continue;
+                }
 
-            if (injection.At is InjectAt.Finally) {
-                ProcessFinallyInjection(new InjectionSiteContext(injection, context.WrapperDefinition, context.Target, context.Locals), anchors.FinallyEnd, buffers.FinallyBodies);
-                continue;
-            }
+                if (injection.At is InjectAt.Constant constant) {
+                    ProcessConstantInjection(injection, constant, context.WrapperDefinition, context.Target, anchors.Spine, preSpliceSpine);
+                    continue;
+                }
 
-            if (injection.At is InjectAt.Around) {
-                aroundInjection = RegisterAroundInjection(injection, aroundInjection, context.Target);
-                continue;
-            }
+                if (injection.At is InjectAt.Local localSite) {
+                    ProcessLocalInjection(injection, localSite, context.WrapperDefinition, context.Target, context.Locals, anchors.Spine, preSpliceSpine);
+                    continue;
+                }
 
-            throw new ConcordEmitException("CONC116", $"Unsupported injection position '{injection.At.GetType().Name}' reached composition dispatch.");
+                if (injection.At is InjectAt.Finally) {
+                    ProcessFinallyInjection(new InjectionSiteContext(injection, context.WrapperDefinition, context.Target, context.Locals), anchors.FinallyEnd, buffers.FinallyBodies);
+                    continue;
+                }
+
+                if (injection.At is InjectAt.Around) {
+                    aroundInjection = RegisterAroundInjection(injection, aroundInjection, context.Target);
+                    continue;
+                }
+
+                throw new ConcordEmitException("CONC116", $"Unsupported injection position '{injection.At.GetType().Name}' reached composition dispatch.");
+            } catch (ConcordEmitException failure) when (failure.LocalBindingMethod is not null) {
+                // Which injection owns the failure is only knowable here. LocalResolver sees the method,
+                // and two injections can share one.
+                failure.LocalBindingInjection ??= injection;
+                throw;
+            }
         }
 
         return hasHead;
@@ -1299,6 +1585,7 @@ public static class WrapperComposer {
                     exit,
                     insideAround: true);
                 BodyCopier.RewriteSpliceArgs(siteBody, spineCopy.ArgLocals);
+                BodyCopier.RewriteSpliceLocals(siteBody, spineCopy.LocalMap);
 
                 RedirectIntermediateBranches(spineCopy.Instructions, exit, siteBody[0]);
                 RedirectIntermediateBranches(aroundBody, exit, siteBody[0]);
@@ -1342,6 +1629,7 @@ public static class WrapperComposer {
                 lastExit,
                 insideAround: true);
             BodyCopier.RewriteSpliceArgs(siteBody, spineCopy.ArgLocals);
+            BodyCopier.RewriteSpliceLocals(siteBody, spineCopy.LocalMap);
 
             RedirectIntermediateBranches(spineCopy.Instructions, lastExit, siteBody[0]);
             RedirectIntermediateBranches(aroundBody, lastExit, siteBody[0]);
@@ -1387,7 +1675,8 @@ public static class WrapperComposer {
         MethodDefinition wrapperDefinition,
         MethodBase target,
         ProtocolLocals locals,
-        List<Instruction> spine) {
+        List<Instruction> spine,
+        List<Instruction> preSpliceSpine) {
         string effectiveName = AccessorNameResolver.ResolveAccessorName(
             invoke.DeclaringType,
             invoke.Method,
@@ -1395,7 +1684,7 @@ public static class WrapperComposer {
             invoke.Shift is At.Around);
 
         bool includeFieldReads = invoke.Shift is At.Head or At.Tail;
-        IReadOnlyList<Instruction> searchable = CallSiteQuery.Narrow(spine, invoke.Slice, target);
+        IReadOnlyList<Instruction> searchable = CallSiteQuery.Narrow(SearchList(invoke.Shift, spine, preSpliceSpine), invoke.Slice, target);
         List<Instruction> allSites = ControlHandleLowering.FindInvokeCallSites(
             searchable,
             invoke.DeclaringType,
@@ -1419,8 +1708,9 @@ public static class WrapperComposer {
         MethodDefinition wrapperDefinition,
         MethodBase target,
         ProtocolLocals locals,
-        List<Instruction> spine) {
-        IReadOnlyList<Instruction> searchable = CallSiteQuery.Narrow(spine, newObj.Slice, target);
+        List<Instruction> spine,
+        List<Instruction> preSpliceSpine) {
+        IReadOnlyList<Instruction> searchable = CallSiteQuery.Narrow(SearchList(newObj.Shift, spine, preSpliceSpine), newObj.Slice, target);
         List<Instruction> allSites = CallSiteQuery.Match(
             searchable,
             newObj.ConstructedType,
@@ -1436,6 +1726,27 @@ public static class WrapperComposer {
             newObj: true,
             sites,
             spine);
+    }
+
+    // At.Around replaces its site instead of inserting beside it, and the replacement's own copy of
+    // the call is how a second Around chains onto the first. The pre-splice snapshot still holds the
+    // instruction the first wrap removed, so Around has to keep counting live. Every other shift
+    // only inserts, which is what makes the snapshot both safe and necessary there.
+    private static List<Instruction> SearchList(At shift, List<Instruction> spine, List<Instruction> preSpliceSpine) {
+        return shift is At.Around ? spine : preSpliceSpine;
+    }
+
+    // Matching runs on a pre-splice snapshot, so a match can outlive the live spine if some position
+    // removes instructions during dispatch. Unguarded, IndexOf returns -1 and the splice silently
+    // lands at index 0, which composes into a wrong body rather than failing.
+    private static int SpliceIndexOf(List<Instruction> spine, Instruction match) {
+        int index = spine.IndexOf(match);
+        if (index < 0) {
+            throw new InvalidOperationException(
+                $"Concord bug: injection site '{match}' is no longer in the spine it is being spliced into.");
+        }
+
+        return index;
     }
 
     /// <summary>
@@ -1480,7 +1791,7 @@ public static class WrapperComposer {
         bool after = shift is At.Tail;
         foreach (Instruction match in sites) {
             Dictionary<int, VariableDefinition>? captureBinding = EmitCaptureSpills(site, match, newObj, spine);
-            int siteIndex = spine.IndexOf(match);
+            int siteIndex = SpliceIndexOf(spine, match);
             Instruction continuation = after ? spine[siteIndex + 1] : match;
             List<Instruction> invokeBody = BodyCopier.CopyInjection(
                 new InjectionCopyRequest(injectionMethodDefinition.Definition, site.WrapperDefinition, site.Target, injection.InjectionMethod, injectedMembers) { BoundArguments = injection.BoundArguments },
@@ -1574,7 +1885,7 @@ public static class WrapperComposer {
         MethodBase injectionMethod = site.Injection.InjectionMethod;
         int boundary = CallSiteProvenance.FindArgumentPushEnd(
             spine,
-            spine.IndexOf(match),
+            SpliceIndexOf(spine, match),
             (int)(arg - 1),
             shape.ParameterTypes.Length,
             shape.HasThis,
@@ -1669,7 +1980,7 @@ public static class WrapperComposer {
                 block.Add(Instruction.Create(OpCodes.Ldloc, argLocals[i]));
             }
 
-            int siteIndex = spine.IndexOf(match);
+            int siteIndex = SpliceIndexOf(spine, match);
             spine.InsertRange(siteIndex, block);
         }
     }
@@ -1721,8 +2032,9 @@ public static class WrapperComposer {
         InjectAt.Constant constant,
         MethodDefinition wrapperDefinition,
         MethodBase target,
-        List<Instruction> spine) {
-        List<Instruction> allMatches = ConstantMatcher.FindMatches(spine, constant.Value);
+        List<Instruction> spine,
+        List<Instruction> preSpliceSpine) {
+        List<Instruction> allMatches = ConstantMatcher.FindMatches(preSpliceSpine, constant.Value);
         if (allMatches.Count == 0) {
             throw new ConcordEmitException(
                 "CONC037",
@@ -1756,17 +2068,239 @@ public static class WrapperComposer {
                 injectedMembers,
                 valueLocal));
 
-            int matchIndex = spine.IndexOf(match);
+            int matchIndex = SpliceIndexOf(spine, match);
             spine.InsertRange(matchIndex + 1, splice);
         }
     }
 
+    // preSpliceSpine is the spine before any injection spliced into it. Matching and By counting run
+    // against it so Concord's own splices never renumber another injection's occurrences; the splice
+    // still goes into the live spine, and every match is an object that list holds.
+    private static void ProcessLocalInjection(
+        Injection injection,
+        InjectAt.Local local,
+        MethodDefinition wrapperDefinition,
+        MethodBase target,
+        ProtocolLocals locals,
+        List<Instruction> spine,
+        List<Instruction> preSpliceSpine) {
+        VariableDefinition slot = LocalResolver.Resolve(
+            wrapperDefinition.Body, locals, local.LocalType, local.Ordinal, local.Index, local.Name, injection.InjectionMethod, target);
+
+        RejectIndirectlyWrittenSlot(preSpliceSpine, slot, local, injection.InjectionMethod, target);
+        RejectLoadOnTheResultSlot(preSpliceSpine, slot, local, locals, injection.InjectionMethod, target);
+
+        IReadOnlyList<Instruction> scope = CallSiteQuery.Narrow(preSpliceSpine, local.Slice, target);
+        List<Instruction> allMatches = LocalAccessMatcher.FindMatches(scope, slot, local.Access);
+
+        if (allMatches.Count == 0 || local.By > allMatches.Count) {
+            string wanted = local.By == 0 ? "every " + AccessName(local.Access) : $"{AccessName(local.Access)} {local.By}";
+            throw new ConcordEmitException(
+                "CONC155",
+                LocalResolver.Opener(injection.InjectionMethod, target) + $" targets {wanted} of slot {slot.Index} " +
+                $"('{local.LocalType}'), but {allMatches.Count} {AccessName(local.Access)}(s) exist {CallSiteQuery.ScopeName(local.Slice is not null)}.") {
+                LocalBindingMethod = injection.InjectionMethod,
+                BrokenByAForeignEdit = SomethingElseMovedTheCount(target, slot, local, locals, allMatches.Count),
+            };
+        }
+
+        List<Instruction> matches = CallSiteQuery.Select(
+            allMatches, local.By, target, $"{AccessName(local.Access)} of '{local.LocalType}'", local.Slice is not null);
+
+        ValidateValueInjectionShape(injection.InjectionMethod, local.LocalType, target);
+
+        InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
+        using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
+
+        InjectionCopyRequest request = new InjectionCopyRequest(
+            injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers);
+        IReadOnlyDictionary<int, VariableDefinition> localBinding =
+            LocalResolver.Bind(request, locals, null) ?? new Dictionary<int, VariableDefinition>();
+        LocalHandleLowering? localHandles = LocalHandleLowering.Plan(
+            injectionMethodDefinition.Definition.Body, injection.InjectionMethod, wrapperDefinition.Body, locals, target);
+
+        foreach (Instruction match in matches) {
+            List<Instruction> splice = local.Access == LocalAccess.Store
+                ? StoreSplice(injectionMethodDefinition.Definition, wrapperDefinition, target, injection, injectedMembers, slot, localBinding, localHandles)
+                : LoadSplice(injectionMethodDefinition.Definition, wrapperDefinition, target, injection, injectedMembers, slot, localBinding, localHandles);
+
+            int matchIndex = SpliceIndexOf(spine, match);
+            spine.InsertRange(matchIndex + 1, splice);
+        }
+    }
+
+    // The matched stloc already left the value in the slot, so the copied body reads it from there
+    // and the trailing stloc writes the replacement back over it.
+    private static List<Instruction> StoreSplice(
+        MethodDefinition injectionDefinition,
+        MethodDefinition wrapperDefinition,
+        MethodBase target,
+        Injection injection,
+        InjectedMemberMap injectedMembers,
+        VariableDefinition slot,
+        IReadOnlyDictionary<int, VariableDefinition> localBinding,
+        LocalHandleLowering? localHandles) {
+        List<Instruction> splice = BodyCopier.CopyValueInjection(
+            injectionDefinition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers, slot, localBinding, localHandles);
+        splice.Add(Instruction.Create(OpCodes.Stloc, slot));
+        return splice;
+    }
+
+    // The matched ldloc left the value on the stack, so it spills into a temp the copied body reads,
+    // and the body's result stays on the stack in its place. The slot itself is not written.
+    private static List<Instruction> LoadSplice(
+        MethodDefinition injectionDefinition,
+        MethodDefinition wrapperDefinition,
+        MethodBase target,
+        Injection injection,
+        InjectedMemberMap injectedMembers,
+        VariableDefinition slot,
+        IReadOnlyDictionary<int, VariableDefinition> localBinding,
+        LocalHandleLowering? localHandles) {
+        VariableDefinition loaded = new VariableDefinition(slot.VariableType);
+        wrapperDefinition.Body.Variables.Add(loaded);
+
+        List<Instruction> splice = new List<Instruction> { Instruction.Create(OpCodes.Stloc, loaded) };
+        splice.AddRange(BodyCopier.CopyValueInjection(
+            injectionDefinition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers, loaded, localBinding, localHandles));
+        return splice;
+    }
+
+    // Another mod having a transpiler on the target is not causation, so the question is asked
+    // exactly: would the count the author wrote against have held on the target's own IL? Equal means
+    // the By was always wrong and they have to fix it, so throw. Different means something else moved
+    // it, and dropping this one injection beats failing the target for everyone. Only runs on the
+    // failure path, so the second Cecil read costs nothing in the normal case.
+    private static bool SomethingElseMovedTheCount(
+        MethodBase target, VariableDefinition slot, InjectAt.Local local, ProtocolLocals locals, int composedCount) {
+        if (slot.Index >= locals.RawLocalCount) {
+            return true;
+        }
+
+        try {
+            using DynamicMethodDefinition original = new DynamicMethodDefinition(target);
+            MethodBody body = original.Definition.Body;
+            if (slot.Index >= body.Variables.Count) {
+                return true;
+            }
+
+            List<Instruction> own = new List<Instruction>(body.Instructions);
+            IReadOnlyList<Instruction> scope = CallSiteQuery.Narrow(own, local.Slice, target);
+            return LocalAccessMatcher.FindMatches(scope, body.Variables[slot.Index], local.Access).Count != composedCount;
+        } catch (ConcordEmitException) {
+            // A Slice that no longer narrows against the bare body says nothing about who moved the
+            // count, and guessing "foreign" here would evict the author's own mistake.
+            return false;
+        }
+    }
+
+    // Only an address the body writes through is a problem: the store never fires for it, because
+    // an indirect write leaves no stloc to match. An address handed to a call is fine, since a
+    // read-only call mutates nothing and every real assignment still emits its own store. This
+    // reads the whole spine and ignores Slice on purpose: a write outside the range still decides
+    // whether the slot is writable at all.
+    private static void RejectIndirectlyWrittenSlot(
+        IReadOnlyList<Instruction> spine, VariableDefinition slot, InjectAt.Local local, MethodBase injectionMethod, MethodBase target) {
+        if (local.Access != LocalAccess.Store || !LocalAccessMatcher.HasIndirectWrite(spine, slot)) {
+            return;
+        }
+
+        throw new ConcordEmitException(
+            "CONC154",
+            LocalResolver.Opener(injectionMethod, target) + $" targets a store of slot {slot.Index} ('{local.LocalType}'), " +
+            "but the body writes that slot through its address. In-place mutation will not be seen: an indirect write leaves no " +
+            "store to match, so the injection would silently miss it and the value would look like it never changed. Target a slot " +
+            "the body assigns by value.") {
+            LocalBindingMethod = injectionMethod,
+        };
+    }
+
+    // NormalizeReturnSites clones the shared 'ldloc' feeding the return into every branch site, so
+    // the load count on the result slot goes from one to one per return path. It only runs when
+    // some injection uses At.Return or At.Tail, so an unrelated mod would decide what By means.
+    // One return path is safe: cloning one load into one site leaves the count where it was.
+    private static void RejectLoadOnTheResultSlot(
+        IReadOnlyList<Instruction> spine, VariableDefinition slot, InjectAt.Local local, ProtocolLocals locals, MethodBase injectionMethod, MethodBase target) {
+        if (local.Access != LocalAccess.Load) {
+            return;
+        }
+
+        int paths = CountResultPaths(spine, slot, locals);
+        if (paths < 2) {
+            return;
+        }
+
+        throw new ConcordEmitException(
+            "CONC159",
+            LocalResolver.Opener(injectionMethod, target) + $" targets a load of slot {slot.Index} ('{local.LocalType}'), " +
+            $"but that slot carries the method's result across {paths} return paths. An unrelated At.Return or At.Tail injection " +
+            $"rewrites the one shared read into one read per path, so the load count moves between 1 and {paths} depending on which " +
+            "other mods are installed. Target the store instead, or use At.Return.") {
+            LocalBindingMethod = injectionMethod,
+        };
+    }
+
+    // How many return paths would read the slot once normalization has run. After it has, that is
+    // the number of 'ldloc slot; stloc result' sites. Before it has, there is one such site and the
+    // answer is how many branches jump to it, which is what NormalizeReturnSites would clone into.
+    private static int CountResultPaths(IReadOnlyList<Instruction> spine, VariableDefinition slot, ProtocolLocals locals) {
+        List<int> sites = new List<int>();
+        for (int i = 0; i < spine.Count - 1; i++) {
+            if (LocalAccessMatcher.IsLoad(spine[i], slot) && StoresTheResult(spine[i + 1], locals)) {
+                sites.Add(i);
+            }
+        }
+
+        if (sites.Count != 1) {
+            return sites.Count;
+        }
+
+        // NormalizeReturnSites only clones a shared load nothing falls through into, so a load that
+        // is both branched to and fallen into keeps its single read and the count cannot move.
+        // Counting the branches anyway would reject a CONC159 the normalizer would never touch.
+        int loadIndex = sites[0];
+        if (loadIndex == 0 || !IsUnconditionalExit(spine[loadIndex - 1].OpCode)) {
+            return 1;
+        }
+
+        int branches = 0;
+        foreach (Instruction instruction in spine) {
+            if (IsUnconditionalBranch(instruction.OpCode) && ReferenceEquals(instruction.Operand, spine[loadIndex])) {
+                branches++;
+            }
+        }
+
+        return branches == 0 ? 1 : branches;
+    }
+
+    private static bool StoresTheResult(Instruction instruction, ProtocolLocals locals) {
+        return (locals.ReturnValue is not null && LocalAccessMatcher.IsStore(instruction, locals.ReturnValue))
+            || (locals.SpliceValue is not null && LocalAccessMatcher.IsStore(instruction, locals.SpliceValue));
+    }
+
+    private static bool IsUnconditionalBranch(OpCode opCode) {
+        return opCode == OpCodes.Br || opCode == OpCodes.Br_S || opCode == OpCodes.Leave || opCode == OpCodes.Leave_S;
+    }
+
+    private static string AccessName(LocalAccess access) {
+        return access == LocalAccess.Store ? "store" : "load";
+    }
+
+    // A [Local] sibling is not part of the value shape: it reads another slot in the same signature,
+    // which is the whole point of At.Local. Only the non-[Local] parameters are counted here.
     private static void ValidateValueInjectionShape(MethodBase injectionMethod, Type valueType, MethodBase target) {
-        ParameterInfo[] parameters = injectionMethod.GetParameters();
-        if (parameters.Length != 1) {
+        List<ParameterInfo> parameters = [];
+        foreach (ParameterInfo parameter in injectionMethod.GetParameters()) {
+            if (parameter.GetCustomAttribute<LocalAttribute>() is null
+                && !LocalHandleLowering.IsLocalHandleType(parameter.ParameterType)) {
+                parameters.Add(parameter);
+            }
+        }
+
+        if (parameters.Count != 1) {
             throw new ConcordEmitException(
                 CodeCONC039,
-                $"Value injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' on '{target.DeclaringType?.Name}.{target.Name}' must declare exactly one parameter, got {parameters.Length}.");
+                $"Value injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' on '{target.DeclaringType?.Name}.{target.Name}' must declare exactly one parameter, got {parameters.Count}.");
         }
 
         Type returnType = injectionMethod is MethodInfo methodInfo ? methodInfo.ReturnType : typeof(void);
@@ -2111,7 +2645,7 @@ public static class WrapperComposer {
             site.OpCode,
             shape);
 
-        int siteIndex = spine.IndexOf(site);
+        int siteIndex = SpliceIndexOf(spine, site);
         spine.RemoveAt(siteIndex);
 
         List<Instruction> replacement = new List<Instruction>(spill.Count + wrapBody.Count + 1);

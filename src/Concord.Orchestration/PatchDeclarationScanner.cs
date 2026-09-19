@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Reflection;
 using Concord.AttachedData;
+using Concord.Detour;
 using Concord.Emit;
 
 namespace Concord.Orchestration;
@@ -22,7 +23,7 @@ public static class PatchDeclarationScanner {
     /// <param name="assembly">The assembly to scan.</param>
     /// <param name="patches">The applier that applies patches.</param>
     /// <param name="props">The registry that registers attached-properties.</param>
-    /// <param name="log">Receives each per-declaration error. Defaults to stderr and the debug listener.</param>
+    /// <param name="log">Receives each per-declaration error. Defaults to stderr and any trace listener.</param>
     public static void ScanAssembly(Assembly assembly, IPatchApplier patches, IAttachedPropertyRegistry props, Action<string>? log = null) {
         ScanDeclarations(assembly.GetTypes(), patches, props, log);
     }
@@ -34,7 +35,7 @@ public static class PatchDeclarationScanner {
     /// <param name="declarations">The declaration types to scan.</param>
     /// <param name="patches">The applier that applies patches.</param>
     /// <param name="props">The registry that registers attached-properties.</param>
-    /// <param name="log">Receives each per-declaration error. Defaults to stderr and the debug listener.</param>
+    /// <param name="log">Receives each per-declaration error. Defaults to stderr and any trace listener.</param>
     public static void ScanDeclarations(IEnumerable<Type> declarations, IPatchApplier patches, IAttachedPropertyRegistry props, Action<string>? log = null) {
         foreach (Type type in declarations) {
             try {
@@ -42,7 +43,7 @@ public static class PatchDeclarationScanner {
             } catch (ConcordDeclarationException ex) {
                 string message = "[Concord] declaration error in " + type.FullName + ": " + ex.Message;
                 if (log is null) {
-                    Debug.WriteLine(message);
+                    PatchLog.Write(message);
                     Console.Error.WriteLine(message);
                 } else {
                     log(message);
@@ -159,7 +160,7 @@ public static class PatchDeclarationScanner {
                 ScanExtendedEnumDeclaration(type);
                 found = true;
             } catch (ConcordDeclarationException ex) {
-                Debug.WriteLine("[Concord] declaration error in " + type.FullName + ": " + ex.Message);
+                PatchLog.Write("[Concord] declaration error in " + type.FullName + ": " + ex.Message);
                 Console.Error.WriteLine("[Concord] declaration error in " + type.FullName + ": " + ex.Message);
             }
         }
@@ -256,6 +257,7 @@ public static class PatchDeclarationScanner {
                 at = at switch {
                     InjectAt.Invoke invoke => invoke with { Slice = slice.ResolvedRange },
                     InjectAt.NewObj newObj => newObj with { Slice = slice.ResolvedRange },
+                    InjectAt.Local local => local with { Slice = slice.ResolvedRange },
                     _ => at,
                 };
             }
@@ -277,6 +279,16 @@ public static class PatchDeclarationScanner {
         if (inject.HasConstant && inject.At != Concord.At.Constant) {
             throw new ConcordDeclarationException(
                 InjectOnPrefix + declaration.FullName + " passes a constant but position " + inject.At + ". Constant injections require At.Constant.");
+        }
+
+        if (inject.HasLocal && inject.At != Concord.At.Local) {
+            throw new ConcordDeclarationException(
+                InjectOnPrefix + declaration.FullName + " names a local but position " + inject.At + ". Local injections require At.Local.");
+        }
+
+        if (!inject.HasLocal && inject.At == Concord.At.Local) {
+            throw new ConcordDeclarationException(
+                InjectOnPrefix + declaration.FullName + " uses position " + inject.At + " without its dedicated constructor form.");
         }
 
         if (!inject.HasConstant &&

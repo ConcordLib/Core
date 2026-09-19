@@ -57,7 +57,7 @@ internal static class MonoModHost {
             return;
         }
 
-        Debug.WriteLine(
+        PatchLog.Write(
             $"[Concord] JIT reports version {reported}, MonoMod expected {*expected}. Trusting the JIT. "
             + "If this runtime also changed the ICorJitInfo vtable, detouring will crash.");
         *expected = reported;

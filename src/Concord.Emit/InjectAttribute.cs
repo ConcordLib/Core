@@ -14,6 +14,11 @@ public sealed class InjectAttribute : Attribute {
     private readonly Type[]? invokeParameterTypes;
     private readonly uint arg;
     private readonly object? constant;
+    private readonly Type? localType;
+    private readonly LocalAccess localAccess;
+    private readonly uint localOrdinal;
+    private readonly int localIndex = -1;
+    private readonly string? localName;
 
     /// <summary>
     ///     Initializes a new injection declaration at the given position.
@@ -130,6 +135,39 @@ public sealed class InjectAttribute : Attribute {
     }
 
     /// <summary>
+    ///     Initializes a new injection declaration targeting a read or write of one of the target method's
+    ///     own local variables.
+    /// </summary>
+    /// <param name="method">The target method name. Private names are validated by Concord tooling.</param>
+    /// <param name="localType">The declared type of the local to match.</param>
+    /// <param name="access">Whether to match writes to the local or reads of it.</param>
+    /// <param name="at">The injection position. Must be <see cref="At.Local" />.</param>
+    /// <param name="by">The 1-based occurrence of the access to target, or <c>0</c> for every match.</param>
+    /// <param name="ordinal">
+    ///     The 1-based occurrence of <paramref name="localType" /> among the target's locals, in slot order,
+    ///     or <c>0</c> to leave it unset.
+    /// </param>
+    /// <param name="index">A raw local slot in the target body, or <c>-1</c> to leave it unset.</param>
+    /// <param name="name">The local's source name, read from a pdb when one is present.</param>
+    /// <param name="parameterTypes">
+    ///     When non-<see langword="null" />, selects a specific overload of <paramref name="method" /> by
+    ///     parameter types, allowing ambiguous overloads to be disambiguated.
+    /// </param>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S107", Justification = "Public attribute constructor. The parameters are the injection's authored call-site shape and cannot be bundled without breaking the API.")]
+    public InjectAttribute(string method, Type localType, LocalAccess access, At at, uint by = 0, uint ordinal = 0, int index = -1, string? name = null, Type[]? parameterTypes = null) {
+        Method = method;
+        At = at;
+        this.localType = localType;
+        this.localAccess = access;
+        this.by = by;
+        this.localOrdinal = ordinal;
+        this.localIndex = index;
+        this.localName = name;
+        ParameterTypes = parameterTypes;
+        TargetsConstructor = false;
+    }
+
+    /// <summary>
     ///     Gets the target method name this injection attaches to, or <see langword="null" /> when
     ///     <see cref="TargetsConstructor" /> is <see langword="true" />.
     /// </summary>
@@ -174,6 +212,12 @@ public sealed class InjectAttribute : Attribute {
     internal bool HasConstant => constant is not null;
 
     /// <summary>
+    ///     Gets a value indicating whether this declaration was created through the local-targeting
+    ///     constructor.
+    /// </summary>
+    internal bool HasLocal => localType is not null;
+
+    /// <summary>
     ///     Gets the <see cref="InjectAt" /> corresponding to this injection's position.
     ///     Returns <see cref="InjectAt.Constant" /> when a constant-targeting constructor was used,
     ///     <see cref="InjectAt.Invoke" /> when the invoke constructor was used, otherwise maps from <see cref="At" />.
@@ -182,6 +226,10 @@ public sealed class InjectAttribute : Attribute {
         get {
             if (constant is not null) {
                 return new InjectAt.Constant(constant, by);
+            }
+
+            if (localType is not null) {
+                return new InjectAt.Local(localType, localAccess, by, localOrdinal, localIndex, localName);
             }
 
             if (invokeDeclaringType is not null) {

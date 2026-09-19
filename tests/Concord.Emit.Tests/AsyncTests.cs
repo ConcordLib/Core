@@ -205,6 +205,27 @@ public sealed class AsyncTests {
             () => WrapperComposer.ValidateBodySelection(target, target, around));
 
         Assert.Equal("CONC123", ex.Code);
+        Assert.Contains("at At.Around,", ex.Message);
+        Assert.DoesNotContain("At.Invoke", ex.Message);
+    }
+
+    // Same code, same message shape, different position: an Around shift on a call site has to read
+    // differently from a whole-method Around or the two cases are indistinguishable in a diagnostic.
+    [Fact]
+    public void ValidateBodySelection_DeclaredWithInvokeAroundShift_NamesTheCallSitePosition() {
+        MethodBase target = typeof(AsyncTarget).GetMethod(nameof(AsyncTarget.Compute))!;
+        MethodBase injectionMethod = typeof(AsyncInjectionMethods).GetMethod(nameof(AsyncInjectionMethods.Observe))!;
+        Injection shifted = new Injection(
+            injectionMethod,
+            new InjectAt.Invoke(typeof(AsyncTarget), nameof(AsyncTarget.Compute), At.Around),
+            "test",
+            0);
+
+        ConcordEmitException ex = Assert.Throws<ConcordEmitException>(
+            () => WrapperComposer.ValidateBodySelection(target, target, shifted));
+
+        Assert.Equal("CONC123", ex.Code);
+        Assert.Contains("at At.Invoke/At.Around,", ex.Message);
     }
 
     [Fact]

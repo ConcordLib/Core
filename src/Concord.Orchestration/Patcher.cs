@@ -36,6 +36,30 @@ public static class Patcher {
     }
 
     /// <summary>
+    ///     Registers the host's log, so Concord's non-fatal patch reports reach the game log instead of
+    ///     <see cref="Trace" />. An evicted <c>[Local]</c> is the main one: the injection is gone and
+    ///     nothing throws, so without a log the owning mod never learns why its code stopped running.
+    /// </summary>
+    /// <param name="log">Receives each report, or null to fall back to <see cref="Trace" />.</param>
+    public static void UseLog(Action<string>? log) {
+        PatchLog.Sink = log;
+    }
+
+    /// <summary>
+    ///     Registers an adapter hook that maps a loaded module to the file its debug symbols sit beside.
+    ///     <c>[Local(Name = ...)]</c> needs symbols, and it finds them through
+    ///     <see cref="Assembly.Location" />, which a host that loads an assembly from bytes leaves empty.
+    ///     RimWorld is one such host, so without this hook <c>Name</c> resolves nothing there.
+    /// </summary>
+    /// <param name="resolver">
+    ///     Returns the path to the module's file, or null to fall back to <see cref="Assembly.Location" />.
+    ///     Pass null to clear the hook.
+    /// </param>
+    public static void UseLocalNameResolver(Func<Module, string?>? resolver) {
+        LocalNames.PathResolver = resolver;
+    }
+
+    /// <summary>
     ///     Registers the adapter registry that receives every attached property declared by
     ///     <see cref="Apply(Assembly)" />. Without one, declared properties are held in memory only and the
     ///     host never learns about them.
@@ -78,7 +102,7 @@ public static class Patcher {
                     try {
                         handle.Dispose();
                     } catch (Exception ex) {
-                        Debug.WriteLine("[Concord] rollback dispose failed: " + ex.Message);
+                        PatchLog.Write("[Concord] rollback dispose failed: " + ex.Message);
                     }
                 }
 
@@ -306,7 +330,7 @@ public static class Patcher {
                     try {
                         handle.Dispose();
                     } catch (Exception ex) {
-                        Debug.WriteLine("[Concord] rollback dispose failed: " + ex.Message);
+                        PatchLog.Write("[Concord] rollback dispose failed: " + ex.Message);
                     }
                 }
 

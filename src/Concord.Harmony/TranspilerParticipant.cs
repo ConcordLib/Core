@@ -43,7 +43,11 @@ internal static class TranspilerParticipant {
         try {
             Concord.ITranspilerContext context = WrapperComposer.CreateStreamContext(opened);
             List<Concord.CodeInstruction> incoming = CodeInstructionConverter.ToConcord(stream, context, out HarmonyStreamContext harmonyContext);
-            List<Concord.CodeInstruction> outgoing = WrapperComposer.TransformStream(opened, incoming, ordered, context);
+            List<Concord.CodeInstruction> outgoing = WrapperComposer.TransformStream(opened, incoming, ordered, context, out IReadOnlyList<RejectedInjection> rejected);
+            foreach (RejectedInjection rejection in rejected) {
+                Log?.Invoke(CoexistenceLogMarkers.InjectionEvicted + " " + original.Name + " owner '" + rejection.Owner + "': " + rejection.Message);
+            }
+
             return CodeInstructionConverter.FromConcord(outgoing, harmonyContext, generator);
         } catch (ConcordEmitException ex) {
             LastStreamFailure = ex;

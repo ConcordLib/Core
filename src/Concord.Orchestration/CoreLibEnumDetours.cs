@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
+using Concord.Detour;
 using Concord.Emit;
 
 namespace Concord;
@@ -59,7 +60,7 @@ public static class CoreLibEnumDetours {
             try {
                 handle.Dispose();
             } catch (Exception ex) {
-                Debug.WriteLine("[Concord] CONC141: could not revert an Enum detour: " + ex.Message);
+                PatchLog.Write("[Concord] CONC141: could not revert an Enum detour: " + ex.Message);
             }
         }
 
@@ -84,7 +85,7 @@ public static class CoreLibEnumDetours {
 
     private static void Report(string name, string reason) {
         string message = "[Concord] CONC141: could not detour Enum." + name + ", " + reason + ". The rest of the set stays installed.";
-        Debug.WriteLine(message);
+        PatchLog.Write(message);
         Console.Error.WriteLine(message);
     }
 }

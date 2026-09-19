@@ -18,7 +18,7 @@ using Label = System.Reflection.Emit.Label;
 ///     Converts between <see cref="HarmonyLib.CodeInstruction" /> streams and
 ///     <see cref="Concord.CodeInstruction" /> streams so <see cref="TranspilerParticipant" /> can compose
 ///     Concord's injections onto Harmony's own transpiler stream via
-///     <see cref="WrapperComposer.TransformStream" />.
+///     <c>WrapperComposer.TransformStream</c>.
 /// </summary>
 internal static class CodeInstructionConverter {
     private const string CodeCalliRejected = "CONC124";
@@ -61,7 +61,7 @@ internal static class CodeInstructionConverter {
     }
 
     /// <summary>Converts a composed Concord instruction stream back into a Harmony transpiler stream.</summary>
-    /// <param name="composed">The composed Concord stream, as returned by <see cref="WrapperComposer.TransformStream" />.</param>
+    /// <param name="composed">The composed Concord stream, as returned by <c>WrapperComposer.TransformStream</c>.</param>
     /// <param name="context">The label/local identity captured by <see cref="ToConcord" /> for this stream.</param>
     /// <param name="generator">Harmony's own <see cref="ILGenerator" />, used to mint labels/locals composition introduced.</param>
     /// <returns>The outgoing Harmony stream.</returns>

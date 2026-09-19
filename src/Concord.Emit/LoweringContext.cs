@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 using Mono.Collections.Generic;
@@ -16,6 +17,12 @@ namespace Concord.Emit;
 /// <param name="ArgRemap">Maps injection method argument indices to target argument indices.</param>
 /// <param name="DestinationVariables">The destination wrapper body's variable collection.</param>
 /// <param name="InjectionDeclaringType">The type declaring the injection method whose body is being copied.</param>
+/// <param name="InjectionMethod">The injection method whose body is being copied, used for diagnostic messages.</param>
+/// <param name="LocalArgBinding">
+///     Maps an injection argument index to the target local its <see cref="LocalAttribute" /> selected, or
+///     null when the injection binds no local. Only real target slots, never a capture spill or a bound
+///     constant, so an address taken of one has to be copied before it escapes.
+/// </param>
 internal readonly record struct LoweringContext(
     ModuleDefinition Module,
     Dictionary<VariableDefinition, VariableDefinition> VariableMap,
@@ -23,4 +30,6 @@ internal readonly record struct LoweringContext(
     InjectedMemberMap InjectedMembers,
     Dictionary<int, int> ArgRemap,
     Collection<VariableDefinition> DestinationVariables,
-    Type InjectionDeclaringType);
+    Type InjectionDeclaringType,
+    MethodBase InjectionMethod,
+    IReadOnlyDictionary<int, VariableDefinition>? LocalArgBinding = null);

@@ -55,4 +55,10 @@ public static class CoexistenceLogMarkers {
     ///     pulled its injections out of that rebuild rather than break the other patcher.
     /// </summary>
     public const string RouteWithdrawn = "[Concord.Coex] route-withdrawn";
+
+    /// <summary>
+    ///     One injection's local selector stopped resolving because another mod changed the composed
+    ///     body, so Concord dropped that injection and kept every other one on the target.
+    /// </summary>
+    public const string InjectionEvicted = "[Concord.Coex] injection-evicted";
 }

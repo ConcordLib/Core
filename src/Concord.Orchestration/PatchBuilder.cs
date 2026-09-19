@@ -354,17 +354,57 @@ public sealed class PatchBuilder {
     }
 
     /// <summary>
-    ///     Bounds the most recently recorded invoke or construction injection to the supplied range.
+    ///     Records a local-access injection on a read or write of one of the target's own locals, using the
+    ///     supplied injection method.
+    /// </summary>
+    /// <param name="localType">The declared type of the local to match.</param>
+    /// <param name="access">Whether to match writes to the local or reads of it.</param>
+    /// <param name="injectionMethod">The method that supplies the injected body.</param>
+    /// <param name="by">The 1-based occurrence to target, or <c>0</c> for every matching access.</param>
+    /// <param name="ordinal">
+    ///     The 1-based occurrence of <paramref name="localType" /> among the target's locals, in slot order,
+    ///     or <c>0</c> to leave it unset.
+    /// </param>
+    /// <param name="index">A raw local slot in the target body, or <c>-1</c> to leave it unset.</param>
+    /// <param name="name">The local's source name, read from a pdb when one is present.</param>
+    /// <returns>This builder, for chaining.</returns>
+    public PatchBuilder Local(Type localType, LocalAccess access, MethodInfo injectionMethod, uint by = 0, uint ordinal = 0, int index = -1, string? name = null) {
+        return Inject(new InjectAt.Local(localType, access, by, ordinal, index, name), injectionMethod);
+    }
+
+    /// <summary>
+    ///     Records a local-access injection on a read or write of one of the target's own locals, resolving
+    ///     the injection method by name.
+    /// </summary>
+    /// <param name="localType">The declared type of the local to match.</param>
+    /// <param name="access">Whether to match writes to the local or reads of it.</param>
+    /// <param name="injectionMethodType">The type that declares the injection method.</param>
+    /// <param name="injectionMethodName">The name of the injection method.</param>
+    /// <param name="by">The 1-based occurrence to target, or <c>0</c> for every matching access.</param>
+    /// <param name="ordinal">
+    ///     The 1-based occurrence of <paramref name="localType" /> among the target's locals, in slot order,
+    ///     or <c>0</c> to leave it unset.
+    /// </param>
+    /// <param name="index">A raw local slot in the target body, or <c>-1</c> to leave it unset.</param>
+    /// <param name="name">The local's source name, read from a pdb when one is present.</param>
+    /// <returns>This builder, for chaining.</returns>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S107", Justification = "Fluent overload mirroring the [Inject] local-access constructor's authored shape.")]
+    public PatchBuilder Local(Type localType, LocalAccess access, Type injectionMethodType, string injectionMethodName, uint by = 0, uint ordinal = 0, int index = -1, string? name = null) {
+        return Inject(new InjectAt.Local(localType, access, by, ordinal, index, name), ResolveInjectionMethod(injectionMethodType, injectionMethodName));
+    }
+
+    /// <summary>
+    ///     Bounds the most recently recorded invoke, construction, or local-access injection to the supplied range.
     /// </summary>
     /// <param name="range">The range that limits call-site matching and occurrence counting.</param>
     /// <returns>This builder, for chaining.</returns>
     /// <exception cref="ConcordDeclarationException">
-    ///     Thrown when no injection has been recorded, or the most recently recorded injection is not an invoke or
-    ///     construction injection.
+    ///     Thrown when no injection has been recorded, or the most recently recorded injection is not an invoke,
+    ///     construction, or local-access injection.
     /// </exception>
     public PatchBuilder Slice(SliceRange range) {
         if (injections.Count == 0) {
-            throw new ConcordDeclarationException("Slice requires a preceding invoke or construction injection.");
+            throw new ConcordDeclarationException("Slice requires a preceding invoke, construction, or local-access injection.");
         }
 
         int index = injections.Count - 1;
@@ -372,7 +412,8 @@ public sealed class PatchBuilder {
         InjectAt sliced = latest.At switch {
             InjectAt.Invoke invoke => invoke with { Slice = range },
             InjectAt.NewObj newObj => newObj with { Slice = range },
-            _ => throw new ConcordDeclarationException("Slice requires the most recently recorded injection to target an invoke or construction site."),
+            InjectAt.Local local => local with { Slice = range },
+            _ => throw new ConcordDeclarationException("Slice requires the most recently recorded injection to target an invoke, construction, or local-access site."),
         };
         injections[index] = latest with { At = sliced };
         return this;

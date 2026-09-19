@@ -31,4 +31,10 @@ internal sealed record ProtocolLocals(
     ///     the target's own locals plus any a transpiler added, and nothing Concord declared after.
     /// </summary>
     public int SearchLocalCount { get; init; }
+
+    /// <summary>
+    ///     Indices of the wrapper locals some instruction in the post-transpiler spine names. A slot
+    ///     outside this set has no live use, so binding it would read zero forever.
+    /// </summary>
+    public HashSet<int> ReferencedSlots { get; init; } = [];
 }

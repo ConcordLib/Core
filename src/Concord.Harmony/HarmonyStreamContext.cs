@@ -10,7 +10,7 @@ using Label = System.Reflection.Emit.Label;
 /// <summary>
 ///     Carries the SRE <see cref="Label" /> and local-variable identity a Harmony transpiler
 ///     stream needs that Concord's IL model cannot itself express, across one
-///     <see cref="CodeInstructionConverter.ToConcord" />/<see cref="Emit.WrapperComposer.TransformStream" />/
+///     <see cref="CodeInstructionConverter.ToConcord" />/<c>WrapperComposer.TransformStream</c>/
 ///     <see cref="CodeInstructionConverter.FromConcord" /> round trip.
 /// </summary>
 internal sealed class HarmonyStreamContext {

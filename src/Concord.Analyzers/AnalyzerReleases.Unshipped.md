@@ -39,3 +39,12 @@ CONCORD032 | Concord.Patches | Error | An [EnumMember] field must be static and 
 CONCORD033 | Concord.Patches | Warning | An extended enum member must be const to pin its value; a plain initializer is discarded.
 CONCORD034 | Concord.Patches | Error | Each extended enum member needs its own persisted id.
 CONCORD035 | Concord.Patches | Warning | An extended enum member read from a static constructor runs before Concord assigns it.
+CONCORD036 | Concord.Patches | Error | A [Local] parameter must set at most one of Ordinal, Index and Name.
+CONCORD037 | Concord.Patches | Error | A [Local] parameter at At.Head reads a local the target has not assigned yet.
+CONCORD044 | Concord.Patches | Error | A [Local] parameter requires an injection position that binds locals.
+CONCORD045 | Concord.Patches | Error | A [Local] parameter on a whole-method Around injection method binds nothing.
+CONCORD046 | Concord.Patches | Error | An At.Local position must set at most one of Ordinal, Index and Name.
+CONCORD047 | Concord.Patches | Error | The local-targeting [Inject] constructor requires At.Local, and At.Local requires it.
+CONCORD048 | Concord.Patches | Error | A LocalHandle<T> parameter requires a position where the write can still be read back.
+CONCORD049 | Concord.Patches | Error | A [Local] parameter is read-only; use LocalHandle<T> to write the slot.
+CONCORD050 | Concord.Patches | Error | One parameter must not carry both [Capture] and [Local].

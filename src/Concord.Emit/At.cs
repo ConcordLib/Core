@@ -74,4 +74,11 @@ public enum At {
     ///     exception keeps propagating once it has run.
     /// </summary>
     Finally,
+
+    /// <summary>
+    ///     Run the injection method at a read or write of one of the target's own local variables.
+    ///     The local is picked by type, and narrowed further by <c>Ordinal</c>, <c>Index</c> or
+    ///     <c>Name</c> when more than one matches.
+    /// </summary>
+    Local,
 }

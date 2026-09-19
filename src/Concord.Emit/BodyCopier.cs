@@ -84,6 +84,7 @@ internal static class BodyCopier {
         bool insideAround = false,
         IReadOnlyDictionary<int, VariableDefinition>? captureBinding = null) {
         MethodBody injectionBody = request.InjectionDefinition.Body;
+        RejectConstructedLocalHandle(injectionBody, request.InjectionMethod);
         ModuleDefinition module = request.Destination.Module;
 
         Dictionary<int, int> argRemap = BuildArgRemap(request.Target, request.InjectionMethod);
@@ -91,6 +92,14 @@ internal static class BodyCopier {
         if (captureBinding is not null) {
             foreach (int captured in captureBinding.Keys) {
                 argRemap.Remove(captured);
+            }
+        }
+
+        LocalHandleLowering? localHandles = LocalHandleLowering.Plan(
+            injectionBody, request.InjectionMethod, request.Destination.Body, locals, request.Target);
+        if (localHandles is not null) {
+            foreach (int handle in LocalHandleLowering.BoundArgIndices(request.InjectionMethod)) {
+                argRemap.Remove(handle);
             }
         }
 
@@ -103,7 +112,9 @@ internal static class BodyCopier {
         int operationArgIndex = ControlHandleLowering.FindOperationArgIndex(request.InjectionMethod);
 
         Dictionary<VariableDefinition, VariableDefinition> variableMap = CopyInjectionLocals(injectionBody, request.Destination.Body, module);
-        LoweringContext ctx = new LoweringContext(module, variableMap, injectionBody.Variables, request.InjectedMembers, argRemap, request.Destination.Body.Variables, request.InjectionMethod.DeclaringType!);
+        LoweringContext ctx = new LoweringContext(
+            module, variableMap, injectionBody.Variables, request.InjectedMembers, argRemap, request.Destination.Body.Variables,
+            request.InjectionMethod.DeclaringType!, request.InjectionMethod, LocalOnly(captureBinding, request.InjectionMethod));
 
         List<Instruction> boundPrologue = [];
         Dictionary<int, VariableDefinition> boundConstants =
@@ -121,7 +132,8 @@ internal static class BodyCopier {
             spineCopies,
             insideAround,
             captureBinding,
-            boundConstants);
+            boundConstants,
+            localHandles);
 
         List<(Instruction Source, List<Instruction> Emitted)> entries =
             new List<(Instruction Source, List<Instruction> Emitted)>(injectionBody.Instructions.Count);
@@ -153,21 +165,53 @@ internal static class BodyCopier {
     ///     result local and branching to a trailing splice-end block that reloads it, leaving exactly the
     ///     replacement value on the evaluation stack.
     /// </summary>
+    /// <param name="injectionDefinition">The Cecil definition of the decompiled injection method body.</param>
+    /// <param name="destination">The wrapper method the lowered instructions are copied into.</param>
+    /// <param name="target">The original target member being patched.</param>
+    /// <param name="injectionMethod">The reflection handle for the injection method.</param>
+    /// <param name="injectedMembers">Maps injected member declarations to the resolved target members.</param>
+    /// <param name="valueLocal">The local holding the value the injection reads and replaces.</param>
+    /// <param name="localBinding">
+    ///     Maps an injection argument index to the wrapper local its <see cref="LocalAttribute" /> selected.
+    ///     Only <see cref="InjectAt.Local" /> supplies one; every other value position leaves it null, and a
+    ///     <see cref="LocalAttribute" /> parameter is then rejected rather than silently bound to nothing.
+    /// </param>
+    /// <param name="localHandles">
+    ///     Pairs <see cref="LocalHandle{T}" /> receiver loads with the Value calls that consume them, or null
+    ///     when the injection declares no handle.
+    /// </param>
     public static List<Instruction> CopyValueInjection(
         MethodDefinition injectionDefinition,
         MethodDefinition destination,
         MethodBase target,
         MethodBase injectionMethod,
         InjectedMemberMap injectedMembers,
-        VariableDefinition valueLocal) {
+        VariableDefinition valueLocal,
+        IReadOnlyDictionary<int, VariableDefinition>? localBinding = null,
+        LocalHandleLowering? localHandles = null) {
         BoundConstants.RejectDeclarations(injectionMethod, "a value injection");
+        if (localBinding is null) {
+            RejectLocalParameters(injectionMethod, "a value injection");
+        }
 
         MethodBody injectionBody = injectionDefinition.Body;
+        RejectConstructedLocalHandle(injectionBody, injectionMethod);
         ModuleDefinition module = destination.Module;
 
         Dictionary<int, int> argRemap = BuildArgRemap(target, injectionMethod);
-        int valueArgIndex = injectionMethod.IsStatic ? 0 : 1;
+        int valueArgIndex = ValueParameterIndex(injectionMethod);
         argRemap.Remove(valueArgIndex);
+        if (localBinding is not null) {
+            foreach (int bound in localBinding.Keys) {
+                argRemap.Remove(bound);
+            }
+        }
+
+        if (localHandles is not null) {
+            foreach (int handle in LocalHandleLowering.BoundArgIndices(injectionMethod)) {
+                argRemap.Remove(handle);
+            }
+        }
 
         VariableDefinition resultLocal = new VariableDefinition(valueLocal.VariableType);
         destination.Body.Variables.Add(resultLocal);
@@ -176,13 +220,15 @@ internal static class BodyCopier {
         Instruction spliceEnd = Instruction.Create(OpCodes.Nop);
 
         Dictionary<VariableDefinition, VariableDefinition> variableMap = CopyInjectionLocals(injectionBody, destination.Body, module);
-        LoweringContext ctx = new LoweringContext(module, variableMap, injectionBody.Variables, injectedMembers, argRemap, destination.Body.Variables, injectionMethod.DeclaringType!);
+        LoweringContext ctx = new LoweringContext(
+            module, variableMap, injectionBody.Variables, injectedMembers, argRemap, destination.Body.Variables,
+            injectionMethod.DeclaringType!, injectionMethod, localBinding);
 
         List<(Instruction Source, List<Instruction> Emitted)> entries =
             new List<(Instruction Source, List<Instruction> Emitted)>(injectionBody.Instructions.Count);
 
         foreach (Instruction source_instruction in injectionBody.Instructions) {
-            List<Instruction> emitted = LowerValueInstruction(source_instruction, ctx, valueArgIndex, valueLocal, resultLocal, spliceEnd);
+            List<Instruction> emitted = LowerValueInstruction(source_instruction, ctx, valueArgIndex, valueLocal, resultLocal, spliceEnd, localBinding, localHandles);
             entries.Add((source_instruction, emitted));
         }
 
@@ -224,8 +270,10 @@ internal static class BodyCopier {
         OpCode originalOpCode,
         CallSiteShape shape) {
         BoundConstants.RejectDeclarations(request.InjectionMethod, "an invoke-wrap injection");
+        RejectLocalParameters(request.InjectionMethod, "an invoke-wrap injection");
 
         MethodBody injectionBody = request.InjectionDefinition.Body;
+        RejectConstructedLocalHandle(injectionBody, request.InjectionMethod);
         ModuleDefinition module = request.Destination.Module;
 
         Dictionary<int, VariableDefinition> wrapArgBinding = BuildWrapArgBinding(request.InjectionMethod, argLocals, shape);
@@ -244,7 +292,9 @@ internal static class BodyCopier {
         }
 
         Dictionary<VariableDefinition, VariableDefinition> variableMap = CopyInjectionLocals(injectionBody, request.Destination.Body, module);
-        LoweringContext ctx = new LoweringContext(module, variableMap, injectionBody.Variables, request.InjectedMembers, thisRemap, request.Destination.Body.Variables, request.InjectionMethod.DeclaringType!);
+        LoweringContext ctx = new LoweringContext(
+            module, variableMap, injectionBody.Variables, request.InjectedMembers, thisRemap, request.Destination.Body.Variables,
+            request.InjectionMethod.DeclaringType!, request.InjectionMethod);
 
         WrapLoweringSite site = new WrapLoweringSite(
             operationArgIndex,
@@ -309,6 +359,64 @@ internal static class BodyCopier {
         }
     }
 
+    /// <summary>
+    ///     Rewrites local operands that name a spine template slot to name the running
+    ///     <see cref="SpineCopy" />'s clone instead, so a body spliced into that copy reads the slot the
+    ///     copy actually wrote. The opcode never changes.
+    /// </summary>
+    /// <param name="spliceBody">The instruction list to rewrite in place.</param>
+    /// <param name="localMap">Maps a template local to this copy's clone of it.</param>
+    internal static void RewriteSpliceLocals(
+        List<Instruction> spliceBody,
+        IReadOnlyDictionary<VariableDefinition, VariableDefinition> localMap) {
+        foreach (Instruction instruction in spliceBody) {
+            if (instruction.Operand is VariableDefinition slot && localMap.TryGetValue(slot, out VariableDefinition? clone)) {
+                instruction.Operand = clone;
+            }
+        }
+    }
+
+    // C# evaluates an assigned value AFTER loading the receiver, so `ch.ReturnValue = Build()`
+    // puts a whole expression between the handle load and the setter that consumes it. Looking only
+    // at the next instruction rejects every such assignment, so walk the stack forward to find the
+    // instruction that actually pops the slot this load pushed. startDepth lets a caller resume the
+    // walk partway through, once an earlier call has already accounted for the slots above it.
+    internal static Instruction? FindStackConsumer(Instruction load, int startDepth = 1) {
+        return FindStackConsumer(load, startDepth, out _);
+    }
+
+    /// <summary>
+    ///     <see cref="FindStackConsumer(Instruction, int)" />, also reporting whether control flow is what
+    ///     ended the walk, so a caller can tell "the consumer is past a branch" from "there is no consumer".
+    /// </summary>
+    /// <param name="load">The instruction whose pushed value is being traced.</param>
+    /// <param name="startDepth">How many stack slots above the traced value are already in flight.</param>
+    /// <param name="blockedByFlow">Set when a branch, return or throw stopped the walk.</param>
+    /// <returns>The instruction that pops the value, or null.</returns>
+    internal static Instruction? FindStackConsumer(Instruction load, int startDepth, out bool blockedByFlow) {
+        blockedByFlow = false;
+        int depth = startDepth;
+        for (Instruction? current = load.Next; current is not null; current = current.Next) {
+            // Control flow means the slot may be consumed on a path this linear walk cannot follow.
+            // Give up rather than accuse code the walk does not actually understand.
+            if (current.OpCode.FlowControl is FlowControl.Branch or FlowControl.Cond_Branch
+                    or FlowControl.Return or FlowControl.Throw
+                || current.OpCode == OpCodes.Dup) {
+                blockedByFlow = current.OpCode != OpCodes.Dup;
+                return null;
+            }
+
+            int pops = IlDump.PopCount(current);
+            if (pops >= depth) {
+                return current;
+            }
+
+            depth = depth - pops + IlDump.PushCount(current);
+        }
+
+        return null;
+    }
+
     private static void CopyInjectionHandlers(
         MethodBody injectionBody,
         MethodBody destinationBody,
@@ -357,7 +465,7 @@ internal static class BodyCopier {
         }
 
         Instruction copy = CloneInstruction(source, ctx.Module, ctx.VariableMap, ctx.InjectedMembers);
-        RemapArgInstruction(copy, ctx.ArgRemap);
+        RemapArgInstruction(copy, ctx);
         return new List<Instruction> { copy };
     }
 
@@ -441,6 +549,10 @@ internal static class BodyCopier {
     }
 
     private static List<Instruction> LowerInstruction(Instruction source, LoweringContext ctx, InjectionLoweringSite site) {
+        if (site.LocalHandles is not null && site.LocalHandles.TryLower(source, out List<Instruction> handleAccess)) {
+            return handleAccess;
+        }
+
         List<Instruction>? strayHandleUse = TryLowerStrayHandleUse(source, site);
         if (strayHandleUse is not null) {
             return strayHandleUse;
@@ -458,6 +570,11 @@ internal static class BodyCopier {
 
         if (source.OpCode == OpCodes.Ret) {
             return LowerReturn(site);
+        }
+
+        List<Instruction>? localAddress = TryLowerLocalAddress(source, ctx);
+        if (localAddress is not null) {
+            return localAddress;
         }
 
         if (site.CaptureBinding is not null && TryLowerArgBinding(source, site.CaptureBinding, out Instruction? captured)) {
@@ -489,7 +606,7 @@ internal static class BodyCopier {
         }
 
         Instruction copy = CloneInstruction(source, ctx.Module, ctx.VariableMap, ctx.InjectedMembers);
-        RemapArgInstruction(copy, ctx.ArgRemap);
+        RemapArgInstruction(copy, ctx);
         return new List<Instruction> { copy };
     }
 
@@ -628,7 +745,13 @@ internal static class BodyCopier {
         int valueArgIndex,
         VariableDefinition valueLocal,
         VariableDefinition resultLocal,
-        Instruction spliceEnd) {
+        Instruction spliceEnd,
+        IReadOnlyDictionary<int, VariableDefinition>? localBinding,
+        LocalHandleLowering? localHandles) {
+        if (localHandles is not null && localHandles.TryLower(source, out List<Instruction> handleAccess)) {
+            return handleAccess;
+        }
+
         if (IsLoadArgOpCode(source.OpCode) && GetArgIndex(source) == valueArgIndex) {
             return new List<Instruction> { Instruction.Create(OpCodes.Ldloc, valueLocal) };
         }
@@ -641,6 +764,15 @@ internal static class BodyCopier {
             throw new ConcordEmitException(
                 "CONC039",
                 $"Value injection cannot take the address of or reassign its 'original' parameter. Only by-value reads are supported.");
+        }
+
+        List<Instruction>? localAddress = TryLowerLocalAddress(source, ctx);
+        if (localAddress is not null) {
+            return localAddress;
+        }
+
+        if (localBinding is not null && TryLowerArgBinding(source, localBinding, out Instruction? boundLocal)) {
+            return new List<Instruction> { boundLocal! };
         }
 
         if (source.OpCode == OpCodes.Ret) {
@@ -670,7 +802,7 @@ internal static class BodyCopier {
         }
 
         Instruction copy = CloneInstruction(source, ctx.Module, ctx.VariableMap, ctx.InjectedMembers);
-        RemapArgInstruction(copy, ctx.ArgRemap);
+        RemapArgInstruction(copy, ctx);
         return new List<Instruction> { copy };
     }
 
@@ -724,32 +856,6 @@ internal static class BodyCopier {
                 "' must be used only for direct control calls (Cancel/ReturnValue/original invoke); " +
                 "it cannot be stored to a local, captured, or passed elsewhere.");
         }
-    }
-
-    // C# evaluates an assigned value AFTER loading the receiver, so `ch.ReturnValue = Build()`
-    // puts a whole expression between the handle load and the setter that consumes it. Looking only
-    // at the next instruction rejects every such assignment, so walk the stack forward to find the
-    // instruction that actually pops the slot this load pushed.
-    private static Instruction? FindStackConsumer(Instruction load) {
-        int depth = 1;
-        for (Instruction? current = load.Next; current is not null; current = current.Next) {
-            // Control flow means the slot may be consumed on a path this linear walk cannot follow.
-            // Give up rather than accuse code the walk does not actually understand.
-            if (current.OpCode.FlowControl is FlowControl.Branch or FlowControl.Cond_Branch
-                    or FlowControl.Return or FlowControl.Throw
-                || current.OpCode == OpCodes.Dup) {
-                return null;
-            }
-
-            int pops = IlDump.PopCount(current);
-            if (pops >= depth) {
-                return current;
-            }
-
-            depth = depth - pops + IlDump.PushCount(current);
-        }
-
-        return null;
     }
 
     private static void EnsureNotStrayOperationUse(Instruction receiverLoad, int operationArgIndex, MethodBase injectionMethod) {
@@ -872,6 +978,57 @@ internal static class BodyCopier {
         return map;
     }
 
+    // The value parameter is whichever one is not a local sibling, so a signature that declares them
+    // the other way round still reads and replaces the right thing. A bare LocalHandle<T> carries no
+    // [Local], so count it the same way WrapperComposer.ValidateValueInjectionShape does.
+    private static int ValueParameterIndex(MethodBase injectionMethod) {
+        int offset = injectionMethod.IsStatic ? 0 : 1;
+        ParameterInfo[] parameters = injectionMethod.GetParameters();
+        for (int i = 0; i < parameters.Length; i++) {
+            if (parameters[i].GetCustomAttribute<LocalAttribute>() is null
+                && !LocalHandleLowering.IsLocalHandleType(parameters[i].ParameterType)) {
+                return i + offset;
+            }
+        }
+
+        return offset;
+    }
+
+    // A handle only ever exists as a lowered-away parameter, so a `new LocalHandle<T>()` anywhere in
+    // an injection body copies through verbatim and puts a real allocation on the patched path.
+    private static void RejectConstructedLocalHandle(MethodBody injectionBody, MethodBase injectionMethod) {
+        foreach (Instruction instruction in injectionBody.Instructions) {
+            if (instruction.OpCode != OpCodes.Newobj || instruction.Operand is not MethodReference reference) {
+                continue;
+            }
+
+            TypeReference? declaringType = reference.DeclaringType;
+            if (declaringType?.Namespace == "Concord" && declaringType.Name == "LocalHandle`1") {
+                throw new ConcordEmitException(
+                    "CONC161",
+                    $"Injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' constructs a " +
+                    "LocalHandle<T>. Concord lowers every handle away while copying IL, so no instance exists at " +
+                    "runtime; a handle can only arrive as an injection parameter.");
+            }
+        }
+    }
+
+    // Backstop behind WrapperComposer.RejectMisplacedLocals. That gate is a hand-maintained list of
+    // positions; re-routing a position through a copier that builds no binding map would otherwise
+    // read a default forever instead of failing.
+    private static void RejectLocalParameters(MethodBase injectionMethod, string what) {
+        ParameterInfo[] parameters = injectionMethod.GetParameters();
+        for (int i = 0; i < parameters.Length; i++) {
+            if (parameters[i].GetCustomAttribute<LocalAttribute>() is not null
+                || LocalHandleLowering.IsLocalHandleType(parameters[i].ParameterType)) {
+                throw new ConcordEmitException(
+                    "CONC158",
+                    $"Injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' declares a [Local] or " +
+                    $"LocalHandle<T> parameter on {what}, which binds no local.");
+            }
+        }
+    }
+
     private static Dictionary<int, int> BuildArgRemap(MethodBase target, MethodBase injectionMethod) {
         ParameterInfo[] targetParams = target.GetParameters();
         ParameterInfo[] injectionParameters = injectionMethod.GetParameters();
@@ -934,13 +1091,85 @@ internal static class BodyCopier {
         return binding;
     }
 
-    private static void RemapArgInstruction(Instruction instruction, Dictionary<int, int> argRemap) {
+    // A parameter Concord binds - [Local], [Capture], [Bound], a control handle - has no argument slot
+    // in the wrapper, so it is absent from ArgRemap and its loads lower to the local it was bound to. A
+    // store has nothing to lower to, so it would copy through as a starg against the wrapper's own
+    // argument of that index, which is the target's parameter N: the wrong variable, silently, or
+    // invalid IL the runtime only rejects at JIT when the two types differ.
+    private static void RejectBoundParameterStore(Instruction instruction, int injectionArgIndex, LoweringContext ctx) {
+        if (instruction.OpCode != OpCodes.Starg && instruction.OpCode != OpCodes.Starg_S) {
+            return;
+        }
+
+        throw new ConcordEmitException(
+            "CONC164",
+            $"Injection '{ctx.InjectionMethod.DeclaringType?.Name}.{ctx.InjectionMethod.Name}' assigns to " +
+            $"{ParameterName(ctx.InjectionMethod, injectionArgIndex)}, which Concord binds for it. A bound parameter " +
+            "is read-only: it has no argument slot to store into. Change what the parameter stands for instead - " +
+            "a local through a LocalHandle<T>, a captured argument through the Around shift's original.Invoke.");
+    }
+
+    private static string ParameterName(MethodBase injectionMethod, int argIndex) {
+        int offset = injectionMethod.IsStatic ? 0 : 1;
+        ParameterInfo[] parameters = injectionMethod.GetParameters();
+        int index = argIndex - offset;
+        return index >= 0 && index < parameters.Length ? $"parameter '{parameters[index].Name}'" : $"argument {argIndex}";
+    }
+
+    // ldarga on a bound local would hand out the address of the target's own slot, so `out x` or
+    // `ref x` on a read-only [Local] parameter would write the target's variable. A by-value parameter
+    // owns its own storage, so copy the slot and give out the copy's address instead: a struct local's
+    // instance calls still work, and a write lands where C# would have put it.
+    private static List<Instruction>? TryLowerLocalAddress(Instruction source, LoweringContext ctx) {
+        if (source.OpCode != OpCodes.Ldarga && source.OpCode != OpCodes.Ldarga_S) {
+            return null;
+        }
+
+        int argIndex = GetArgIndex(source);
+        if (argIndex < 0 || ctx.LocalArgBinding is null || !ctx.LocalArgBinding.TryGetValue(argIndex, out VariableDefinition? slot)) {
+            return null;
+        }
+
+        VariableDefinition copy = new VariableDefinition(slot.VariableType);
+        ctx.DestinationVariables.Add(copy);
+
+        return new List<Instruction> {
+            Instruction.Create(OpCodes.Ldloc, slot),
+            Instruction.Create(OpCodes.Stloc, copy),
+            Instruction.Create(OpCodes.Ldloca, copy),
+        };
+    }
+
+    // Filters the merged capture-and-local binding down to the entries that name a real target slot.
+    private static IReadOnlyDictionary<int, VariableDefinition>? LocalOnly(
+        IReadOnlyDictionary<int, VariableDefinition>? merged, MethodBase injectionMethod) {
+        if (merged is null) {
+            return null;
+        }
+
+        HashSet<int> bound = LocalResolver.BoundArgIndices(injectionMethod);
+        if (bound.Count == 0) {
+            return null;
+        }
+
+        Dictionary<int, VariableDefinition> locals = new Dictionary<int, VariableDefinition>(bound.Count);
+        foreach (KeyValuePair<int, VariableDefinition> entry in merged) {
+            if (bound.Contains(entry.Key)) {
+                locals[entry.Key] = entry.Value;
+            }
+        }
+
+        return locals;
+    }
+
+    private static void RemapArgInstruction(Instruction instruction, LoweringContext ctx) {
         int injectionArgIndex = GetArgIndex(instruction);
         if (injectionArgIndex < 0) {
             return;
         }
 
-        if (!argRemap.TryGetValue(injectionArgIndex, out int wrapperArgIndex)) {
+        if (!ctx.ArgRemap.TryGetValue(injectionArgIndex, out int wrapperArgIndex)) {
+            RejectBoundParameterStore(instruction, injectionArgIndex, ctx);
             return;
         }
 

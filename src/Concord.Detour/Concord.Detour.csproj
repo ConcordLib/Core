@@ -24,6 +24,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Concord.Detour.Tests"/>
     <InternalsVisibleTo Include="Concord.Orchestration"/>
+    <InternalsVisibleTo Include="Concord.Orchestration.Tests"/>
   </ItemGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'net472'">

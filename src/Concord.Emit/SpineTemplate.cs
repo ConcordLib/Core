@@ -42,6 +42,40 @@ internal sealed class SpineTemplate {
         return new SpineTemplate(new List<Instruction>(instructions), ownedHandlers, locals);
     }
 
+    // Which slots the body actually names, by the same rule Capture collects locals: an explicit
+    // VariableDefinition operand, or a short-form ldloc.N/stloc.N. Reads without rewriting.
+    public static HashSet<int> ReferencedLocalIndices(
+        IEnumerable<Instruction> instructions,
+        IList<VariableDefinition> bodyVariables) {
+        HashSet<int> referenced = [];
+        foreach (Instruction instruction in instructions) {
+            if (instruction.Operand is VariableDefinition variable) {
+                int index = bodyVariables.IndexOf(variable);
+                if (index >= 0) {
+                    referenced.Add(index);
+                }
+
+                continue;
+            }
+
+            int loadIndex = MacroLocalIndex(instruction.OpCode, load: true);
+            if (loadIndex >= 0) {
+                if (loadIndex < bodyVariables.Count) {
+                    referenced.Add(loadIndex);
+                }
+
+                continue;
+            }
+
+            int storeIndex = MacroLocalIndex(instruction.OpCode, load: false);
+            if (storeIndex >= 0 && storeIndex < bodyVariables.Count) {
+                referenced.Add(storeIndex);
+            }
+        }
+
+        return referenced;
+    }
+
     private static void ExpandShortFormLocals(List<Instruction> instructions, IList<VariableDefinition> bodyVariables) {
         foreach (Instruction instruction in instructions) {
             int loadIndex = MacroLocalIndex(instruction.OpCode, load: true);

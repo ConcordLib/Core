@@ -5,10 +5,15 @@ using MethodBody = Mono.Cecil.Cil.MethodBody;
 namespace Concord.Emit;
 
 internal sealed class SpineCopy {
-    public SpineCopy(List<Instruction> instructions, List<ExceptionHandler> handlers, Instruction exitJoin) {
+    public SpineCopy(
+        List<Instruction> instructions,
+        List<ExceptionHandler> handlers,
+        Instruction exitJoin,
+        IReadOnlyDictionary<VariableDefinition, VariableDefinition> localMap) {
         this.Instructions = instructions;
         this.Handlers = handlers;
         this.ExitJoin = exitJoin;
+        this.LocalMap = localMap;
         this.ArgLocals = new Dictionary<int, VariableDefinition>();
     }
 
@@ -19,6 +24,12 @@ internal sealed class SpineCopy {
     public Instruction ExitJoin { get; }
 
     public Dictionary<int, VariableDefinition> ArgLocals { get; }
+
+    /// <summary>
+    ///     Maps each template local to the fresh slot this copy allocated for it. A body spliced into
+    ///     this copy has to read the clone, since the template's own slot is never executed.
+    /// </summary>
+    public IReadOnlyDictionary<VariableDefinition, VariableDefinition> LocalMap { get; }
 
     public static SpineCopy Create(SpineTemplate template, MethodDefinition wrapperDefinition) {
         ModuleDefinition module = wrapperDefinition.Module;
@@ -57,7 +68,7 @@ internal sealed class SpineCopy {
         List<Instruction> instructions = new List<Instruction>(scratchBody.Instructions);
         Instruction exitJoin = Instruction.Create(OpCodes.Nop);
 
-        return new SpineCopy(instructions, handlers, exitJoin);
+        return new SpineCopy(instructions, handlers, exitJoin, variableMap);
     }
 
     private static Instruction CloneInstruction(Instruction source, Dictionary<VariableDefinition, VariableDefinition> variableMap) {

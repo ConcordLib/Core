@@ -15,7 +15,9 @@ public sealed class CaptureAttribute : Attribute {
     }
 
     /// <summary>
-    ///     The 1-based argument of the matched call this parameter binds to.
+    ///     The 1-based argument of the matched call this parameter binds to. It counts the call's
+    ///     declared parameters only: on an instance call the receiver is not argument one, so
+    ///     <c>list.Add(item)</c> binds <c>item</c> at <c>Arg = 1</c>.
     /// </summary>
     public uint Arg { get; }
 }

@@ -96,4 +96,30 @@ public abstract record InjectAt {
     ///     <see langword="true" /> rewrites the fully composed wrapper.
     /// </param>
     public sealed record Transpiler(bool Final = false) : InjectAt;
+
+    /// <summary>
+    ///     Targets a read or write of one of the target method's own local variables.
+    /// </summary>
+    /// <param name="LocalType">The declared type of the local to match.</param>
+    /// <param name="Access">Whether to match writes to the local or reads of it.</param>
+    /// <param name="By">The 1-based occurrence of the access to target, or <c>0</c> to target every match.</param>
+    /// <param name="Ordinal">
+    ///     The 1-based occurrence of <paramref name="LocalType" /> among the target's locals, in slot order,
+    ///     or <c>0</c> to leave it unset.
+    /// </param>
+    /// <param name="Index">
+    ///     A raw local slot in the target body, or <c>-1</c> to leave it unset. Precise and brittle: any
+    ///     recompile of the target can move it.
+    /// </param>
+    /// <param name="Name">
+    ///     The local's source name, read from a pdb when one is present, or <see langword="null" /> to
+    ///     leave it unset. The least portable selector: see <see cref="LocalAttribute.Name" /> for the
+    ///     hosts where no pdb can be found and for how a name can cover more than one slot.
+    /// </param>
+    public sealed record Local(Type LocalType, LocalAccess Access, uint By = 0, uint Ordinal = 0, int Index = -1, string? Name = null) : InjectAt {
+        /// <summary>
+        ///     Bounds matching and <c>By</c> counting to a range of the target body.
+        /// </summary>
+        public SliceRange? Slice { get; init; }
+    }
 }

@@ -297,8 +297,9 @@ public static partial class ExtendedEnumRegistry {
         return Convert.ToInt64(value, CultureInfo.InvariantCulture);
     }
 
+    // Trace, not Debug: Release defines TRACE but not DEBUG, so Debug.WriteLine compiles away.
     private static void Warn(string message) {
-        Debug.WriteLine("[Concord] " + message);
+        Trace.WriteLine("[Concord] " + message);
         Console.Error.WriteLine("[Concord] " + message);
     }
 }
