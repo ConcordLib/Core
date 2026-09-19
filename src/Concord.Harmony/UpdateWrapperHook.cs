@@ -71,7 +71,7 @@ internal static class UpdateWrapperHook
             return false;
         }
 
-        log(CoexistenceLogMarkers.HookInstalled + " " + typeof(HarmonyLib.Harmony).Assembly.GetName().Version);
+        log(CoexistenceLogMarkers.HookInstalled + " " + typeof(HarmonyLib.Harmony).Assembly.GetName().Version + " #" + typeof(HarmonyLib.Harmony).Assembly.GetHashCode());
         return true;
     }
 

@@ -31,6 +31,12 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
     }
 
     /// <summary>
+    ///     The backend this router forwards to. A host that wires more than once per process, such as
+    ///     RimWorld under an assembly reloader, wraps this instead of the previous router.
+    /// </summary>
+    public IDetourBackend Inner => inner;
+
+    /// <summary>
     ///     Routes every target through the host once one is active, not only contested ones.
     /// </summary>
     public bool RouteEverything { get; set; }
