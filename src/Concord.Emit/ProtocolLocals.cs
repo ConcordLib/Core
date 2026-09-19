@@ -19,4 +19,16 @@ internal sealed record ProtocolLocals(
     VariableDefinition? SpliceValue = null,
     VariableDefinition? CtorBodyRan = null,
     VariableDefinition? CtorBodyRanTwice = null,
-    IReadOnlyDictionary<Type, VariableDefinition>? State = null);
+    IReadOnlyDictionary<Type, VariableDefinition>? State = null) {
+    /// <summary>
+    ///     How many of the wrapper's locals came from the raw target body. Locals at or past this
+    ///     index were added by a transpiler.
+    /// </summary>
+    public int RawLocalCount { get; init; }
+
+    /// <summary>
+    ///     How many of the wrapper's leading locals a <see cref="LocalAttribute" /> may select from:
+    ///     the target's own locals plus any a transpiler added, and nothing Concord declared after.
+    /// </summary>
+    public int SearchLocalCount { get; init; }
+}

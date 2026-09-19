@@ -881,8 +881,17 @@ public static class WrapperComposer {
         bool hasAround = HasWholeMethodAround(ordered);
 
         bool needsCtorGuard = hasAround && target.IsConstructor;
+
+        // Snapshot before Concord declares any local of its own, so [Local] only ever sees the
+        // target's own slots plus whatever a pre-transpiler added.
+        int searchLocalCount = body.Variables.Count;
+        int rawLocalCount = target.GetMethodBody()?.LocalVariables.Count ?? searchLocalCount;
+
         Dictionary<Type, VariableDefinition> stateLocals = AllocateStateLocals(ordered, wrapperDefinition, target);
-        ProtocolLocals locals = DeclareLocals(body, module, returnType, isVoid, hasAround && !isVoid, needsCtorGuard, stateLocals);
+        ProtocolLocals locals = DeclareLocals(body, module, returnType, isVoid, hasAround && !isVoid, needsCtorGuard, stateLocals) with {
+            RawLocalCount = rawLocalCount,
+            SearchLocalCount = searchLocalCount,
+        };
 
         List<Instruction> spine = new List<Instruction>(body.Instructions);
         Instruction afterSpine = Instruction.Create(OpCodes.Nop);

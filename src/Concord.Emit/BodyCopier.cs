@@ -87,6 +87,7 @@ internal static class BodyCopier {
         ModuleDefinition module = request.Destination.Module;
 
         Dictionary<int, int> argRemap = BuildArgRemap(request.Target, request.InjectionMethod);
+        captureBinding = LocalResolver.Bind(request, locals, captureBinding);
         if (captureBinding is not null) {
             foreach (int captured in captureBinding.Keys) {
                 argRemap.Remove(captured);
