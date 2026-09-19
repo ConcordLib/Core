@@ -129,7 +129,7 @@ internal static class IlDump {
             }
 
             perType.Add((type, assembly));
-            string name = assembly.GetName().Name ?? assembly.FullName ?? "?";
+            string name = SimpleName(assembly);
             if (!resolved.TryGetValue(name, out HashSet<Assembly>? set)) {
                 set = new HashSet<Assembly>();
                 resolved[name] = set;
@@ -144,7 +144,7 @@ internal static class IlDump {
         foreach (KeyValuePair<string, HashSet<Assembly>> entry in resolved.OrderBy(e => e.Key, StringComparer.Ordinal)) {
             HashSet<Assembly> seen = new HashSet<Assembly>();
             foreach (Assembly candidate in loaded) {
-                if (candidate.GetName().Name == entry.Key) {
+                if (SimpleName(candidate) == entry.Key) {
                     seen.Add(candidate);
                     AppendAssemblyRow(sb, entry.Key, candidate, entry.Value.Contains(candidate), false);
                 }
@@ -490,5 +490,12 @@ internal static class IlDump {
         }
 
         sb.Append(" location=").Append(DescribeLocation(assembly)).Append('\n');
+    }
+
+    // Assembly.GetName() computes CodeBase, and mono asserts on that for a byte-loaded assembly.
+    private static string SimpleName(Assembly assembly) {
+        string full = assembly.FullName ?? "?";
+        int comma = full.IndexOf(',');
+        return comma < 0 ? full : full.Substring(0, comma);
     }
 }
