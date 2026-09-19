@@ -46,9 +46,10 @@ public static class WrapperComposer {
 
         PartitionTranspilers(ordered, out List<Injection> preTranspilers, out List<Injection> finalTranspilers, out List<Injection> declarative);
 
+        int rawLocalCount = wrapper.Definition.Body.Variables.Count;
         RunTranspilers(wrapper.Definition, resolved, preTranspilers);
 
-        AssembleInto(wrapper.Definition, resolved, declarative, returnType);
+        AssembleInto(wrapper.Definition, resolved, declarative, returnType, rawLocalCount);
         RunTranspilers(wrapper.Definition, resolved, finalTranspilers);
         MethodInfo wrapperMethod = wrapper.Generate();
         return new ComposeResult(wrapperMethod, () => OriginalBody.Clone(resolved));
@@ -74,9 +75,10 @@ public static class WrapperComposer {
 
         PartitionTranspilers(ordered, out List<Injection> preTranspilers, out List<Injection> finalTranspilers, out List<Injection> declarative);
 
+        int rawLocalCount = wrapper.Definition.Body.Variables.Count;
         RunTranspilers(wrapper.Definition, resolved, preTranspilers);
 
-        Assemble(wrapper.Definition, resolved, declarative, returnType);
+        Assemble(wrapper.Definition, resolved, declarative, returnType, rawLocalCount);
         RunTranspilers(wrapper.Definition, resolved, finalTranspilers);
 
         return IlDump.Format(wrapper.Definition);
@@ -136,8 +138,9 @@ public static class WrapperComposer {
 
         PartitionTranspilers(ordered, out List<Injection> preTranspilers, out List<Injection> finalTranspilers, out List<Injection> declarative);
 
+        int rawLocalCount = wrapper.Definition.Body.Variables.Count;
         RunTranspilers(wrapper.Definition, resolved, preTranspilers);
-        AssembleInto(wrapper.Definition, resolved, declarative, returnType);
+        AssembleInto(wrapper.Definition, resolved, declarative, returnType, rawLocalCount);
         RunTranspilers(wrapper.Definition, resolved, finalTranspilers);
 
         TranspilerContext readContext = new TranspilerContext(resolved);
@@ -384,9 +387,9 @@ public static class WrapperComposer {
         }
     }
 
-    internal static void AssembleInto(MethodDefinition wrapperDefinition, MethodBase target, IReadOnlyList<Injection> ordered, Type returnType) {
+    internal static void AssembleInto(MethodDefinition wrapperDefinition, MethodBase target, IReadOnlyList<Injection> ordered, Type returnType, int rawLocalCount) {
         ValidateComposition(target, ordered);
-        Assemble(wrapperDefinition, target, ordered, returnType);
+        Assemble(wrapperDefinition, target, ordered, returnType, rawLocalCount);
     }
 
     internal static void ValidateOperationShape(MethodBase injectionMethod, CallSiteShape shape, MethodBase target, bool allowValueReceiver = false) {
@@ -871,7 +874,7 @@ public static class WrapperComposer {
         return iterator?.StateMachineType;
     }
 
-    private static void Assemble(MethodDefinition wrapperDefinition, MethodBase target, IReadOnlyList<Injection> ordered, Type returnType) {
+    private static void Assemble(MethodDefinition wrapperDefinition, MethodBase target, IReadOnlyList<Injection> ordered, Type returnType, int rawLocalCount) {
         ValidateNonHeadInjectionsDoNotReturnControl(ordered);
 
         MethodBody body = wrapperDefinition.Body;
@@ -885,7 +888,6 @@ public static class WrapperComposer {
         // Snapshot before Concord declares any local of its own, so [Local] only ever sees the
         // target's own slots plus whatever a pre-transpiler added.
         int searchLocalCount = body.Variables.Count;
-        int rawLocalCount = target.GetMethodBody()?.LocalVariables.Count ?? searchLocalCount;
 
         Dictionary<Type, VariableDefinition> stateLocals = AllocateStateLocals(ordered, wrapperDefinition, target);
         ProtocolLocals locals = DeclareLocals(body, module, returnType, isVoid, hasAround && !isVoid, needsCtorGuard, stateLocals) with {

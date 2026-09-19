@@ -1,5 +1,6 @@
 using System.Reflection;
 using Mono.Cecil.Cil;
+using MonoMod.Utils;
 using MethodBody = Mono.Cecil.Cil.MethodBody;
 
 namespace Concord.Emit;
@@ -95,16 +96,25 @@ internal static class LocalResolver {
         }
 
         VariableDefinition slot = body.Variables[index];
-        if (!Matches(slot, wanted)) {
+        Type? found = SlotType(slot);
+        if (found != wanted) {
+            string foundName = found?.ToString() ?? slot.VariableType.FullName;
             throw Fail("CONC150", injectionMethod, target,
-                $"declares slot {index} as '{wanted}', but that slot is '{slot.VariableType.FullName}'.");
+                $"declares slot {index} as '{wanted}', but that slot is '{foundName}'.");
         }
 
         return slot;
     }
 
     private static bool Matches(VariableDefinition slot, Type wanted) {
-        return slot.VariableType.FullName == wanted.FullName;
+        return SlotType(slot) == wanted;
+    }
+
+    // Cecil and reflection spell FullName differently for generics and nested types, so cross the
+    // boundary once and compare canonical runtime types. ResolveReflection throws on a generic
+    // parameter inside a DynamicMethodDefinition body, which can never be a match anyway.
+    private static Type? SlotType(VariableDefinition slot) {
+        return slot.VariableType.IsGenericParameter ? null : slot.VariableType.ResolveReflection();
     }
 
     private static string Describe(List<VariableDefinition> candidates, int rawCount) {

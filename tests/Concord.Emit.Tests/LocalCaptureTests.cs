@@ -16,6 +16,8 @@ public static class LocalRecorder {
     public static int SeenInt;
 
     public static long SeenLong;
+
+    public static int SeenCount;
 }
 
 public class LocalMethods {
@@ -39,6 +41,19 @@ public class TwoIntHost {
 public class OrdinalMethods {
     public void ReadSecond([Local(Ordinal = 2)] int value) {
         LocalRecorder.SeenInt = value;
+    }
+}
+
+public class GenericLocalHost {
+    public int ListLocal(int seed) {
+        List<int> values = [seed, seed * 2];
+        return values.Count;
+    }
+}
+
+public class GenericLocalMethods {
+    public void ReadList([Local] List<int> values) {
+        LocalRecorder.SeenCount = values.Count;
     }
 }
 
@@ -68,10 +83,28 @@ public sealed class LocalCaptureTests {
         ConcordEmitException error = Assert.Throws<ConcordEmitException>(
             () => WrapperComposer.Compose(target, [read]));
 
+        // Three candidates in a Debug build: first, second, and the temp the return expression gets.
         Assert.Equal("CONC147", error.Code);
-        Assert.Contains("slot 0", error.Message);
-        Assert.Contains("slot 1", error.Message);
-        Assert.Contains("target body", error.Message);
+        Assert.Contains("matches 3 locals", error.Message);
+        Assert.Contains("slot 0 (target body)", error.Message);
+        Assert.Contains("slot 1 (target body)", error.Message);
+        Assert.Contains("slot 2 (target body)", error.Message);
+    }
+
+    [Fact]
+    public void ImplicitTypeMatch_BindsAGenericLocal() {
+        MethodBase target = typeof(GenericLocalHost).GetMethod(nameof(GenericLocalHost.ListLocal))!;
+        MethodBase injection = typeof(GenericLocalMethods).GetMethod(nameof(GenericLocalMethods.ReadList))!;
+        Injection read = new Injection(injection, new InjectAt.Return(), "test", 0);
+
+        ComposeResult result = WrapperComposer.Compose(target, [read]);
+        Func<GenericLocalHost, int, int> run = result.Wrapper.CreateDelegate<Func<GenericLocalHost, int, int>>();
+
+        LocalRecorder.SeenCount = 0;
+        int returned = run(new GenericLocalHost(), 5);
+
+        Assert.Equal(2, returned);
+        Assert.Equal(2, LocalRecorder.SeenCount);
     }
 
     [Fact]
