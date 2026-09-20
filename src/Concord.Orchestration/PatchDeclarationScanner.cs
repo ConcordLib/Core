@@ -438,8 +438,6 @@ public static class PatchDeclarationScanner {
         return attribute != null;
     }
 
-    // A [Patch(typeof(X))] whose X ships with a mod that is not loaded lands here. Skipping it is right,
-    // skipping it silently is not: the author sees a patch that never runs and no reason anywhere.
     private static void ReportUnreadableDeclaration(Type declaration, Exception cause) {
         PatchLog.Write(
             "[Concord] skipped declaration " + declaration.FullName +

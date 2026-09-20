@@ -12,7 +12,6 @@ public abstract class RoutableDeclaration : OtherBase {
     public void OnRun(ControlHandle ch) { }
 }
 
-// Refuses one target the way the router refuses a contested method it cannot route.
 public sealed class CodeThrowingApplier : IPatchApplier {
     private readonly string code;
 
@@ -43,7 +42,6 @@ public sealed class RejectedRouteScanTests {
         Assert.Contains(RoutingDetourBackend.RejectedRouteCode, ex.Message);
     }
 
-    // The point of the code: one unroutable target costs one declaration, not the whole mod.
     [Theory]
     [InlineData(RoutingDetourBackend.RejectedRouteCode)]
     [InlineData("CONC061")]

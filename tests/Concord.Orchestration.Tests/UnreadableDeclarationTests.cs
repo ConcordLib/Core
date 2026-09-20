@@ -9,8 +9,6 @@ using Xunit;
 namespace Concord.Orchestration.Tests;
 
 public sealed class UnreadableDeclarationTests {
-    // A [Patch(typeof(X))] whose X belongs to a mod the player does not have. Reading the attribute
-    // throws, and the declaration has to be skipped with a reason rather than in silence.
     [Fact]
     public void ScanType_PatchTargetAssemblyMissing_SkipsAndSaysWhy() {
         Type declaration = BuildDeclarationTargetingAMissingAssembly();

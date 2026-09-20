@@ -3,11 +3,6 @@ namespace Concord.Detour;
 /// <summary>
 ///     Prepares an assembly image for a second in-memory load of the same file.
 /// </summary>
-/// <remarks>
-///     Harmony stores a patch as (module id, token) and resolves it against the first loaded module with
-///     that id. Every copy loaded from one file shares an id, so after a host reload Harmony keeps
-///     handing back members of the oldest copy, which is bound to assemblies that are now reflection-only.
-/// </remarks>
 public static class AssemblyImage {
     /// <summary>
     ///     Returns a copy of <paramref name="image" /> with a new module version id.
@@ -30,7 +25,6 @@ public static class AssemblyImage {
         int sections = optional + Read16(image, pe + 20);
         int directories = optional + (Read16(image, optional) == 0x20b ? 112 : 96);
 
-        // Data directory 14 is the CLI header, whose Metadata field points at the metadata root.
         int cli = ToOffset(image, sections, count, Read32(image, directories + (14 * 8)));
         int root = ToOffset(image, sections, count, Read32(image, cli + 8));
         Expect(image[root] == 'B' && image[root + 1] == 'S' && image[root + 2] == 'J' && image[root + 3] == 'B', "no metadata root");
@@ -64,7 +58,6 @@ public static class AssemblyImage {
             }
         }
 
-        // Module is table 0, so its one row leads the table data: Generation, Name, Mvid, EncId, EncBaseId.
         int index = ReadIndex(image, rows + 2 + ((heaps & 1) != 0 ? 4 : 2), (heaps & 2) != 0);
         Expect(index > 0, "empty module id");
 

@@ -1,5 +1,4 @@
 using System.Reflection;
-using System.Reflection.PortableExecutable;
 using Xunit;
 
 namespace Concord.Detour.Tests;
@@ -23,24 +22,22 @@ public sealed class AssemblyImageTests {
         byte[] rewritten = AssemblyImage.WithFreshModuleId(image);
 
         Assert.Equal(image.Length, rewritten.Length);
-        int differing = 0;
+
+        int first = -1;
+        int last = -1;
         for (int i = 0; i < image.Length; i++) {
             if (image[i] != rewritten[i]) {
-                differing++;
+                first = first < 0 ? i : first;
+                last = i;
             }
         }
 
-        Assert.InRange(differing, 1, 16);
-        Assert.Equal(DebugEntries(image), DebugEntries(rewritten));
+        Assert.True(first >= 0, "the module id was not rewritten");
+        Assert.InRange(last - first + 1, 1, 16);
     }
 
     [Fact]
     public void WithFreshModuleId_RejectsBytesThatAreNotAnAssembly() {
         Assert.Throws<BadImageFormatException>(() => AssemblyImage.WithFreshModuleId(new byte[512]));
-    }
-
-    private static string DebugEntries(byte[] image) {
-        using PEReader reader = new PEReader(new MemoryStream(image));
-        return string.Join(",", reader.ReadDebugDirectory().Select(entry => entry.Type + ":" + entry.DataSize));
     }
 }

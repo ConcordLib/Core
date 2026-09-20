@@ -29,7 +29,6 @@ public static class Patcher {
         set => WrapperPrecompile.Enabled = value;
     }
 
-    // The scan feeds this, not any one registry, so every installed registry sees every declaration.
     internal static IAttachedPropertyRegistry AttachedPropertyFanOut => Properties;
 
     /// <summary>
@@ -69,10 +68,6 @@ public static class Patcher {
     ///     Adds a registry that receives every attached property declared by <see cref="Apply(Assembly)" />.
     ///     Everything declared before the call is replayed into it first, so install order does not matter.
     /// </summary>
-    /// <remarks>
-    ///     Additive, because an adapter and a mod can both want the feed. A registry that throws is dropped
-    ///     from that one registration and logged, so no consumer can cost another one its data.
-    /// </remarks>
     /// <param name="registry">The registry to add. Adding the same instance twice does nothing.</param>
     public static void UseAttachedPropertyRegistry(IAttachedPropertyRegistry registry) {
         lock (Gate) {

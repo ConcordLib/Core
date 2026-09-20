@@ -34,8 +34,6 @@ public sealed class AttachedRegistryFanOutTests : IDisposable {
         Patcher.UseLog(null);
     }
 
-    // The bug this replaces: the second caller evicted the first, so an adapter stopped being told
-    // about every field declared after any mod installed its own registry.
     [Fact]
     public void TwoRegistries_BothKeepReceiving() {
         RecordingRegistry adapter = new RecordingRegistry();

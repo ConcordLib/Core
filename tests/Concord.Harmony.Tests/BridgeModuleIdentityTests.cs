@@ -7,8 +7,6 @@ using Xunit;
 
 namespace Concord.Harmony.Tests;
 
-// Pins the reason the adapter rewrites the module id before it loads the bridge. Harmony stores a patch
-// as (module id, token), so two copies sharing one id make the newer copy unaddressable.
 [Collection("HarmonySerial")]
 public class BridgeModuleIdentityTests
 {
