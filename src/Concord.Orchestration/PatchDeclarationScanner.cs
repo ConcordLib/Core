@@ -424,15 +424,27 @@ public static class PatchDeclarationScanner {
 
         try {
             attribute = declaration.GetCustomAttribute<PatchAttribute>();
-        } catch (TypeLoadException) {
+        } catch (TypeLoadException ex) {
+            ReportUnreadableDeclaration(declaration, ex);
             return false;
-        } catch (FileNotFoundException) {
+        } catch (FileNotFoundException ex) {
+            ReportUnreadableDeclaration(declaration, ex);
             return false;
-        } catch (FileLoadException) {
+        } catch (FileLoadException ex) {
+            ReportUnreadableDeclaration(declaration, ex);
             return false;
         }
 
         return attribute != null;
+    }
+
+    // A [Patch(typeof(X))] whose X ships with a mod that is not loaded lands here. Skipping it is right,
+    // skipping it silently is not: the author sees a patch that never runs and no reason anywhere.
+    private static void ReportUnreadableDeclaration(Type declaration, Exception cause) {
+        PatchLog.Write(
+            "[Concord] skipped declaration " + declaration.FullName +
+            ": its [Patch] attribute could not be read, which usually means the target type's assembly is not loaded. " +
+            cause.Message);
     }
 
     private static Type ResolveBaseType(Type declaration, Type? explicitTarget) {
@@ -486,6 +498,7 @@ public static class PatchDeclarationScanner {
     }
 
     private static bool IsDeclarationScopedCode(string code) {
-        return code is "CONC116" or "CONC117" or "CONC118" or "CONC119" or "CONC120" or "CONC144";
+        return code is "CONC061" or "CONC116" or "CONC117" or "CONC118" or "CONC119" or "CONC120" or "CONC144"
+            or RoutingDetourBackend.RejectedRouteCode;
     }
 }

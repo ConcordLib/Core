@@ -11,6 +11,9 @@ namespace Concord.Detour;
 ///     promoted onto the host rather than silently losing its injections.
 /// </summary>
 public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver {
+    /// <summary>The code carried by every refusal to route a contested target.</summary>
+    public const string RejectedRouteCode = "CONC166";
+
     private readonly object gate = new object();
     private readonly IDetourBackend inner;
     private readonly Action<string> log;
@@ -216,7 +219,7 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
         }
 
         if (state == RouteState.Rejected) {
-            throw new InvalidOperationException(rejectionReasons[routeKey]);
+            throw new ConcordEmitException(RejectedRouteCode, rejectionReasons[routeKey]);
         }
 
         // ContestedLost: the host owns the entry point. Apply anyway so the injections are live if the
@@ -250,7 +253,7 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
         routes[routeKey] = RouteState.Rejected;
         rejectionReasons[routeKey] = result.Reason!;
         log(result.Reason!);
-        throw new InvalidOperationException(result.Reason);
+        throw new ConcordEmitException(RejectedRouteCode, result.Reason!);
     }
 
     private void Revalidate(MethodBase routeKey, MethodBase hostTarget, object hostPatchState) {

@@ -11,6 +11,10 @@ internal sealed class AttachedPropertyStore : IAttachedPropertyRegistry {
         entries[(declarationType, baseType, name)] = new Registration(valueType, slot);
     }
 
+    public void Clear() {
+        entries.Clear();
+    }
+
     public void ReplayInto(IAttachedPropertyRegistry registry) {
         foreach (KeyValuePair<(Type DeclarationType, Type BaseType, string Name), Registration> entry in entries) {
             registry.RegisterAttachedProperty(

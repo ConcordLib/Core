@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using Concord.AttachedData;
 using Concord.Detour;
 using Concord.Emit;
 using Concord.Orchestration;
@@ -15,7 +16,9 @@ public static class Patcher {
     private static readonly object Gate = new object();
     private static readonly Dictionary<Assembly, IPatchHandle> Applied = [];
     private static readonly HashSet<IPatchHandle> Live = [];
-    private static IAttachedPropertyRegistry properties = new AttachedPropertyStore();
+    private static readonly AttachedPropertyStore Seen = new AttachedPropertyStore();
+    private static readonly List<IAttachedPropertyRegistry> Registries = [];
+    private static readonly FanOutRegistry Properties = new FanOutRegistry();
 
     /// <summary>
     ///     Whether a composed wrapper is compiled at compose time rather than on its first call.
@@ -25,6 +28,9 @@ public static class Patcher {
         get => WrapperPrecompile.Enabled;
         set => WrapperPrecompile.Enabled = value;
     }
+
+    // The scan feeds this, not any one registry, so every installed registry sees every declaration.
+    internal static IAttachedPropertyRegistry AttachedPropertyFanOut => Properties;
 
     /// <summary>
     ///     Registers a scope opened around every wrapper compile, including a recompose any patcher
@@ -60,18 +66,22 @@ public static class Patcher {
     }
 
     /// <summary>
-    ///     Registers the adapter registry that receives every attached property declared by
-    ///     <see cref="Apply(Assembly)" />. Without one, declared properties are held in memory only and the
-    ///     host never learns about them.
+    ///     Adds a registry that receives every attached property declared by <see cref="Apply(Assembly)" />.
+    ///     Everything declared before the call is replayed into it first, so install order does not matter.
     /// </summary>
-    /// <param name="registry">The adapter's registry.</param>
+    /// <remarks>
+    ///     Additive, because an adapter and a mod can both want the feed. A registry that throws is dropped
+    ///     from that one registration and logged, so no consumer can cost another one its data.
+    /// </remarks>
+    /// <param name="registry">The registry to add. Adding the same instance twice does nothing.</param>
     public static void UseAttachedPropertyRegistry(IAttachedPropertyRegistry registry) {
         lock (Gate) {
-            if (properties is AttachedPropertyStore pending) {
-                pending.ReplayInto(registry);
+            if (Registries.Contains(registry)) {
+                return;
             }
 
-            properties = registry;
+            Seen.ReplayInto(registry);
+            Registries.Add(registry);
         }
     }
 
@@ -96,7 +106,7 @@ public static class Patcher {
                         : assembly.GetTypes();
 
                 PatchDeclarationScanner.ScanExtendedEnums(declarations);
-                PatchDeclarationScanner.ScanDeclarations(declarations, applier, properties);
+                PatchDeclarationScanner.ScanDeclarations(declarations, applier, Properties);
             } catch {
                 foreach (IDetourHandle handle in applier.Handles) {
                     try {
@@ -318,6 +328,13 @@ public static class Patcher {
         return ForConstructor(typeof(T), parameterTypes);
     }
 
+    internal static void ForgetAttachedPropertyRegistries() {
+        lock (Gate) {
+            Registries.Clear();
+            Seen.Clear();
+        }
+    }
+
     internal static IPatchHandle ApplyInjections(IReadOnlyList<(MethodBase Target, Injection Injection)> items) {
         lock (Gate) {
             CollectingPatchApplier applier = new CollectingPatchApplier();
@@ -427,5 +444,22 @@ public static class Patcher {
         }
 
         return resolved;
+    }
+
+    private sealed class FanOutRegistry : IAttachedPropertyRegistry {
+        public void RegisterAttachedProperty(Type declarationType, Type baseType, string name, Type valueType, IAttachedSlot slot) {
+            lock (Gate) {
+                Seen.RegisterAttachedProperty(declarationType, baseType, name, valueType, slot);
+                foreach (IAttachedPropertyRegistry registry in Registries) {
+                    try {
+                        registry.RegisterAttachedProperty(declarationType, baseType, name, valueType, slot);
+                    } catch (Exception ex) {
+                        PatchLog.Write(
+                            "[Concord] attached property registry " + registry.GetType().FullName +
+                            " threw for " + declarationType.FullName + "." + name + ": " + ex.Message);
+                    }
+                }
+            }
+        }
     }
 }
