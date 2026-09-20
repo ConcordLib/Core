@@ -89,7 +89,7 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
                 }
 
                 if (state == RouteState.Rejected) {
-                    throw new InvalidOperationException(rejectionReasons[routeKey]);
+                    throw new ConcordEmitException(RejectedRouteCode, rejectionReasons[routeKey]);
                 }
 
                 if (state == RouteState.Unpinned) {
