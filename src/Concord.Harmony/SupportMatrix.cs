@@ -139,6 +139,7 @@ namespace Concord.Harmony
             return widest;
         }
 
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S3011", Justification = "Some of the PatchInfo fields this mirrors are non-public in the Harmony versions the bridge supports.")]
         private static FieldInfo[] MatchIncomingFields(ConstructorInfo ctor)
         {
             if (ctor == null)

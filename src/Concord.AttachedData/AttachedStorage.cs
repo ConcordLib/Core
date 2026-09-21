@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Threading;
 
@@ -12,6 +13,7 @@ public static class AttachedStorage {
     private static readonly Dictionary<string, Allocation> Ids = new Dictionary<string, Allocation>();
     private static readonly List<IAttachedSlot> Registered = new List<IAttachedSlot>();
 
+    [SuppressMessage("Major Code Smell", "S3011:Reflection should not be used to increase accessibility of classes, methods, or fields", Justification = "Concord allocates its own private slot factory by reflection because the generic argument is only known at runtime.")]
     private static readonly MethodInfo CreateMethod = typeof(AttachedStorage)
         .GetMethod(nameof(CreateSlot), BindingFlags.NonPublic | BindingFlags.Static)!;
 
@@ -78,7 +80,7 @@ public static class AttachedStorage {
         return ref Storage<TVal>.At(slot).GetOrAddRef(target);
     }
 
-    private static IAttachedSlot CreateSlot<TVal>(int slot) {
+    private static Slot<TVal> CreateSlot<TVal>(int slot) {
         Storage<TVal>.Ensure(slot);
         return new Slot<TVal>(slot);
     }
@@ -95,7 +97,7 @@ public static class AttachedStorage {
     }
 
     private static class Storage<TVal> {
-        private static AttachedField<object, TVal>[] fields = new AttachedField<object, TVal>[0];
+        private static AttachedField<object, TVal>[] fields = Array.Empty<AttachedField<object, TVal>>();
 
         internal static AttachedField<object, TVal> At(int slot) {
             return Volatile.Read(ref fields)[slot];
@@ -119,10 +121,12 @@ public static class AttachedStorage {
             this.slot = slot;
         }
 
+        [SuppressMessage("Major Code Smell", "S3218:Inner class members should not shadow outer class \"static\" or type members", Justification = "The name is fixed by IAttachedSlot.")]
         public object? Get(object target) {
             return Storage<TVal>.At(slot).Get(target);
         }
 
+        [SuppressMessage("Major Code Smell", "S3218:Inner class members should not shadow outer class \"static\" or type members", Justification = "The name is fixed by IAttachedSlot.")]
         public void Set(object target, object? value) {
             Storage<TVal>.At(slot).Set(target, value is TVal typed ? typed : default!);
         }

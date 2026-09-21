@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using BenchmarkDotNet.Attributes;
 using Concord.Orchestration;
 
@@ -11,6 +12,8 @@ public enum BenchWeather {
 
 [Patch]
 public abstract class BenchWeatherExtension : ExtendedEnum<BenchWeather> {
+    [SuppressMessage("Major Code Smell", "S1104:Fields should not have public accessibility", Justification = "An extended enum member must be a public static field so Concord can assign it by reflection.")]
+    [SuppressMessage("Major Code Smell", "S2223:Non-constant static fields should not be visible", Justification = "An extended enum member must be a public static field so Concord can assign it by reflection.")]
     public static BenchWeather Frozen;
 }
 
@@ -32,6 +35,7 @@ public sealed class BenchEnumStore : IEnumValueStore {
 
 [MemoryDiagnoser]
 [ShortRunJob]
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "CA2263", Justification = "CoreLibEnumDetours only detours the Type-taking overloads, so the generic ones would benchmark an undetoured call.")]
 public class EnumDetourBench {
     private readonly DayOfWeek unextended = DayOfWeek.Monday;
 

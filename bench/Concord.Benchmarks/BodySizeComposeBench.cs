@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Engines;
@@ -7,6 +8,8 @@ using Concord.Emit;
 namespace Concord.Benchmarks;
 
 public static class Sink {
+    [SuppressMessage("Major Code Smell", "S1104:Fields should not have public accessibility", Justification = "The injected bodies are copied into emitted IL that stores straight to this field.")]
+    [SuppressMessage("Major Code Smell", "S2223:Non-constant static fields should not be visible", Justification = "The benchmark needs a writable sink the JIT cannot elide.")]
     public static int Value;
 }
 

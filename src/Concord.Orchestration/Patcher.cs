@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using Concord.AttachedData;
 using Concord.Detour;
@@ -197,6 +198,7 @@ public static class Patcher {
     ///     Distinct owner ids in run order, empty when Concord has no injections on the method the frame is
     ///     running or the frame reports no method at all.
     /// </returns>
+    [SuppressMessage("Usage", "CA1510:Use ArgumentNullException.ThrowIfNull", Justification = "ThrowIfNull is net6+ and this project also targets netstandard2.0 and net472.")]
     public static IReadOnlyList<string> OwnersOfFrame(StackFrame frame) {
         if (frame is null) {
             throw new ArgumentNullException(nameof(frame));

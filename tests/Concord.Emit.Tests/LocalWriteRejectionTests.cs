@@ -43,7 +43,7 @@ public static class LocalWriteMethods {
     }
 
     public static int Parse(int original, [Local(Ordinal = 1)] int first) {
-        int.TryParse("777", out first);
+        _ = int.TryParse("777", out first);
         return original;
     }
 

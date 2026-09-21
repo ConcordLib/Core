@@ -227,8 +227,10 @@ internal static class BodyCopier {
         List<(Instruction Source, List<Instruction> Emitted)> entries =
             new List<(Instruction Source, List<Instruction> Emitted)>(injectionBody.Instructions.Count);
 
+        ValueLoweringSite valueSite = new ValueLoweringSite(valueArgIndex, valueLocal, resultLocal, spliceEnd, localBinding, localHandles);
+
         foreach (Instruction source_instruction in injectionBody.Instructions) {
-            List<Instruction> emitted = LowerValueInstruction(source_instruction, ctx, valueArgIndex, valueLocal, resultLocal, spliceEnd, localBinding, localHandles);
+            List<Instruction> emitted = LowerValueInstruction(source_instruction, ctx, valueSite);
             entries.Add((source_instruction, emitted));
         }
 
@@ -572,6 +574,17 @@ internal static class BodyCopier {
             return LowerReturn(site);
         }
 
+        List<Instruction>? bindingLowering = TryLowerBinding(source, ctx, site);
+        if (bindingLowering is not null) {
+            return bindingLowering;
+        }
+
+        Instruction copy = CloneInstruction(source, ctx.Module, ctx.VariableMap, ctx.InjectedMembers);
+        RemapArgInstruction(copy, ctx);
+        return new List<Instruction> { copy };
+    }
+
+    private static List<Instruction>? TryLowerBinding(Instruction source, LoweringContext ctx, InjectionLoweringSite site) {
         List<Instruction>? localAddress = TryLowerLocalAddress(source, ctx);
         if (localAddress is not null) {
             return localAddress;
@@ -585,6 +598,10 @@ internal static class BodyCopier {
             return new List<Instruction> { boundLocal! };
         }
 
+        return TryLowerCommon(source, ctx);
+    }
+
+    private static List<Instruction>? TryLowerCommon(Instruction source, LoweringContext ctx) {
         if (TryLowerGetExecutingAssembly(source, ctx, out List<Instruction>? executingAssembly)) {
             return executingAssembly;
         }
@@ -605,9 +622,7 @@ internal static class BodyCopier {
             return attachedField!;
         }
 
-        Instruction copy = CloneInstruction(source, ctx.Module, ctx.VariableMap, ctx.InjectedMembers);
-        RemapArgInstruction(copy, ctx);
-        return new List<Instruction> { copy };
+        return null;
     }
 
     private static List<Instruction>? TryLowerStrayHandleUse(Instruction source, InjectionLoweringSite site) {
@@ -739,23 +754,43 @@ internal static class BodyCopier {
         return new List<Instruction> { Instruction.Create(OpCodes.Br, site.ReturnBranchTarget) };
     }
 
-    private static List<Instruction> LowerValueInstruction(
-        Instruction source,
-        LoweringContext ctx,
-        int valueArgIndex,
-        VariableDefinition valueLocal,
-        VariableDefinition resultLocal,
-        Instruction spliceEnd,
-        IReadOnlyDictionary<int, VariableDefinition>? localBinding,
-        LocalHandleLowering? localHandles) {
-        if (localHandles is not null && localHandles.TryLower(source, out List<Instruction> handleAccess)) {
+    private static List<Instruction> LowerValueInstruction(Instruction source, LoweringContext ctx, ValueLoweringSite site) {
+        if (site.LocalHandles is not null && site.LocalHandles.TryLower(source, out List<Instruction> handleAccess)) {
             return handleAccess;
         }
 
-        if (IsLoadArgOpCode(source.OpCode) && GetArgIndex(source) == valueArgIndex) {
-            return new List<Instruction> { Instruction.Create(OpCodes.Ldloc, valueLocal) };
+        if (IsLoadArgOpCode(source.OpCode) && GetArgIndex(source) == site.ValueArgIndex) {
+            return new List<Instruction> { Instruction.Create(OpCodes.Ldloc, site.ValueLocal) };
         }
 
+        RejectValueParameterWrite(source, site.ValueArgIndex);
+
+        List<Instruction>? localAddress = TryLowerLocalAddress(source, ctx);
+        if (localAddress is not null) {
+            return localAddress;
+        }
+
+        if (site.LocalBinding is not null && TryLowerArgBinding(source, site.LocalBinding, out Instruction? boundLocal)) {
+            return new List<Instruction> { boundLocal! };
+        }
+
+        if (source.OpCode == OpCodes.Ret) {
+            return new List<Instruction> {
+                Instruction.Create(OpCodes.Stloc, site.ResultLocal), Instruction.Create(OpCodes.Br, site.SpliceEnd),
+            };
+        }
+
+        List<Instruction>? common = TryLowerCommon(source, ctx);
+        if (common is not null) {
+            return common;
+        }
+
+        Instruction copy = CloneInstruction(source, ctx.Module, ctx.VariableMap, ctx.InjectedMembers);
+        RemapArgInstruction(copy, ctx);
+        return new List<Instruction> { copy };
+    }
+
+    private static void RejectValueParameterWrite(Instruction source, int valueArgIndex) {
         int argIndex = GetArgIndex(source);
         bool isAddressOfValue = (source.OpCode == OpCodes.Ldarga || source.OpCode == OpCodes.Ldarga_S) && argIndex == valueArgIndex;
         bool isReassignValue = (source.OpCode == OpCodes.Starg || source.OpCode == OpCodes.Starg_S) && argIndex == valueArgIndex;
@@ -765,45 +800,6 @@ internal static class BodyCopier {
                 "CONC039",
                 $"Value injection cannot take the address of or reassign its 'original' parameter. Only by-value reads are supported.");
         }
-
-        List<Instruction>? localAddress = TryLowerLocalAddress(source, ctx);
-        if (localAddress is not null) {
-            return localAddress;
-        }
-
-        if (localBinding is not null && TryLowerArgBinding(source, localBinding, out Instruction? boundLocal)) {
-            return new List<Instruction> { boundLocal! };
-        }
-
-        if (source.OpCode == OpCodes.Ret) {
-            return new List<Instruction> {
-                Instruction.Create(OpCodes.Stloc, resultLocal), Instruction.Create(OpCodes.Br, spliceEnd),
-            };
-        }
-
-        if (TryLowerGetExecutingAssembly(source, ctx, out List<Instruction>? executingAssembly)) {
-            return executingAssembly;
-        }
-
-        if (TryLowerProjectedMethodCall(source, ctx, out List<Instruction>? projectedCall)) {
-            return projectedCall;
-        }
-
-        if (TryNormalizeLocal(source, ctx.VariableMap, ctx.InjectionMethodLocals, out Instruction? local)) {
-            return new List<Instruction> { local! };
-        }
-
-        if (TryLowerObjectTypedInjectedField(source, ctx, out List<Instruction>? boxedField)) {
-            return boxedField!;
-        }
-
-        if (TryLowerAttachedField(source, ctx, out List<Instruction>? attachedField)) {
-            return attachedField!;
-        }
-
-        Instruction copy = CloneInstruction(source, ctx.Module, ctx.VariableMap, ctx.InjectedMembers);
-        RemapArgInstruction(copy, ctx);
-        return new List<Instruction> { copy };
     }
 
     private static bool IsControlHandleDup(Instruction instruction, int controlHandleArgIndex) {
@@ -1141,7 +1137,7 @@ internal static class BodyCopier {
     }
 
     // Filters the merged capture-and-local binding down to the entries that name a real target slot.
-    private static IReadOnlyDictionary<int, VariableDefinition>? LocalOnly(
+    private static Dictionary<int, VariableDefinition>? LocalOnly(
         IReadOnlyDictionary<int, VariableDefinition>? merged, MethodBase injectionMethod) {
         if (merged is null) {
             return null;

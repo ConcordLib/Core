@@ -80,36 +80,7 @@ internal sealed class LocalHandleLowering {
                 continue;
             }
 
-            if (instruction.OpCode == OpCodes.Ldarga || instruction.OpCode == OpCodes.Ldarga_S) {
-                throw Escaped(injectionMethod, target);
-            }
-
-            // `h.Value *= 10` compiles to `ldarg h; dup; call get_Value; ...; call set_Value`, so one
-            // load can put several copies of the handle in flight. They are consumed top down, and
-            // each consumer leaves the next copy's walk one slot deeper than a fresh one.
-            List<Instruction> copies = new List<Instruction> { instruction };
-            for (Instruction? next = instruction.Next; next is not null && next.OpCode == OpCodes.Dup; next = next.Next) {
-                copies.Add(next);
-            }
-
-            Instruction cursor = copies[copies.Count - 1];
-            int depth = 1;
-            for (int i = copies.Count - 1; i >= 0; i--) {
-                Instruction? consumer = BodyCopier.FindStackConsumer(cursor, depth, out bool blockedByFlow);
-                if (consumer is null && blockedByFlow) {
-                    throw Branched(injectionMethod, target);
-                }
-
-                ValueCallKind kind = consumer is null ? ValueCallKind.None : ClassifyValueCall(consumer);
-                if (consumer is null || kind == ValueCallKind.None || accesses.ContainsKey(consumer)) {
-                    throw Escaped(injectionMethod, target);
-                }
-
-                receivers.Add(copies[i]);
-                accesses[consumer] = (slot, kind == ValueCallKind.Write);
-                cursor = consumer;
-                depth = 1 + IlDump.PushCount(consumer);
-            }
+            PairReceiver(instruction, slot, injectionMethod, target, receivers, accesses);
         }
 
         // A Value call the loop never paired got its receiver from somewhere other than the
@@ -150,6 +121,45 @@ internal sealed class LocalHandleLowering {
         return false;
     }
 
+    private static void PairReceiver(
+        Instruction instruction,
+        VariableDefinition slot,
+        MethodBase injectionMethod,
+        MethodBase target,
+        HashSet<Instruction> receivers,
+        Dictionary<Instruction, (VariableDefinition Slot, bool Write)> accesses) {
+        if (instruction.OpCode == OpCodes.Ldarga || instruction.OpCode == OpCodes.Ldarga_S) {
+            throw Escaped(injectionMethod, target);
+        }
+
+        // `h.Value *= 10` compiles to `ldarg h; dup; call get_Value; ...; call set_Value`, so one
+        // load can put several copies of the handle in flight. They are consumed top down, and
+        // each consumer leaves the next copy's walk one slot deeper than a fresh one.
+        List<Instruction> copies = new List<Instruction> { instruction };
+        for (Instruction? next = instruction.Next; next is not null && next.OpCode == OpCodes.Dup; next = next.Next) {
+            copies.Add(next);
+        }
+
+        Instruction cursor = copies[copies.Count - 1];
+        int depth = 1;
+        for (int i = copies.Count - 1; i >= 0; i--) {
+            Instruction? consumer = BodyCopier.FindStackConsumer(cursor, depth, out bool blockedByFlow);
+            if (consumer is null && blockedByFlow) {
+                throw Branched(injectionMethod, target);
+            }
+
+            ValueCallKind kind = consumer is null ? ValueCallKind.None : ClassifyValueCall(consumer);
+            if (consumer is null || kind == ValueCallKind.None || accesses.ContainsKey(consumer)) {
+                throw Escaped(injectionMethod, target);
+            }
+
+            receivers.Add(copies[i]);
+            accesses[consumer] = (slot, kind == ValueCallKind.Write);
+            cursor = consumer;
+            depth = 1 + IlDump.PushCount(consumer);
+        }
+    }
+
     private static Dictionary<int, VariableDefinition> Bind(
         MethodBase injectionMethod, MethodBody wrapperBody, ProtocolLocals locals, MethodBase target) {
         ParameterInfo[] parameters = injectionMethod.GetParameters();
@@ -167,7 +177,7 @@ internal sealed class LocalHandleLowering {
             int index = selector?.Index ?? -1;
 
             binding[i + offset] = LocalResolver.Resolve(
-                wrapperBody, locals, element, ordinal, index, selector?.Name, injectionMethod, target, parameters[i].Name);
+                wrapperBody, locals, new LocalSelector(element, ordinal, index, selector?.Name), injectionMethod, target, parameters[i].Name);
         }
 
         return binding;

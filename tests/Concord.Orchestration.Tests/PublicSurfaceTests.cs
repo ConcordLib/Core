@@ -14,6 +14,7 @@ namespace Concord.Orchestration.Tests;
 ///     and taking it back out later is a breaking change. Both are <c>PrivateAssets="all"</c> in the ref
 ///     package, so either one on a public member breaks a mod's compile.
 /// </summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "SYSLIB1045", Justification = "GeneratedRegex needs net7 or later and this suite also targets net472.")]
 public sealed class PublicSurfaceTests {
     // NonPublic is here for protected members: they are part of the surface a mod can reach by
     // deriving, and BindingFlags.Public alone does not return them. VisibleOutsideAssembly drops the

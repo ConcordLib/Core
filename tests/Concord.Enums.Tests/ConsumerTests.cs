@@ -24,6 +24,7 @@ public abstract class ConsumerWeather : ExtendedEnum<WeatherKind> {
 }
 
 [Collection(RegistryCollection.Name)]
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "CA2263", Justification = "CoreLibEnumDetours only detours the Type-taking overloads, so the generic ones would not exercise the detour.")]
 public sealed class ConsumerTests {
     [Fact]
     public void Values_IncludesTheAddedMember() {

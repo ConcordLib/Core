@@ -221,15 +221,7 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
     /// <inheritdoc />
     public IReadOnlyList<string> ForeignOwners(MethodBase target)
     {
-        target = MethodIdentity.Normalize(target);
-
-        try
-        {
-            target = ResolveSharedBodyOwner(target);
-        }
-        catch (Exception)
-        {
-        }
+        target = ResolveSharedBodyOwnerOrSelf(MethodIdentity.Normalize(target));
 
         try
         {
@@ -305,6 +297,18 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
 #pragma warning restore CS0618
     }
 
+    private static MethodBase ResolveSharedBodyOwnerOrSelf(MethodBase target)
+    {
+        try
+        {
+            return ResolveSharedBodyOwner(target);
+        }
+        catch (Exception)
+        {
+            return target;
+        }
+    }
+
     private static MethodBase ResolveSharedBodyOwner(MethodBase target)
     {
         if (!WrapperComposer.SharesGenericBody(target))
@@ -340,6 +344,17 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
 
     private static partial IReadOnlyList<string> CollectForeignOwners(MethodBase target);
 
+    private static void CollectForeignOwners(IReadOnlyList<Patch> patches, HashSet<string> owners)
+    {
+        for (int i = 0; i < patches.Count; i++)
+        {
+            if (patches[i].PatchMethod != TranspilerParticipant.TranspileMethod)
+            {
+                owners.Add(patches[i].owner);
+            }
+        }
+    }
+
     private static bool HasForeignEntry(IReadOnlyList<Patch> patches)
     {
         for (int i = 0; i < patches.Count; i++)
@@ -351,17 +366,6 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
         }
 
         return false;
-    }
-
-    private static void CollectForeignOwners(IReadOnlyList<Patch> patches, HashSet<string> owners)
-    {
-        for (int i = 0; i < patches.Count; i++)
-        {
-            if (patches[i].PatchMethod != TranspilerParticipant.TranspileMethod)
-            {
-                owners.Add(patches[i].owner);
-            }
-        }
     }
 
     private long[] ApplyToRoutedCore(MethodBase target, IReadOnlyList<Injection> added)

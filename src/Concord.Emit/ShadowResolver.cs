@@ -7,6 +7,8 @@ namespace Concord.Emit;
 ///     Resolves declaration shadow fields to their matching fields on the real target type.
 /// </summary>
 internal static class ShadowResolver {
+    private const string MissingField = "CONC003";
+
     /// <summary>
     ///     Builds a field remap from declaration field name to the corresponding target field, and allocates
     ///     a storage slot for every <c>[Attached]</c> declaration field.
@@ -37,45 +39,17 @@ internal static class ShadowResolver {
                 BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly);
 
             if (targetField is null) {
-                bool marked = declarationField.GetCustomAttribute<AttachedAttribute>() is not null;
-                if (declarationField.IsStatic) {
-                    if (marked) {
-                        throw new ConcordEmitException(
-                            "CONC003",
-                            $"Field '{declarationField.Name}' on declaration '{declarationType.Name}' is static, so there is no instance to attach it to. Drop [Attached]. A static field on a declaration is just a static field.");
-                    }
-
-                    continue;
+                AttachedFieldSlot? slot = SlotForMissing(declarationType, targetType, declarationField);
+                if (slot is not null) {
+                    attached[declarationField.Name] = slot.Value;
                 }
 
-                if (!marked && !IsCompilerGenerated(declarationField)) {
-                    throw new ConcordEmitException(
-                        "CONC003",
-                        $"Field '{declarationField.Name}' on declaration '{declarationType.Name}' has no matching field on target '{targetType.Name}'. " +
-                        "Mark it [Attached] to store it beside each instance, or [InjectField(\"name\")] when it shadows a target field under a different name.");
-                }
-
-                if (targetType.IsValueType) {
-                    throw new ConcordEmitException(
-                        "CONC003",
-                        $"Field '{declarationField.Name}' on declaration '{declarationType.Name}' is [Attached], but target '{targetType.Name}' is a value type. Attached state is keyed by instance identity, which a struct does not have.");
-                }
-
-                if (declarationField.FieldType.ContainsGenericParameters) {
-                    throw new ConcordEmitException(
-                        "CONC003",
-                        $"Field '{declarationField.Name}' on declaration '{declarationType.Name}' is [Attached] with the open type '{declarationField.FieldType}'. Attached storage is allocated per closed type, so name a concrete one.");
-                }
-
-                attached[declarationField.Name] = new AttachedFieldSlot(
-                    AttachedStorage.SlotFor(declarationType, declarationField.Name, declarationField.FieldType),
-                    declarationField.FieldType);
                 continue;
             }
 
             if (declarationField.GetCustomAttribute<AttachedAttribute>() is not null) {
                 throw new ConcordEmitException(
-                    "CONC003",
+                    MissingField,
                     $"Field '{declarationField.Name}' on declaration '{declarationType.Name}' is marked [Attached], but target '{targetType.Name}' already declares that field. Drop the attribute to shadow the real field.");
             }
 
@@ -89,6 +63,42 @@ internal static class ShadowResolver {
         }
 
         return map;
+    }
+
+    private static AttachedFieldSlot? SlotForMissing(Type declarationType, Type targetType, FieldInfo declarationField) {
+        bool marked = declarationField.GetCustomAttribute<AttachedAttribute>() is not null;
+        if (declarationField.IsStatic) {
+            if (marked) {
+                throw new ConcordEmitException(
+                    MissingField,
+                    $"Field '{declarationField.Name}' on declaration '{declarationType.Name}' is static, so there is no instance to attach it to. Drop [Attached]. A static field on a declaration is just a static field.");
+            }
+
+            return null;
+        }
+
+        if (!marked && !IsCompilerGenerated(declarationField)) {
+            throw new ConcordEmitException(
+                MissingField,
+                $"Field '{declarationField.Name}' on declaration '{declarationType.Name}' has no matching field on target '{targetType.Name}'. " +
+                "Mark it [Attached] to store it beside each instance, or [InjectField(\"name\")] when it shadows a target field under a different name.");
+        }
+
+        if (targetType.IsValueType) {
+            throw new ConcordEmitException(
+                MissingField,
+                $"Field '{declarationField.Name}' on declaration '{declarationType.Name}' is [Attached], but target '{targetType.Name}' is a value type. Attached state is keyed by instance identity, which a struct does not have.");
+        }
+
+        if (declarationField.FieldType.ContainsGenericParameters) {
+            throw new ConcordEmitException(
+                MissingField,
+                $"Field '{declarationField.Name}' on declaration '{declarationType.Name}' is [Attached] with the open type '{declarationField.FieldType}'. Attached storage is allocated per closed type, so name a concrete one.");
+        }
+
+        return new AttachedFieldSlot(
+            AttachedStorage.SlotFor(declarationType, declarationField.Name, declarationField.FieldType),
+            declarationField.FieldType);
     }
 
     private static bool IsCompilerGenerated(FieldInfo field) {

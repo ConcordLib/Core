@@ -102,8 +102,25 @@ internal static class CodeInstructionConverter {
     ///     the original body's local at that slot. Harmony declares from the same list, so slots line up.
     /// </remarks>
     private static List<Concord.LocalRef> DeclareLocalsForStream(List<CodeInstruction> stream, Concord.ITranspilerContext context, HarmonyStreamContext built) {
-        int maxSlot = -1;
         Dictionary<int, LocalVariableInfo> localBySlot = new Dictionary<int, LocalVariableInfo>();
+        int maxSlot = ScanLocalSlots(stream, localBySlot);
+
+        IList<LocalVariableInfo>? originalLocals = context.Original.GetMethodBody()?.LocalVariables;
+        List<Concord.LocalRef> localRefBySlot = new List<Concord.LocalRef>(maxSlot + 1);
+        for (int slot = 0; slot <= maxSlot; slot++) {
+            localBySlot.TryGetValue(slot, out LocalVariableInfo? original);
+            Concord.LocalRef declared = context.DeclareLocal(LocalTypeForSlot(original, originalLocals, slot));
+            localRefBySlot.Add(declared);
+            if (original is not null) {
+                built.HarmonyLocalByRef[declared] = original;
+            }
+        }
+
+        return localRefBySlot;
+    }
+
+    private static int ScanLocalSlots(List<CodeInstruction> stream, Dictionary<int, LocalVariableInfo> localBySlot) {
+        int maxSlot = -1;
         foreach (CodeInstruction instruction in stream) {
             if (instruction.operand is LocalVariableInfo localInfo) {
                 localBySlot[localInfo.LocalIndex] = localInfo;
@@ -118,21 +135,19 @@ internal static class CodeInstructionConverter {
             }
         }
 
-        IList<LocalVariableInfo>? originalLocals = context.Original.GetMethodBody()?.LocalVariables;
-        List<Concord.LocalRef> localRefBySlot = new List<Concord.LocalRef>(maxSlot + 1);
-        for (int slot = 0; slot <= maxSlot; slot++) {
-            localBySlot.TryGetValue(slot, out LocalVariableInfo? original);
-            Type localType = original is not null ? original.LocalType
-                : originalLocals is not null && slot < originalLocals.Count ? originalLocals[slot].LocalType
-                : typeof(object);
-            Concord.LocalRef declared = context.DeclareLocal(localType);
-            localRefBySlot.Add(declared);
-            if (original is not null) {
-                built.HarmonyLocalByRef[declared] = original;
-            }
+        return maxSlot;
+    }
+
+    private static Type LocalTypeForSlot(LocalVariableInfo? original, IList<LocalVariableInfo>? originalLocals, int slot) {
+        if (original is not null) {
+            return original.LocalType;
         }
 
-        return localRefBySlot;
+        if (originalLocals is not null && slot < originalLocals.Count) {
+            return originalLocals[slot].LocalType;
+        }
+
+        return typeof(object);
     }
 
     /// <summary>Maps each Harmony instruction, its labels, and its exception blocks onto the Concord model.</summary>

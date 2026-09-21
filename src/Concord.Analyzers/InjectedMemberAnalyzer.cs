@@ -240,6 +240,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     private const string OperationTypeName = "Operation";
     private const string VoidOperationPrefix = "VoidOperation<";
     private const string ConstructorName = ".ctor";
+    private const string InvokeDeclaringTypeParameter = "invokeDeclaringType";
 
     // Mirrors WrapperComposer.SupportsLocalBinding's message. The two lists are deliberate twins:
     // the analyzer cannot reference Concord.Emit, so changing one means changing the other.
@@ -777,7 +778,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
 
     private static void ValidateSlicePosition(SymbolAnalysisContext context, InjectionDeclaration declaration) {
         AttributeData? slice = declaration.Method.GetAttributes().FirstOrDefault(IsSliceAttribute);
-        if (slice is null || declaration.TargetsCallSite || declaration.PositionName == "Local") {
+        if (slice is null || declaration.TargetsCallSite || declaration.AtName == "Local") {
             return;
         }
 
@@ -785,7 +786,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             MisplacedSliceRule,
             LocationOf(slice, declaration.Method, context.CancellationToken),
             declaration.Method.Name,
-            "At." + declaration.PositionName));
+            "At." + declaration.AtName));
     }
 
     // Mirrors RejectMisplacedCaptures: a capture needs a matched call, so only the Head and Tail
@@ -798,10 +799,10 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             return;
         }
 
-        if (!declaration.TargetsCallSite || declaration.PositionName is not ("Head" or "Tail")) {
+        if (!declaration.TargetsCallSite || declaration.AtName is not ("Head" or "Tail")) {
             string reason = declaration.TargetsCallSite
-                ? $"uses the shift At.{declaration.PositionName}, which does not name a point where the call's arguments are still on the stack"
-                : $"is a whole-method position (At.{declaration.PositionName}), which matches no call";
+                ? $"uses the shift At.{declaration.AtName}, which does not name a point where the call's arguments are still on the stack"
+                : $"is a whole-method position (At.{declaration.AtName}), which matches no call";
             context.ReportDiagnostic(Diagnostic.Create(
                 MisplacedCaptureRule,
                 LocationOf(captured),
@@ -842,10 +843,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         }
     }
 
-    // Mirrors WrapperComposer.RejectMisplacedLocals. At.Head runs before the target body assigns
-    // anything, and every other unsupported position lowers through a copier that builds no binding
-    // map. At values are matched by enum field name so this list diffs by eye against the runtime one.
-    private static void ValidateLocalParameters(SymbolAnalysisContext context, InjectionDeclaration declaration) {
+    private static IParameterSymbol? ValidateLocalParameterAttributes(SymbolAnalysisContext context, InjectionDeclaration declaration) {
         IParameterSymbol? first = null;
 
         foreach (IParameterSymbol parameter in declaration.Method.Parameters) {
@@ -874,6 +872,15 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             }
         }
 
+        return first;
+    }
+
+    // Mirrors WrapperComposer.RejectMisplacedLocals. At.Head runs before the target body assigns
+    // anything, and every other unsupported position lowers through a copier that builds no binding
+    // map. At values are matched by enum field name so this list diffs by eye against the runtime one.
+    private static void ValidateLocalParameters(SymbolAnalysisContext context, InjectionDeclaration declaration) {
+        IParameterSymbol? first = ValidateLocalParameterAttributes(context, declaration);
+
         if (first is null) {
             return;
         }
@@ -883,7 +890,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             return;
         }
 
-        if (!declaration.TargetsCallSite && declaration.PositionName == "Around") {
+        if (!declaration.TargetsCallSite && declaration.AtName == "Around") {
             context.ReportDiagnostic(Diagnostic.Create(
                 LocalOnWholeMethodAroundRule,
                 LocationOf(first),
@@ -891,7 +898,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             return;
         }
 
-        if (!declaration.TargetsCallSite && declaration.PositionName == "Head") {
+        if (!declaration.TargetsCallSite && declaration.AtName == "Head") {
             context.ReportDiagnostic(Diagnostic.Create(
                 LocalAtHeadRule,
                 LocationOf(first),
@@ -1003,26 +1010,32 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     // Around. Keep both in step.
     private static string PositionName(InjectionDeclaration declaration) {
         if (!declaration.TargetsCallSite) {
-            return "At." + declaration.PositionName;
+            return "At." + declaration.AtName;
         }
 
-        return (declaration.TargetsNewObj ? "At.NewObj/At." : "At.Invoke/At.") + declaration.PositionName;
+        return (declaration.TargetsNewObj ? "At.NewObj/At." : "At.Invoke/At.") + declaration.AtName;
+    }
+
+    private static string PositionName(InjectionInfo injection) {
+        string at = AtMemberName(injection.Attribute, injection.TargetsInvoke ? "shift" : "at") ?? "Head";
+
+        return at + "/" + injection.By.ToString();
     }
 
     // Twin of WrapperComposer.SupportsLocalBinding. Keep both in step; the analyzer targets
     // netstandard2.0 with no reference to Concord.Emit, so it cannot call the runtime one.
     private static bool SupportsLocalBinding(InjectionDeclaration declaration) {
         return declaration.TargetsCallSite
-            ? declaration.PositionName is "Head" or "Tail"
-            : declaration.PositionName is "Return" or "Tail" or "Finally" or "Local";
+            ? declaration.AtName is "Head" or "Tail"
+            : declaration.AtName is "Return" or "Tail" or "Finally" or "Local";
     }
 
     // Twin of WrapperComposer.SupportsLocalWrite. Keep both in step; the analyzer targets
     // netstandard2.0 with no reference to Concord.Emit, so it cannot call the runtime one.
     private static bool SupportsLocalWrite(InjectionDeclaration declaration) {
         return declaration.TargetsCallSite
-            ? declaration.PositionName is "Head" or "Tail"
-            : declaration.PositionName == "Local";
+            ? declaration.AtName is "Head" or "Tail"
+            : declaration.AtName == "Local";
     }
 
     private static bool IsLocalHandleType(ITypeSymbol type) {
@@ -1111,6 +1124,27 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         context.RegisterSymbolEndAction(collector.Report);
     }
 
+    private static void ResolveCallSiteArguments(
+        AttributeData attribute,
+        bool targetsNewObj,
+        bool targetsInvoke,
+        out ITypeSymbol? callSiteType,
+        out string? callSiteMember,
+        out ImmutableArray<ITypeSymbol>? callSiteParameterTypes) {
+        callSiteType = null;
+        callSiteMember = null;
+        if (TryGetConstructorArgument(attribute, targetsNewObj ? "constructedType" : InvokeDeclaringTypeParameter, out TypedConstant callSiteTypeArgument) &&
+            callSiteTypeArgument.Value is ITypeSymbol resolvedCallSiteType) {
+            callSiteType = resolvedCallSiteType;
+        }
+
+        if (targetsInvoke) {
+            TryGetStringConstructorArgument(attribute, "invokeDeclaringMethod", out callSiteMember);
+        }
+
+        callSiteParameterTypes = TryGetTypeArrayConstructorArgument(attribute, "invokeParameterTypes");
+    }
+
     private static InjectionDeclaration? TryGetInjectionDeclaration(IMethodSymbol method) {
         AttributeData? attribute = method.GetAttributes().FirstOrDefault(IsInjectAttribute);
         bool targetsNewObj = false;
@@ -1123,7 +1157,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             return null;
         }
 
-        bool targetsInvoke = !targetsNewObj && ConstructorHasParameter(attribute, "invokeDeclaringType");
+        bool targetsInvoke = !targetsNewObj && ConstructorHasParameter(attribute, InvokeDeclaringTypeParameter);
         bool targetsCallSite = targetsInvoke || targetsNewObj;
         string atParameterName = targetsCallSite ? "shift" : "at";
         string? positionName = AtMemberName(attribute, atParameterName);
@@ -1145,16 +1179,13 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         string? callSiteMember = null;
         ImmutableArray<ITypeSymbol>? callSiteParameterTypes = null;
         if (targetsCallSite) {
-            if (TryGetConstructorArgument(attribute, targetsNewObj ? "constructedType" : "invokeDeclaringType", out TypedConstant callSiteTypeArgument) &&
-                callSiteTypeArgument.Value is ITypeSymbol resolvedCallSiteType) {
-                callSiteType = resolvedCallSiteType;
-            }
-
-            if (targetsInvoke) {
-                TryGetStringConstructorArgument(attribute, "invokeDeclaringMethod", out callSiteMember);
-            }
-
-            callSiteParameterTypes = TryGetTypeArrayConstructorArgument(attribute, "invokeParameterTypes");
+            ResolveCallSiteArguments(
+                attribute,
+                targetsNewObj,
+                targetsInvoke,
+                out callSiteType,
+                out callSiteMember,
+                out callSiteParameterTypes);
         }
 
         return new InjectionDeclaration(
@@ -1186,34 +1217,6 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         }
 
         return null;
-    }
-
-    // A state slot is scoped per patch declaration per target method, matching how
-    // AllocateStateLocals keys its declared-type map inside a single target's injection list.
-    // The constructor branch matches parameter types the way ResolveInjectionTarget does, so an
-    // absent parameterTypes selects the parameterless constructor rather than every constructor;
-    // otherwise two injections that name the same constructor land in two slots.
-    private static InjectionTargetIdentity TargetIdentity(InjectionDeclaration declaration, INamedTypeSymbol targetType) {
-        ImmutableArray<IMethodSymbol> candidates = declaration.TargetsConstructor
-            ? targetType.InstanceConstructors
-                .Where(constructor => ConstructorParameterTypesMatch(declaration.ParameterTypes, constructor.Parameters))
-                .ToImmutableArray()
-            : FindMethodCandidates(targetType, declaration.TargetMemberName)
-                .Where(candidate => ParameterTypesMatch(declaration.ParameterTypes, candidate.Parameters))
-                .ToImmutableArray();
-
-        if (candidates.Length == 1) {
-            return new InjectionTargetIdentity(
-                candidates[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-                candidates[0].ToDisplayString());
-        }
-
-        string parameters = declaration.ParameterTypes.HasValue
-            ? string.Join(",", declaration.ParameterTypes.Value.Select(type => type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)))
-            : "*";
-        return new InjectionTargetIdentity(
-            declaration.TargetMemberName + "|" + parameters,
-            targetType.ToDisplayString() + "." + declaration.TargetMemberName);
     }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Minor Code Smell", "S4158", Justification = "False positive: beforeOwners/afterOwners accumulate across loop iterations via owners.Add, so oppositeOwners is not empty on later iterations. The Contains check detects owners declared in both [PatchBefore] and [PatchAfter].")]
@@ -1592,12 +1595,31 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         }
     }
 
+    private static string ResolveLocalKey(AttributeData attribute, out LocalPositionInfo? localPosition) {
+        string localKey = "*";
+        localPosition = null;
+        if (ConstructorHasParameter(attribute, "localType")) {
+            TryGetConstructorArgument(attribute, "localType", out TypedConstant localTypeArgument);
+            TryGetIntConstructorArgument(attribute, "access", out int access);
+            TryGetUIntConstructorArgument(attribute, "ordinal", out uint ordinal);
+            TryGetIntConstructorArgument(attribute, "index", out int index);
+            TryGetStringConstructorArgument(attribute, "name", out string? localName);
+            string localTypeName = localTypeArgument.Value is ITypeSymbol localType
+                ? localType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+                : "?";
+            localKey = localTypeName + "," + access + "," + ordinal + "," + index + "," + (localName ?? "*");
+            localPosition = new LocalPositionInfo(localTypeArgument.Value as ITypeSymbol, ordinal, index, localName);
+        }
+
+        return localKey;
+    }
+
     private static bool TryGetInjectionInfo(IMethodSymbol method, AttributeData attribute, out InjectionInfo? injection) {
         injection = null;
 
         bool hasConstant = ConstructorHasParameter(attribute, "constant");
         bool targetsConstructor = !ConstructorHasParameter(attribute, "method");
-        bool targetsInvoke = ConstructorHasParameter(attribute, "invokeDeclaringType");
+        bool targetsInvoke = ConstructorHasParameter(attribute, InvokeDeclaringTypeParameter);
         string targetName = ConstructorName;
         if (!targetsConstructor) {
             if (!TryGetStringConstructorArgument(attribute, "method", out string? methodName) || string.IsNullOrWhiteSpace(methodName)) {
@@ -1624,7 +1646,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         ImmutableArray<ITypeSymbol>? invokeParameterTypes = null;
         uint arg = 0;
         if (targetsInvoke) {
-            if (TryGetConstructorArgument(attribute, "invokeDeclaringType", out TypedConstant invokeTypeArgument) &&
+            if (TryGetConstructorArgument(attribute, InvokeDeclaringTypeParameter, out TypedConstant invokeTypeArgument) &&
                 invokeTypeArgument.Value is ITypeSymbol invokeType) {
                 invokeDeclaringType = invokeType;
             }
@@ -1634,20 +1656,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             TryGetUIntConstructorArgument(attribute, "arg", out arg);
         }
 
-        string localKey = "*";
-        LocalPositionInfo? localPosition = null;
-        if (ConstructorHasParameter(attribute, "localType")) {
-            TryGetConstructorArgument(attribute, "localType", out TypedConstant localTypeArgument);
-            TryGetIntConstructorArgument(attribute, "access", out int access);
-            TryGetUIntConstructorArgument(attribute, "ordinal", out uint ordinal);
-            TryGetIntConstructorArgument(attribute, "index", out int index);
-            TryGetStringConstructorArgument(attribute, "name", out string? localName);
-            string localTypeName = localTypeArgument.Value is ITypeSymbol localType
-                ? localType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
-                : "?";
-            localKey = localTypeName + "," + access + "," + ordinal + "," + index + "," + (localName ?? "*");
-            localPosition = new LocalPositionInfo(localTypeArgument.Value as ITypeSymbol, ordinal, index, localName);
-        }
+        string localKey = ResolveLocalKey(attribute, out LocalPositionInfo? localPosition);
 
         injection = new InjectionInfo(
             method,
@@ -2525,6 +2534,18 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             "set_" + name));
     }
 
+    private static ITypeSymbol? ValueInjectionType(InjectionInfo injection) {
+        if (injection.HasConstant) {
+            return injection.ConstantValue?.Type;
+        }
+
+        if (injection.Local is not null) {
+            return injection.Local.LocalType;
+        }
+
+        return ResolveArgumentValueType(injection);
+    }
+
     private static void ValidateValueInjectionSignature(
         SymbolAnalysisContext context,
         InjectionInfo injection) {
@@ -2532,11 +2553,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             ValidateInvokeCallSiteName(context, injection);
         }
 
-        ITypeSymbol? valueType = injection.HasConstant
-            ? injection.ConstantValue?.Type
-            : injection.Local is not null
-                ? injection.Local.LocalType
-                : ResolveArgumentValueType(injection);
+        ITypeSymbol? valueType = ValueInjectionType(injection);
 
         // A local sibling reads another slot rather than carrying the replaced value, so it is not
         // part of the 'T M(T original)' shape. A bare LocalHandle<T> carries no [Local] and is still
@@ -3224,12 +3241,6 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         }
 
         return null;
-    }
-
-    private static string PositionName(InjectionInfo injection) {
-        string at = AtMemberName(injection.Attribute, injection.TargetsInvoke ? "shift" : "at") ?? "Head";
-
-        return at + "/" + injection.By.ToString();
     }
 
     // localKey is built in TryGetInjectionInfo, which is a long way up this file. It is "*" for every
@@ -4079,7 +4090,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             Method = method;
             TargetsCallSite = targetsCallSite;
             TargetsNewObj = targetsNewObj;
-            PositionName = positionName;
+            AtName = positionName;
             TargetsConstructor = targetsConstructor;
             TargetMemberName = targetMemberName;
             ParameterTypes = parameterTypes;
@@ -4094,7 +4105,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
 
         public bool TargetsNewObj { get; }
 
-        public string PositionName { get; }
+        public string AtName { get; }
 
         public bool TargetsConstructor { get; }
 
@@ -4252,6 +4263,34 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             foreach (StateSlot slot in order) {
                 slot.ReportUnwritten(context, patchType);
             }
+        }
+
+        // A state slot is scoped per patch declaration per target method, matching how
+        // AllocateStateLocals keys its declared-type map inside a single target's injection list.
+        // The constructor branch matches parameter types the way ResolveInjectionTarget does, so an
+        // absent parameterTypes selects the parameterless constructor rather than every constructor;
+        // otherwise two injections that name the same constructor land in two slots.
+        private static InjectionTargetIdentity TargetIdentity(InjectionDeclaration declaration, INamedTypeSymbol targetType) {
+            ImmutableArray<IMethodSymbol> candidates = declaration.TargetsConstructor
+                ? targetType.InstanceConstructors
+                    .Where(constructor => ConstructorParameterTypesMatch(declaration.ParameterTypes, constructor.Parameters))
+                    .ToImmutableArray()
+                : FindMethodCandidates(targetType, declaration.TargetMemberName)
+                    .Where(candidate => ParameterTypesMatch(declaration.ParameterTypes, candidate.Parameters))
+                    .ToImmutableArray();
+
+            if (candidates.Length == 1) {
+                return new InjectionTargetIdentity(
+                    candidates[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                    candidates[0].ToDisplayString());
+            }
+
+            string parameters = declaration.ParameterTypes.HasValue
+                ? string.Join(",", declaration.ParameterTypes.Value.Select(type => type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)))
+                : "*";
+            return new InjectionTargetIdentity(
+                declaration.TargetMemberName + "|" + parameters,
+                targetType.ToDisplayString() + "." + declaration.TargetMemberName);
         }
 
         private static int CompareBySourcePosition(StateCall left, StateCall right) {

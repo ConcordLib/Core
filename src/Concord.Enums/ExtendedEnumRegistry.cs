@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Reflection;
 
@@ -16,6 +17,7 @@ public sealed record ExtendedEnumMember(Type EnumType, FieldInfo Field, string I
 ///     Reads extended enum declarations, allocates member values, and assigns the declaration fields.
 /// </summary>
 public static partial class ExtendedEnumRegistry {
+    [SuppressMessage("Major Code Smell", "S3011:Reflection should not be used to increase accessibility of classes, methods, or fields", Justification = "Concord assigns a declaration's own private member fields by design; the declaration opted in with [Patch].")]
     private const BindingFlags DeclaredFields = BindingFlags.Public |
                                                 BindingFlags.NonPublic |
                                                 BindingFlags.Instance |

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Reflection;
 using Concord.Emit;
@@ -120,6 +121,7 @@ public sealed class ConsumerBuilder {
         return this;
     }
 
+    [SuppressMessage("Major Code Smell", "S3011:Reflection should not be used to increase accessibility of classes, methods, or fields", Justification = "Concord binds a game's consumer method whatever its accessibility, then validates its shape.")]
     private static MethodInfo Resolve(Type owner, string methodName) {
         MethodInfo? target = owner.GetMethod(
             methodName,

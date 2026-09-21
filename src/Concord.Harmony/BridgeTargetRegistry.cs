@@ -135,7 +135,7 @@ internal sealed class BridgeTargetRegistry
     }
 
     // Composition order runs backwards: the body composed last wraps the others, so it runs first.
-    private static IReadOnlyList<string> BuildOwners(List<(long Seq, Injection Injection)> live)
+    private static List<string> BuildOwners(List<(long Seq, Injection Injection)> live)
     {
         Injection[] ordered;
         try

@@ -15,6 +15,7 @@ namespace Concord.Detour;
 ///     <see cref="MethodInfo" /> and the runtime rejects the body. Call this once the swap is done.
 /// </remarks>
 public static class ResolveCache {
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S3011", Justification = "MonoMod's resolve caches are private statics, and clearing them after an assembly swap needs them.")]
     private const BindingFlags Hidden = BindingFlags.NonPublic | BindingFlags.Static;
 
     /// <summary>

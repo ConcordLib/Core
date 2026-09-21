@@ -11,16 +11,20 @@ namespace Concord.Detour;
 ///     before the first detour is created.
 /// </summary>
 internal static class MonoModHost {
+#if NET10_0_OR_GREATER
     private const string Core100RuntimeName = "MonoMod.Core.Platforms.Runtimes.Core100Runtime";
     private const int VtableIndexGetVersionIdentifier = 2;
 
     private static int reconciled;
+#endif
 
     internal static IDetourFactory Factory {
         get {
+#if NET10_0_OR_GREATER
             if (Interlocked.Exchange(ref reconciled, 1) == 0) {
                 ReconcileJitVersion();
             }
+#endif
 
             return DetourFactory.Current;
         }
@@ -31,6 +35,7 @@ internal static class MonoModHost {
     // can bump that guid. Everything MonoMod pokes is still stock-shaped, so take the JIT at its word
     // rather than losing every detour to the assert.
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Vulnerability", "S6640", Justification = "ICorJitCompiler is a C++ vtable. Reading its version guid needs an unmanaged function pointer and has no managed equivalent.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S3011", Justification = "MonoMod keeps the JIT version guid in a private static field, and reading it is the whole point of this method.")]
     private static unsafe void ReconcileJitVersion() {
         if (Environment.Version.Major != 10) {
             return;
@@ -91,9 +96,6 @@ internal static class MonoModHost {
         il.Emit(OpCodes.Conv_I);
         il.Emit(OpCodes.Ret);
         return ((Func<nint>)method.CreateDelegate(typeof(Func<nint>)))();
-    }
-#else
-    private static void ReconcileJitVersion() {
     }
 #endif
 }

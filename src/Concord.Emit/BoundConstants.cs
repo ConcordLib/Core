@@ -9,6 +9,10 @@ namespace Concord.Emit;
 ///     <see cref="BoundAttribute" /> parameters while its body is copied.
 /// </summary>
 internal static class BoundConstants {
+    private const string Unbindable = "CONC137";
+    private const string BoundParameter = "[Bound] parameter '";
+    private const string OnOwner = "' on '";
+
     private static MethodInfo TypeFromHandle =>
         typeof(Type).GetMethod(nameof(Type.GetTypeFromHandle), [typeof(RuntimeTypeHandle)])!;
 
@@ -71,8 +75,8 @@ internal static class BoundConstants {
         foreach (ParameterInfo parameter in injectionMethod.GetParameters()) {
             if (parameter.GetCustomAttribute<BoundAttribute>() is not null) {
                 throw new ConcordEmitException(
-                    "CONC137",
-                    "[Bound] parameter '" + parameter.Name + "' on '" + injectionMethod.Name + "' is not supported at " + position + ".");
+                    Unbindable,
+                    BoundParameter + parameter.Name + OnOwner + injectionMethod.Name + "' is not supported at " + position + ".");
             }
         }
     }
@@ -108,7 +112,7 @@ internal static class BoundConstants {
             ulong n => [Instruction.Create(OpCodes.Ldc_I8, unchecked((long)n))],
             float n => [Instruction.Create(OpCodes.Ldc_R4, n)],
             double n => [Instruction.Create(OpCodes.Ldc_R8, n)],
-            _ => throw new ConcordEmitException("CONC137", "Bound value of type '" + literal.GetType().Name + "' cannot be emitted as a literal."),
+            _ => throw new ConcordEmitException(Unbindable, "Bound value of type '" + literal.GetType().Name + "' cannot be emitted as a literal."),
         };
     }
 
@@ -116,15 +120,15 @@ internal static class BoundConstants {
         Type declared = parameter.ParameterType;
         if (declared.IsByRef) {
             throw new ConcordEmitException(
-                "CONC137",
-                "[Bound] parameter '" + parameter.Name + "' on '" + injectionMethod.Name + "' is byref. A bound value is emitted as a literal and has no address.");
+                Unbindable,
+                BoundParameter + parameter.Name + OnOwner + injectionMethod.Name + "' is byref. A bound value is emitted as a literal and has no address.");
         }
 
         if (value is null) {
             if (declared.IsValueType && Nullable.GetUnderlyingType(declared) is null) {
                 throw new ConcordEmitException(
-                    "CONC137",
-                    "[Bound] parameter '" + parameter.Name + "' on '" + injectionMethod.Name + "' is a non-nullable value type and cannot be bound to null.");
+                    Unbindable,
+                    BoundParameter + parameter.Name + OnOwner + injectionMethod.Name + "' is a non-nullable value type and cannot be bound to null.");
             }
 
             return;
@@ -132,8 +136,8 @@ internal static class BoundConstants {
 
         if (!declared.IsInstanceOfType(value)) {
             throw new ConcordEmitException(
-                "CONC137",
-                "[Bound] parameter '" + parameter.Name + "' on '" + injectionMethod.Name + "' is declared as '" + declared.Name + "' but was bound to a '" +
+                Unbindable,
+                BoundParameter + parameter.Name + OnOwner + injectionMethod.Name + "' is declared as '" + declared.Name + "' but was bound to a '" +
                 value.GetType().Name + "'.");
         }
     }

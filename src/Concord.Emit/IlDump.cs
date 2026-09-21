@@ -88,55 +88,8 @@ internal static class IlDump {
     // local from one copy will not accept a value from the other.
     internal static string FormatAssemblies(MethodDefinition method) {
         MethodBody body = method.Body;
-        Dictionary<string, HashSet<Assembly>> resolved = new Dictionary<string, HashSet<Assembly>>(StringComparer.Ordinal);
-        List<TypeReference> types = new List<TypeReference>();
-        foreach (VariableDefinition v in body.Variables) {
-            CollectTypes(v.VariableType, types);
-        }
-
-        foreach (Instruction instruction in body.Instructions) {
-            switch (instruction.Operand) {
-                case TypeReference type:
-                    CollectTypes(type, types);
-                    break;
-                case MethodReference call:
-                    CollectTypes(call.DeclaringType, types);
-                    CollectTypes(call.ReturnType, types);
-                    break;
-                case MemberReference member when member.DeclaringType is not null:
-                    CollectTypes(member.DeclaringType, types);
-                    break;
-            }
-        }
-
-        foreach (ExceptionHandler handler in body.ExceptionHandlers) {
-            if (handler.CatchType is not null) {
-                CollectTypes(handler.CatchType, types);
-            }
-        }
-
-        List<(TypeReference Reference, Assembly Assembly)> perType = new List<(TypeReference, Assembly)>();
-        foreach (TypeReference type in types) {
-            Assembly? assembly;
-            try {
-                assembly = type.ResolveReflection()?.Assembly;
-            } catch (Exception) {
-                assembly = null;
-            }
-
-            if (assembly is null) {
-                continue;
-            }
-
-            perType.Add((type, assembly));
-            string name = SimpleName(assembly);
-            if (!resolved.TryGetValue(name, out HashSet<Assembly>? set)) {
-                set = new HashSet<Assembly>();
-                resolved[name] = set;
-            }
-
-            set.Add(assembly);
-        }
+        List<TypeReference> types = CollectBodyTypes(body);
+        List<(TypeReference Reference, Assembly Assembly)> perType = ResolveAssemblies(types, out Dictionary<string, HashSet<Assembly>> resolved);
 
         StringBuilder sb = new StringBuilder();
         sb.Append("assemblies[").Append(resolved.Count).Append("]:\n");
@@ -157,19 +110,7 @@ internal static class IlDump {
             }
 
             if (seen.Count > 1) {
-                sb.Append("  <<< ").Append(seen.Count).Append(" assemblies named ").Append(entry.Key).Append(" are loaded\n");
-                HashSet<string> printed = new HashSet<string>(StringComparer.Ordinal);
-                foreach ((TypeReference reference, Assembly assembly) in perType) {
-                    if (!entry.Value.Contains(assembly)) {
-                        continue;
-                    }
-
-                    string scope = reference.Scope is AssemblyNameReference asmRef ? asmRef.GetRuntimeHashedFullName() : reference.Scope?.Name ?? "?";
-                    string row = "      " + reference.FullName + " ref=" + scope + " -> hash=" + assembly.GetHashCode() + "\n";
-                    if (printed.Add(row)) {
-                        sb.Append(row);
-                    }
-                }
+                AppendDuplicateDetail(sb, entry, seen.Count, perType);
             }
         }
 
@@ -235,6 +176,85 @@ internal static class IlDump {
                 return VarPush(instruction);
             default:
                 return 0;
+        }
+    }
+
+    private static List<TypeReference> CollectBodyTypes(MethodBody body) {
+        List<TypeReference> types = new List<TypeReference>();
+        foreach (VariableDefinition v in body.Variables) {
+            CollectTypes(v.VariableType, types);
+        }
+
+        foreach (Instruction instruction in body.Instructions) {
+            switch (instruction.Operand) {
+                case TypeReference type:
+                    CollectTypes(type, types);
+                    break;
+                case MethodReference call:
+                    CollectTypes(call.DeclaringType, types);
+                    CollectTypes(call.ReturnType, types);
+                    break;
+                case MemberReference member when member.DeclaringType is not null:
+                    CollectTypes(member.DeclaringType, types);
+                    break;
+            }
+        }
+
+        foreach (ExceptionHandler handler in body.ExceptionHandlers) {
+            if (handler.CatchType is not null) {
+                CollectTypes(handler.CatchType, types);
+            }
+        }
+
+        return types;
+    }
+
+    private static List<(TypeReference Reference, Assembly Assembly)> ResolveAssemblies(
+        List<TypeReference> types, out Dictionary<string, HashSet<Assembly>> resolved) {
+        resolved = new Dictionary<string, HashSet<Assembly>>(StringComparer.Ordinal);
+        List<(TypeReference Reference, Assembly Assembly)> perType = new List<(TypeReference, Assembly)>();
+        foreach (TypeReference type in types) {
+            Assembly? assembly;
+            try {
+                assembly = type.ResolveReflection()?.Assembly;
+            } catch (Exception) {
+                assembly = null;
+            }
+
+            if (assembly is null) {
+                continue;
+            }
+
+            perType.Add((type, assembly));
+            string name = SimpleName(assembly);
+            if (!resolved.TryGetValue(name, out HashSet<Assembly>? set)) {
+                set = new HashSet<Assembly>();
+                resolved[name] = set;
+            }
+
+            set.Add(assembly);
+        }
+
+        return perType;
+    }
+
+    private static void AppendDuplicateDetail(
+        StringBuilder sb,
+        KeyValuePair<string, HashSet<Assembly>> entry,
+        int seenCount,
+        List<(TypeReference Reference, Assembly Assembly)> perType) {
+        sb.Append("  <<< ").Append(seenCount).Append(" assemblies named ").Append(entry.Key).Append(" are loaded\n");
+        HashSet<string> printed = new HashSet<string>(StringComparer.Ordinal);
+        foreach ((TypeReference reference, Assembly assembly) in perType) {
+            if (!entry.Value.Contains(assembly)) {
+                continue;
+            }
+
+            string scope = reference.Scope is AssemblyNameReference asmRef ? asmRef.GetRuntimeHashedFullName() : reference.Scope?.Name ?? "?";
+            string row = "      " + reference.FullName + " ref=" + scope + " -> hash=" + assembly.GetHashCode() + "\n";
+            if (printed.Add(row)) {
+                sb.Append(row);
+            }
         }
     }
 

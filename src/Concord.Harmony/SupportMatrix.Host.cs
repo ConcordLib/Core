@@ -35,38 +35,49 @@ namespace Concord.Harmony
 
             foreach (Patch patch in InnerPatches(patchInfo))
             {
-                object innerTarget = InnerTargetField?.GetValue(patch);
-                if (innerTarget != null)
+                string reason = ValidateInnerPatch(target, added, patch);
+                if (reason != null)
                 {
-                    return $"Target {target.Name} has a Harmony inner patch on a non-method operation ({innerTarget}). Concord cannot prove its composed body leaves that operation's count unchanged";
+                    return reason;
+                }
+            }
+
+            return null;
+        }
+
+        private static string ValidateInnerPatch(MethodBase target, IReadOnlyList<Injection> added, Patch patch)
+        {
+            object innerTarget = InnerTargetField?.GetValue(patch);
+            if (innerTarget != null)
+            {
+                return $"Target {target.Name} has a Harmony inner patch on a non-method operation ({innerTarget}). Concord cannot prove its composed body leaves that operation's count unchanged";
+            }
+
+            MethodInfo inner;
+            try
+            {
+                inner = patch.innerMethod?.Method;
+            }
+            catch (System.Exception ex)
+            {
+                return $"Target {target.Name} has a Harmony inner patch whose inner method will not resolve: {ex.Message}";
+            }
+
+            if (inner == null)
+            {
+                return null;
+            }
+
+            foreach (Injection injection in added)
+            {
+                if (injection.At is InjectAt.Transpiler)
+                {
+                    return $"Target {target.Name} has a Harmony inner patch on {inner.Name} and Concord transpiler injection {injection.InjectionMethod.Name} (a transpiler can add or remove the calls the inner patch counts)";
                 }
 
-                MethodBase inner;
-                try
+                if (BodyCalls(injection.InjectionMethod, called => called == inner))
                 {
-                    inner = patch.innerMethod?.Method;
-                }
-                catch (System.Exception ex)
-                {
-                    return $"Target {target.Name} has a Harmony inner patch whose inner method will not resolve: {ex.Message}";
-                }
-
-                if (inner == null)
-                {
-                    continue;
-                }
-
-                foreach (Injection injection in added)
-                {
-                    if (injection.At is InjectAt.Transpiler)
-                    {
-                        return $"Target {target.Name} has a Harmony inner patch on {inner.Name} and Concord transpiler injection {injection.InjectionMethod.Name} (a transpiler can add or remove the calls the inner patch counts)";
-                    }
-
-                    if (BodyCalls(injection.InjectionMethod, called => called == inner))
-                    {
-                        return $"Injection method {injection.InjectionMethod.Name} calls {inner.Name}, which a Harmony inner patch on {target.Name} counts by position";
-                    }
+                    return $"Injection method {injection.InjectionMethod.Name} calls {inner.Name}, which a Harmony inner patch on {target.Name} counts by position";
                 }
             }
 

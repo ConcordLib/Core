@@ -80,7 +80,7 @@ internal sealed class TargetDetourRegistry {
     }
 
     // Composition order runs backwards: the body composed last wraps the others, so it runs first.
-    private static IReadOnlyList<string> BuildOwners(IReadOnlyList<Injection> ordered) {
+    private static List<string> BuildOwners(IReadOnlyList<Injection> ordered) {
         if (ordered.Count == 0) {
             return [];
         }

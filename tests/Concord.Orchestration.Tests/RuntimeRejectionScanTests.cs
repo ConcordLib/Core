@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Reflection;
 using Concord.Emit;
 using Xunit;
@@ -24,7 +25,12 @@ public sealed class RuntimeRejectionScanTests {
     [Fact]
     public void ScanDeclarations_RuntimeRejectsBody_ContinuesToNextDeclaration() {
         FakeAttachedPropertyRegistry props = new FakeAttachedPropertyRegistry();
+        List<string> log = [];
 
-        PatchDeclarationScanner.ScanDeclarations([typeof(GoodDeclaration)], new RejectingApplier(), props);
+        PatchDeclarationScanner.ScanDeclarations([typeof(GoodDeclaration)], new RejectingApplier(), props, log.Add);
+
+        Assert.Single(log);
+        Assert.Contains("CONC144", log[0]);
+        Assert.Contains(typeof(GoodDeclaration).FullName!, log[0]);
     }
 }

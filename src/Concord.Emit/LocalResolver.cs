@@ -20,7 +20,8 @@ internal static class LocalResolver {
         Dictionary<int, VariableDefinition>? merged = null;
 
         for (int i = 0; i < parameters.Length; i++) {
-            if (!Binds(parameters[i])) {
+            LocalAttribute? bound = BoundSelector(parameters[i]);
+            if (bound is null) {
                 continue;
             }
 
@@ -33,19 +34,12 @@ internal static class LocalResolver {
                     "local of the target body; keep one and delete the other.");
             }
 
-            if (merged is null) {
-                merged = new Dictionary<int, VariableDefinition>();
-                if (captureBinding is not null) {
-                    foreach (KeyValuePair<int, VariableDefinition> entry in captureBinding) {
-                        merged[entry.Key] = entry.Value;
-                    }
-                }
-            }
-
+            merged ??= Seed(captureBinding);
             merged[i + argOffset] = Resolve(
                 request.Destination.Body,
                 locals,
                 parameters[i],
+                bound,
                 request.InjectionMethod,
                 request.Target);
         }
@@ -64,7 +58,7 @@ internal static class LocalResolver {
         HashSet<int> indices = new HashSet<int>();
 
         for (int i = 0; i < parameters.Length; i++) {
-            if (Binds(parameters[i])) {
+            if (BoundSelector(parameters[i]) is not null) {
                 indices.Add(i + argOffset);
             }
         }
@@ -76,17 +70,16 @@ internal static class LocalResolver {
         MethodBody body,
         ProtocolLocals locals,
         ParameterInfo parameter,
+        LocalAttribute local,
         MethodBase injectionMethod,
         MethodBase target) {
-        LocalAttribute local = parameter.GetCustomAttribute<LocalAttribute>()!;
-        return Resolve(body, locals, parameter.ParameterType, local.Ordinal, local.Index, local.Name, injectionMethod, target, parameter.Name);
-    }
-
-    // The three At.Local failures in WrapperComposer come from a position rather than a parameter, and
-    // they share this opener so two mods on one target are still told apart.
-    internal static string Opener(MethodBase injectionMethod, MethodBase target) {
-        return $"Injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' on " +
-            $"'{target.DeclaringType?.Name}.{target.Name}'";
+        return Resolve(
+            body,
+            locals,
+            new LocalSelector(parameter.ParameterType, local.Ordinal, local.Index, local.Name),
+            injectionMethod,
+            target,
+            parameter.Name);
     }
 
     /// <summary>
@@ -95,23 +88,21 @@ internal static class LocalResolver {
     /// </summary>
     /// <param name="body">The wrapper body whose locals are being selected from.</param>
     /// <param name="locals">The wrapper's protocol locals, which bound the searchable slot range.</param>
-    /// <param name="wanted">The declared type of the local to match.</param>
-    /// <param name="ordinal">The 1-based occurrence of <paramref name="wanted" /> to select, or 0 to leave unset.</param>
-    /// <param name="index">A raw local slot, or -1 to leave unset.</param>
-    /// <param name="name">The local's source name as a pdb records it, or null to leave unset.</param>
+    /// <param name="selector">The type and selector triple picking the local.</param>
     /// <param name="injectionMethod">The injection method, used for diagnostic messages.</param>
     /// <param name="target">The original method being patched, used for diagnostic messages.</param>
     /// <param name="parameterName">The injection parameter this selector came from, or null when it came from a position.</param>
     internal static VariableDefinition Resolve(
         MethodBody body,
         ProtocolLocals locals,
-        Type wanted,
-        uint ordinal,
-        int index,
-        string? name,
+        LocalSelector selector,
         MethodBase injectionMethod,
         MethodBase target,
         string? parameterName = null) {
+        Type wanted = selector.Wanted;
+        uint ordinal = selector.Ordinal;
+        int index = selector.Index;
+        string? name = selector.Name;
         int searchCount = locals.SearchLocalCount;
 
         RejectConflictingSelectors(ordinal, index, name, injectionMethod, target, parameterName);
@@ -152,6 +143,24 @@ internal static class LocalResolver {
         }
 
         return Referenced(candidates[0], body, locals, injectionMethod, target, parameterName);
+    }
+
+    // The three At.Local failures in WrapperComposer come from a position rather than a parameter, and
+    // they share this opener so two mods on one target are still told apart.
+    internal static string Opener(MethodBase injectionMethod, MethodBase target) {
+        return $"Injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' on " +
+            $"'{target.DeclaringType?.Name}.{target.Name}'";
+    }
+
+    private static Dictionary<int, VariableDefinition> Seed(IReadOnlyDictionary<int, VariableDefinition>? captureBinding) {
+        Dictionary<int, VariableDefinition> seeded = new Dictionary<int, VariableDefinition>();
+        if (captureBinding is not null) {
+            foreach (KeyValuePair<int, VariableDefinition> entry in captureBinding) {
+                seeded[entry.Key] = entry.Value;
+            }
+        }
+
+        return seeded;
     }
 
     // Twin of the analyzer's CONCORD036. Index, Name and Ordinal each pick a slot a different way, so
@@ -309,9 +318,9 @@ internal static class LocalResolver {
 
     // A LocalHandle parameter carries [Local] for its selectors, but its own type is the handle, not
     // the local's. LocalHandleLowering binds it from T instead.
-    private static bool Binds(ParameterInfo parameter) {
-        return parameter.GetCustomAttribute<LocalAttribute>() is not null
-            && !LocalHandleLowering.IsLocalHandleType(parameter.ParameterType);
+    private static LocalAttribute? BoundSelector(ParameterInfo parameter) {
+        LocalAttribute? local = parameter.GetCustomAttribute<LocalAttribute>();
+        return local is not null && !LocalHandleLowering.IsLocalHandleType(parameter.ParameterType) ? local : null;
     }
 
     // An injection can carry two same-typed selectors, and without the parameter name every one of

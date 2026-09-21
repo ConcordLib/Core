@@ -1280,9 +1280,7 @@ public static class WrapperComposer {
         InjectionBuffers buffers,
         out Injection? aroundInjection,
         out Instruction? lastExit) {
-        bool hasHead = false;
-        aroundInjection = null;
-        lastExit = null;
+        DispatchState state = default;
 
         // At.Local, At.Constant, At.Invoke and At.NewObj all count By against this, never the live
         // spine. A store splice ends in 'stloc slot' and a value injection opens with 'ldloc slot',
@@ -1298,59 +1296,7 @@ public static class WrapperComposer {
         for (int i = ordered.Count - 1; i >= 0; i--) {
             Injection injection = ordered[i];
             try {
-                if (injection.At is InjectAt.Head) {
-                    int firstHeadBody = buffers.HeadBodies.Count;
-                    ProcessHeadInjection(new InjectionSiteContext(injection, context.WrapperDefinition, context.Target, context.Locals), anchors.GuardStart, context.IsVoid, ref hasHead, buffers.HeadBodies);
-                    PrefixSharedGenericGuard(context.WrapperDefinition, injection, buffers.HeadBodies, firstHeadBody, anchors.GuardStart);
-                    continue;
-                }
-
-                if (injection.At is InjectAt.Tail) {
-                    int firstTailBody = buffers.TailBodies.Count;
-                    lastExit = DispatchTailInjection(context, anchors, buffers, injection, lastExit);
-                    if (lastExit is not null) {
-                        PrefixSharedGenericGuard(context.WrapperDefinition, injection, buffers.TailBodies, firstTailBody, lastExit);
-                    }
-
-                    continue;
-                }
-
-                if (injection.At is InjectAt.Return returnSite) {
-                    DispatchReturnInjection(context, anchors, buffers, injection, returnSite);
-                    continue;
-                }
-
-                if (injection.At is InjectAt.Invoke invoke) {
-                    ProcessInvokeInjection(injection, invoke, context.WrapperDefinition, context.Target, context.Locals, anchors.Spine, preSpliceSpine);
-                    continue;
-                }
-
-                if (injection.At is InjectAt.NewObj newObj) {
-                    ProcessNewObjInjection(injection, newObj, context.WrapperDefinition, context.Target, context.Locals, anchors.Spine, preSpliceSpine);
-                    continue;
-                }
-
-                if (injection.At is InjectAt.Constant constant) {
-                    ProcessConstantInjection(injection, constant, context.WrapperDefinition, context.Target, anchors.Spine, preSpliceSpine);
-                    continue;
-                }
-
-                if (injection.At is InjectAt.Local localSite) {
-                    ProcessLocalInjection(injection, localSite, context.WrapperDefinition, context.Target, context.Locals, anchors.Spine, preSpliceSpine);
-                    continue;
-                }
-
-                if (injection.At is InjectAt.Finally) {
-                    ProcessFinallyInjection(new InjectionSiteContext(injection, context.WrapperDefinition, context.Target, context.Locals), anchors.FinallyEnd, buffers.FinallyBodies);
-                    continue;
-                }
-
-                if (injection.At is InjectAt.Around) {
-                    aroundInjection = RegisterAroundInjection(injection, aroundInjection, context.Target);
-                    continue;
-                }
-
-                throw new ConcordEmitException("CONC116", $"Unsupported injection position '{injection.At.GetType().Name}' reached composition dispatch.");
+                state = DispatchInjection(context, anchors, buffers, injection, preSpliceSpine, state);
             } catch (ConcordEmitException failure) when (failure.LocalBindingMethod is not null) {
                 // Which injection owns the failure is only knowable here. LocalResolver sees the method,
                 // and two injections can share one.
@@ -1359,7 +1305,71 @@ public static class WrapperComposer {
             }
         }
 
-        return hasHead;
+        aroundInjection = state.AroundInjection;
+        lastExit = state.LastExit;
+        return state.HasHead;
+    }
+
+    private static DispatchState DispatchInjection(
+        WrapperAssembly context,
+        AssemblyAnchors anchors,
+        InjectionBuffers buffers,
+        Injection injection,
+        List<Instruction> preSpliceSpine,
+        DispatchState state) {
+        if (injection.At is InjectAt.Head) {
+            bool hasHead = state.HasHead;
+            int firstHeadBody = buffers.HeadBodies.Count;
+            ProcessHeadInjection(new InjectionSiteContext(injection, context.WrapperDefinition, context.Target, context.Locals), anchors.GuardStart, context.IsVoid, ref hasHead, buffers.HeadBodies);
+            PrefixSharedGenericGuard(context.WrapperDefinition, injection, buffers.HeadBodies, firstHeadBody, anchors.GuardStart);
+            return state with { HasHead = hasHead };
+        }
+
+        if (injection.At is InjectAt.Tail) {
+            int firstTailBody = buffers.TailBodies.Count;
+            Instruction? lastExit = DispatchTailInjection(context, anchors, buffers, injection, state.LastExit);
+            if (lastExit is not null) {
+                PrefixSharedGenericGuard(context.WrapperDefinition, injection, buffers.TailBodies, firstTailBody, lastExit);
+            }
+
+            return state with { LastExit = lastExit };
+        }
+
+        if (injection.At is InjectAt.Return returnSite) {
+            DispatchReturnInjection(context, anchors, buffers, injection, returnSite);
+            return state;
+        }
+
+        if (injection.At is InjectAt.Invoke invoke) {
+            ProcessInvokeInjection(injection, invoke, context.WrapperDefinition, context.Target, context.Locals, anchors.Spine, preSpliceSpine);
+            return state;
+        }
+
+        if (injection.At is InjectAt.NewObj newObj) {
+            ProcessNewObjInjection(injection, newObj, context.WrapperDefinition, context.Target, context.Locals, anchors.Spine, preSpliceSpine);
+            return state;
+        }
+
+        if (injection.At is InjectAt.Constant constant) {
+            ProcessConstantInjection(injection, constant, context.WrapperDefinition, context.Target, anchors.Spine, preSpliceSpine);
+            return state;
+        }
+
+        if (injection.At is InjectAt.Local localSite) {
+            ProcessLocalInjection(injection, localSite, context.WrapperDefinition, context.Target, context.Locals, anchors.Spine, preSpliceSpine);
+            return state;
+        }
+
+        if (injection.At is InjectAt.Finally) {
+            ProcessFinallyInjection(new InjectionSiteContext(injection, context.WrapperDefinition, context.Target, context.Locals), anchors.FinallyEnd, buffers.FinallyBodies);
+            return state;
+        }
+
+        if (injection.At is InjectAt.Around) {
+            return state with { AroundInjection = RegisterAroundInjection(injection, state.AroundInjection, context.Target) };
+        }
+
+        throw new ConcordEmitException("CONC116", $"Unsupported injection position '{injection.At.GetType().Name}' reached composition dispatch.");
     }
 
     private static Instruction? DispatchTailInjection(
@@ -1781,8 +1791,10 @@ public static class WrapperComposer {
         }
 
         if (shift is At.Around) {
+            InjectionCopyRequest wrapRequest = new InjectionCopyRequest(
+                injectionMethodDefinition.Definition, site.WrapperDefinition, site.Target, injection.InjectionMethod, injectedMembers);
             foreach (Instruction match in sites) {
-                WrapCallSite(spine, match, injectionMethodDefinition.Definition, site.WrapperDefinition, site.Target, injection.InjectionMethod, injectedMembers, newObj);
+                WrapCallSite(spine, match, wrapRequest, newObj);
             }
 
             return;
@@ -1842,36 +1854,48 @@ public static class WrapperComposer {
                 continue;
             }
 
-            if (capture.Arg == 0 || capture.Arg > shape.ParameterTypes.Length) {
-                throw new ConcordEmitException(
-                    "CONC130",
-                    $"Injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' on '{site.Target.DeclaringType?.Name}.{site.Target.Name}' " +
-                    $"captures argument {capture.Arg}, but the matched call takes {shape.ParameterTypes.Length} argument(s).");
-            }
-
-            Type slotType = shape.ParameterTypes[capture.Arg - 1];
-            bool dereference = slotType.IsByRef && !parameters[i].ParameterType.IsByRef;
-            Type storedType = dereference ? slotType.GetElementType()! : slotType;
-
-            if (storedType != parameters[i].ParameterType) {
-                throw new ConcordEmitException(
-                    "CONC130",
-                    $"Injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' on '{site.Target.DeclaringType?.Name}.{site.Target.Name}' " +
-                    $"declares captured parameter '{parameters[i].Name}' as '{parameters[i].ParameterType}', but argument {capture.Arg} of the " +
-                    $"matched call is '{slotType}'. A captured parameter must declare the argument's own type, or its element type to read a " +
-                    "by-ref argument by value.");
-            }
-
-            (uint Arg, bool Dereference) slot = (capture.Arg, dereference);
-            if (!spilled.TryGetValue(slot, out VariableDefinition? spill)) {
-                spill = SpillCaptureSlot(site, match, shape, capture.Arg, storedType, dereference, spine);
-                spilled[slot] = spill;
-            }
-
-            binding[i + argOffset] = spill;
+            binding[i + argOffset] = CaptureSpill(site, match, shape, parameters[i], capture, spilled, spine);
         }
 
         return binding;
+    }
+
+    private static VariableDefinition CaptureSpill(
+        InjectionSiteContext site,
+        Instruction match,
+        CallSiteShape shape,
+        ParameterInfo parameter,
+        CaptureAttribute capture,
+        Dictionary<(uint Arg, bool Dereference), VariableDefinition> spilled,
+        List<Instruction> spine) {
+        MethodBase injectionMethod = site.Injection.InjectionMethod;
+        if (capture.Arg == 0 || capture.Arg > shape.ParameterTypes.Length) {
+            throw new ConcordEmitException(
+                "CONC130",
+                $"Injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' on '{site.Target.DeclaringType?.Name}.{site.Target.Name}' " +
+                $"captures argument {capture.Arg}, but the matched call takes {shape.ParameterTypes.Length} argument(s).");
+        }
+
+        Type slotType = shape.ParameterTypes[capture.Arg - 1];
+        bool dereference = slotType.IsByRef && !parameter.ParameterType.IsByRef;
+        Type storedType = dereference ? slotType.GetElementType()! : slotType;
+
+        if (storedType != parameter.ParameterType) {
+            throw new ConcordEmitException(
+                "CONC130",
+                $"Injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' on '{site.Target.DeclaringType?.Name}.{site.Target.Name}' " +
+                $"declares captured parameter '{parameter.Name}' as '{parameter.ParameterType}', but argument {capture.Arg} of the " +
+                $"matched call is '{slotType}'. A captured parameter must declare the argument's own type, or its element type to read a " +
+                "by-ref argument by value.");
+        }
+
+        (uint Arg, bool Dereference) slot = (capture.Arg, dereference);
+        if (!spilled.TryGetValue(slot, out VariableDefinition? spill)) {
+            spill = SpillCaptureSlot(site, match, shape, capture.Arg, storedType, dereference, spine);
+            spilled[slot] = spill;
+        }
+
+        return spill;
     }
 
     private static VariableDefinition SpillCaptureSlot(
@@ -2085,7 +2109,11 @@ public static class WrapperComposer {
         List<Instruction> spine,
         List<Instruction> preSpliceSpine) {
         VariableDefinition slot = LocalResolver.Resolve(
-            wrapperDefinition.Body, locals, local.LocalType, local.Ordinal, local.Index, local.Name, injection.InjectionMethod, target);
+            wrapperDefinition.Body,
+            locals,
+            new LocalSelector(local.LocalType, local.Ordinal, local.Index, local.Name),
+            injection.InjectionMethod,
+            target);
 
         RejectIndirectlyWrittenSlot(preSpliceSpine, slot, local, injection.InjectionMethod, target);
         RejectLoadOnTheResultSlot(preSpliceSpine, slot, local, locals, injection.InjectionMethod, target);
@@ -2121,8 +2149,8 @@ public static class WrapperComposer {
 
         foreach (Instruction match in matches) {
             List<Instruction> splice = local.Access == LocalAccess.Store
-                ? StoreSplice(injectionMethodDefinition.Definition, wrapperDefinition, target, injection, injectedMembers, slot, localBinding, localHandles)
-                : LoadSplice(injectionMethodDefinition.Definition, wrapperDefinition, target, injection, injectedMembers, slot, localBinding, localHandles);
+                ? StoreSplice(request, slot, localBinding, localHandles)
+                : LoadSplice(request, slot, localBinding, localHandles);
 
             int matchIndex = SpliceIndexOf(spine, match);
             spine.InsertRange(matchIndex + 1, splice);
@@ -2132,16 +2160,12 @@ public static class WrapperComposer {
     // The matched stloc already left the value in the slot, so the copied body reads it from there
     // and the trailing stloc writes the replacement back over it.
     private static List<Instruction> StoreSplice(
-        MethodDefinition injectionDefinition,
-        MethodDefinition wrapperDefinition,
-        MethodBase target,
-        Injection injection,
-        InjectedMemberMap injectedMembers,
+        InjectionCopyRequest request,
         VariableDefinition slot,
         IReadOnlyDictionary<int, VariableDefinition> localBinding,
         LocalHandleLowering? localHandles) {
         List<Instruction> splice = BodyCopier.CopyValueInjection(
-            injectionDefinition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers, slot, localBinding, localHandles);
+            request.InjectionDefinition, request.Destination, request.Target, request.InjectionMethod, request.InjectedMembers, slot, localBinding, localHandles);
         splice.Add(Instruction.Create(OpCodes.Stloc, slot));
         return splice;
     }
@@ -2149,20 +2173,16 @@ public static class WrapperComposer {
     // The matched ldloc left the value on the stack, so it spills into a temp the copied body reads,
     // and the body's result stays on the stack in its place. The slot itself is not written.
     private static List<Instruction> LoadSplice(
-        MethodDefinition injectionDefinition,
-        MethodDefinition wrapperDefinition,
-        MethodBase target,
-        Injection injection,
-        InjectedMemberMap injectedMembers,
+        InjectionCopyRequest request,
         VariableDefinition slot,
         IReadOnlyDictionary<int, VariableDefinition> localBinding,
         LocalHandleLowering? localHandles) {
         VariableDefinition loaded = new VariableDefinition(slot.VariableType);
-        wrapperDefinition.Body.Variables.Add(loaded);
+        request.Destination.Body.Variables.Add(loaded);
 
         List<Instruction> splice = new List<Instruction> { Instruction.Create(OpCodes.Stloc, loaded) };
         splice.AddRange(BodyCopier.CopyValueInjection(
-            injectionDefinition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers, loaded, localBinding, localHandles));
+            request.InjectionDefinition, request.Destination, request.Target, request.InjectionMethod, request.InjectedMembers, loaded, localBinding, localHandles));
         return splice;
     }
 
@@ -2599,19 +2619,15 @@ public static class WrapperComposer {
     private static void WrapCallSite(
         List<Instruction> spine,
         Instruction site,
-        MethodDefinition injectionMethodDefinition,
-        MethodDefinition wrapperDefinition,
-        MethodBase target,
-        MethodBase injectionMethod,
-        InjectedMemberMap injectedMembers,
+        InjectionCopyRequest request,
         bool newObj) {
         MethodReference originalCall = (MethodReference)site.Operand;
         MethodBase resolvedOriginal = originalCall.ResolveReflection();
         CallSiteShape shape = ResolveSiteShape(resolvedOriginal, newObj);
-        ValidateOperationShape(injectionMethod, shape, target);
+        ValidateOperationShape(request.InjectionMethod, shape, request.Target);
 
-        ModuleDefinition module = wrapperDefinition.Module;
-        MethodBody body = wrapperDefinition.Body;
+        ModuleDefinition module = request.Destination.Module;
+        MethodBody body = request.Destination.Body;
 
         List<VariableDefinition> argLocals = new List<VariableDefinition>(shape.ParameterTypes.Length);
         for (int i = 0; i < shape.ParameterTypes.Length; i++) {
@@ -2637,7 +2653,7 @@ public static class WrapperComposer {
 
         Instruction wrapEnd = Instruction.Create(OpCodes.Nop);
         List<Instruction> wrapBody = BodyCopier.CopyWrapInjection(
-            new InjectionCopyRequest(injectionMethodDefinition, wrapperDefinition, target, injectionMethod, injectedMembers),
+            request,
             wrapEnd,
             originalCall,
             receiverLocal,

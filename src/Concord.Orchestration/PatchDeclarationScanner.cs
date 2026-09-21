@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using Concord.AttachedData;
 using Concord.Detour;
@@ -194,6 +195,7 @@ public static class PatchDeclarationScanner {
         throw new ConcordDeclarationException("Target type '" + name + "' could not be resolved from any loaded assembly.");
     }
 
+    [SuppressMessage("Major Code Smell", "S3011:Reflection should not be used to increase accessibility of classes, methods, or fields", Justification = "Concord reads a declaration's own private members by design; the declaration opted in with [Patch].")]
     private static void ScanExtendedEnumDeclaration(Type declaration) {
         const BindingFlags declared = BindingFlags.Public |
                                       BindingFlags.NonPublic |
@@ -251,17 +253,7 @@ public static class PatchDeclarationScanner {
             Type[]? targetParameterTypes = inject?.ParameterTypes ?? injectNew?.ParameterTypes;
             bool targetsConstructor = inject?.TargetsConstructor ?? injectNew!.TargetsConstructor;
             MethodBase resolvedTarget = ResolveInjectionTarget(declaration, baseType, prefix, targetMethod, targetParameterTypes, targetsConstructor);
-            InjectAt at = inject?.ResolvedAt ?? injectNew!.ResolvedAt;
-            SliceAttribute? slice = method.GetCustomAttribute<SliceAttribute>();
-            if (slice is not null) {
-                at = at switch {
-                    InjectAt.Invoke invoke => invoke with { Slice = slice.ResolvedRange },
-                    InjectAt.NewObj newObj => newObj with { Slice = slice.ResolvedRange },
-                    InjectAt.Local local => local with { Slice = slice.ResolvedRange },
-                    _ => at,
-                };
-            }
-
+            InjectAt at = WithSlice(inject?.ResolvedAt ?? injectNew!.ResolvedAt, method.GetCustomAttribute<SliceAttribute>());
             int priority = inject?.ResolvedPriority ?? injectNew!.ResolvedPriority;
             PatchBody body = inject?.Body ?? injectNew!.Body;
             resolved.Add((resolvedTarget, new Injection(method, at, declaration.FullName!, priority) {
@@ -273,6 +265,19 @@ public static class PatchDeclarationScanner {
         }
 
         return resolved;
+    }
+
+    private static InjectAt WithSlice(InjectAt at, SliceAttribute? slice) {
+        if (slice is null) {
+            return at;
+        }
+
+        return at switch {
+            InjectAt.Invoke invoke => invoke with { Slice = slice.ResolvedRange },
+            InjectAt.NewObj newObj => newObj with { Slice = slice.ResolvedRange },
+            InjectAt.Local local => local with { Slice = slice.ResolvedRange },
+            _ => at,
+        };
     }
 
     private static void ValidateInjectAttribute(Type declaration, InjectAttribute inject) {
