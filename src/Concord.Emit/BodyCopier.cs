@@ -180,6 +180,7 @@ internal static class BodyCopier {
     ///     Pairs <see cref="LocalHandle{T}" /> receiver loads with the Value calls that consume them, or null
     ///     when the injection declares no handle.
     /// </param>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S107", Justification = "Public API, so the parameter list cannot be regrouped without a breaking change.")]
     public static List<Instruction> CopyValueInjection(
         MethodDefinition injectionDefinition,
         MethodDefinition destination,

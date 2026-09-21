@@ -73,6 +73,7 @@ public static class MethodIdentity {
     ///     wrapper. A plain unpatched method, a wrapper another patch library composed, and a wrapper whose
     ///     patches have since been reverted all return <see langword="null" />.
     /// </returns>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "CA1510", Justification = "ArgumentNullException.ThrowIfNull needs net6 or later and this project also targets netstandard2.0 and net472.")]
     public static MethodBase? ResolveOriginal(MethodBase method) {
         if (method is null) {
             throw new ArgumentNullException(nameof(method));

@@ -3,6 +3,7 @@ using Xunit;
 
 namespace Concord.Enums.Tests;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "CA2263", Justification = "CoreLibEnumDetours only detours the Type-taking overloads, so the generic ones would not exercise the detour.")]
 public static class WeatherUtility {
     [MethodImpl(MethodImplOptions.NoInlining)]
     public static WeatherKind[] All() => [WeatherKind.Clear, WeatherKind.Rain, WeatherKind.Storm];

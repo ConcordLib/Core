@@ -69,6 +69,7 @@ internal static class LocalNames {
     /// </summary>
     /// <param name="method">The method whose locals are being named.</param>
     /// <param name="unreadable">Why no symbols were read, naming the path searched, or null when they were.</param>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S125", Justification = "Prose explaining why the hook runs outside Gate, not commented out code.")]
     internal static IReadOnlyList<Entry> For(MethodBase method, out string? unreadable) {
         // A DynamicMethod throws rather than returning a token, and its module is not on disk.
         int token = Token(method);
