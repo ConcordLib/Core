@@ -194,8 +194,8 @@ internal sealed class TargetDetourRegistry {
             if (composed is not null) {
                 try {
                     WrapperPrecompile.Compile(composed.Wrapper);
-                    Root(composed.Wrapper);
                     detour = MonoModHost.Factory.CreateDetour(target, composed.Wrapper);
+                    Root(composed.Wrapper);
                 } catch (InvalidProgramException rejected) {
                     throw new ConcordEmitException(
                         "CONC144",
