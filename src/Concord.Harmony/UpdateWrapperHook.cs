@@ -71,7 +71,7 @@ internal static class UpdateWrapperHook
             return false;
         }
 
-        log(CoexistenceLogMarkers.HookInstalled + " " + typeof(HarmonyLib.Harmony).Assembly.GetName().Version + " #" + typeof(HarmonyLib.Harmony).Assembly.GetHashCode());
+        log(CoexistenceLogMarkers.HookInstalled + " " + HarmonyVersionText() + " #" + typeof(HarmonyLib.Harmony).Assembly.GetHashCode());
         return true;
     }
 
@@ -94,6 +94,22 @@ internal static class UpdateWrapperHook
     internal static void DetachObserver()
     {
         observer = null;
+    }
+
+    private static string HarmonyVersionText()
+    {
+        const string marker = "Version=";
+        string full = typeof(HarmonyLib.Harmony).Assembly.FullName;
+        int start = full == null ? -1 : full.IndexOf(marker, StringComparison.Ordinal);
+
+        if (start < 0)
+        {
+            return "unknown";
+        }
+
+        start += marker.Length;
+        int end = full.IndexOf(',', start);
+        return end < 0 ? full.Substring(start) : full.Substring(start, end - start);
     }
 
     private static MethodInfo ResolveUpdateWrapper()
