@@ -15,12 +15,12 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
     public const string RejectedRouteCode = "CONC166";
 
     private readonly object gate = new object();
-    private readonly IDetourBackend inner;
     private readonly Action<string> log;
     private readonly Dictionary<MethodBase, RouteState> routes = [];
     private readonly Dictionary<MethodBase, string> rejectionReasons = [];
     private readonly Dictionary<MethodBase, List<RoutedHandle>> rawApplies = [];
     private readonly HashSet<MethodBase> rawInventory = [];
+    private IDetourBackend inner;
     private volatile IForeignPatchHost? host;
 
     /// <summary>
@@ -49,6 +49,21 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
     ///     by polling and is not recoverable.
     /// </summary>
     public bool NotifierInstalled { get; private set; }
+
+    /// <summary>
+    ///     Rebinds what this router forwards to, keeping every route, pinned target and the host notifier.
+    ///     A backend installing late swaps here rather than replacing the router, which would drop all of it.
+    /// </summary>
+    /// <param name="backend">The backend to forward to.</param>
+    public void ReplaceInner(IDetourBackend backend) {
+        if (backend is null) {
+            throw new ArgumentNullException(nameof(backend));
+        }
+
+        lock (gate) {
+            inner = backend;
+        }
+    }
 
     /// <summary>
     ///     Attaches the foreign patch host and tries to install its notifier hook. Only the first call
@@ -262,7 +277,7 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
             return;
         }
 
-        routes[routeKey] = RouteState.ContestedLost;
+        LoseToHost(routeKey);
         log(CoexistenceLogMarkers.RouteWithdrawn + " " + DescribeTarget(hostTarget) + ": " + reason);
     }
 
@@ -281,7 +296,7 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
         // would be clobbered by the rebuild that follows.
         string? reason = host!.ValidateRoute(hostTarget, all);
         if (reason != null) {
-            routes[routeKey] = RouteState.ContestedLost;
+            LoseToHost(routeKey);
             rawInventory.Remove(routeKey);
             log(CoexistenceLogMarkers.PromoteRejected + " " + DescribeTarget(hostTarget) + ": " + reason);
             return;
@@ -310,7 +325,7 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
             log(CoexistenceLogMarkers.Promoted + " " + DescribeTarget(hostTarget));
         } catch (Exception ex) {
             RestoreRawAfterFailedPromotion(applies);
-            routes[routeKey] = RouteState.ContestedLost;
+            LoseToHost(routeKey);
             rawInventory.Remove(routeKey);
             log(CoexistenceLogMarkers.PromoteFailed + " " + DescribeTarget(hostTarget) + ": " + ex.Message);
         }
@@ -326,6 +341,11 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
                 log(CoexistenceLogMarkers.PromoteFailed + " could not restore the detour for " + DescribeTarget(held.Original) + ": " + ex.Message);
             }
         }
+    }
+
+    private void LoseToHost(MethodBase routeKey) {
+        routes[routeKey] = RouteState.ContestedLost;
+        TargetDetourRegistry.MarkForeignOwned(routeKey);
     }
 
     private void PinRaw(MethodBase target) {

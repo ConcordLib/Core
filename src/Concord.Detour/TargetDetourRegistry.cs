@@ -7,6 +7,7 @@ namespace Concord.Detour;
 internal sealed class TargetDetourRegistry {
     private static readonly Dictionary<MethodBase, TargetDetourRegistry> Registries = new Dictionary<MethodBase, TargetDetourRegistry>();
     private static readonly object RegistriesGate = new object();
+    private static readonly HashSet<MethodBase> ForeignOwned = [];
 
     // never released: mono frees a collected wrapper's code while a thread may still be inside it.
     private static readonly List<MethodInfo> RootedWrappers = [];
@@ -55,15 +56,36 @@ internal sealed class TargetDetourRegistry {
         return registry.AddInternal(added);
     }
 
-    // Keys are normalized when RoutingDetourBackend is in the chain and raw when it is not, so try both.
     internal static IReadOnlyList<string> OwnersFor(MethodBase target) {
-        TargetDetourRegistry? registry = Find(target) ?? Find(MethodIdentity.SharedBodyKey(target));
+        TargetDetourRegistry? registry = Find(MethodIdentity.SharedBodyKey(target));
         if (registry == null) {
             return [];
         }
 
         lock (registry.gate) {
             return registry.owners;
+        }
+    }
+
+    internal static bool OwnsBody(MethodBase target) {
+        MethodBase key = MethodIdentity.SharedBodyKey(target);
+        TargetDetourRegistry? registry = Find(key);
+        if (registry == null) {
+            return false;
+        }
+
+        lock (RegistriesGate) {
+            if (ForeignOwned.Contains(registry.target)) {
+                return false;
+            }
+        }
+
+        return registry.IsApplied;
+    }
+
+    internal static void MarkForeignOwned(MethodBase key) {
+        lock (RegistriesGate) {
+            ForeignOwned.Add(key);
         }
     }
 

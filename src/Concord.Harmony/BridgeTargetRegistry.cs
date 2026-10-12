@@ -1,5 +1,3 @@
-#nullable disable
-
 using System.Collections.Generic;
 using System.Reflection;
 using Concord.Detour;
@@ -40,7 +38,7 @@ internal sealed class BridgeTargetRegistry
 
         lock (gate)
         {
-            if (!entries.TryGetValue(target, out Entry entry))
+            if (!entries.TryGetValue(target, out Entry? entry))
             {
                 return System.Array.Empty<(long Seq, Injection Injection)>();
             }
@@ -82,7 +80,7 @@ internal sealed class BridgeTargetRegistry
 
         lock (gate)
         {
-            if (!entries.TryGetValue(target, out Entry entry) || entry.Live.Count == 0)
+            if (!entries.TryGetValue(target, out Entry? entry) || entry.Live.Count == 0)
             {
                 return System.Array.Empty<string>();
             }
@@ -103,7 +101,7 @@ internal sealed class BridgeTargetRegistry
         List<(long Seq, Injection Injection)> live;
         lock (gate)
         {
-            if (!entries.TryGetValue(target, out Entry entry))
+            if (!entries.TryGetValue(target, out Entry? entry))
             {
                 return System.Array.Empty<Injection>();
             }
@@ -120,7 +118,7 @@ internal sealed class BridgeTargetRegistry
 
         lock (gate)
         {
-            return entries.TryGetValue(target, out Entry entry) && entry.Live.Count > 0;
+            return entries.TryGetValue(target, out Entry? entry) && entry.Live.Count > 0;
         }
     }
 
@@ -167,7 +165,7 @@ internal sealed class BridgeTargetRegistry
 
     private Entry GetOrCreateEntry(MethodBase target)
     {
-        if (!entries.TryGetValue(target, out Entry entry))
+        if (!entries.TryGetValue(target, out Entry? entry))
         {
             entry = new Entry();
             entries[target] = entry;
@@ -182,6 +180,6 @@ internal sealed class BridgeTargetRegistry
 
         internal long NextSeq { get; set; }
 
-        internal IReadOnlyList<string> Owners { get; set; }
+        internal IReadOnlyList<string>? Owners { get; set; }
     }
 }

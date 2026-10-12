@@ -1,5 +1,3 @@
-#nullable disable
-
 using System;
 using System.Collections.Generic;
 using System.Reflection;
@@ -92,7 +90,7 @@ namespace Concord.Harmony.Tests
                 null,
                 null,
                 false);
-            typeof(Patch).GetField(nameof(Patch.innerMethod)).SetValue(patch, new InnerMethod(innerMethod));
+            HarmonyVersions.Field(typeof(Patch), nameof(Patch.innerMethod)).SetValue(patch, new InnerMethod(innerMethod));
             return new Patches(null, null, null, null, new Patch[] { patch }, null);
         }
 
@@ -104,8 +102,8 @@ namespace Concord.Harmony.Tests
                 return;
             }
 
-            MethodInfo target = typeof(InnerPatchTarget).GetMethod(nameof(InnerPatchTarget.Run));
-            MethodInfo innerPrefix = typeof(InnerPatchMods).GetMethod(nameof(InnerPatchMods.HarmonyInnerPrefix));
+            MethodInfo target = HarmonyVersions.Method(typeof(InnerPatchTarget), nameof(InnerPatchTarget.Run));
+            MethodInfo innerPrefix = HarmonyVersions.Method(typeof(InnerPatchMods), nameof(InnerPatchMods.HarmonyInnerPrefix));
             HarmonyLib.Harmony harmony = new HarmonyLib.Harmony("test.inner.baseline");
 
             try
@@ -130,14 +128,14 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void Validate_InnerPatch_HeadInjectionThatNeverCallsInner_Accepted()
         {
-            MethodBase target = typeof(InnerPatchHeadTarget).GetMethod(nameof(InnerPatchHeadTarget.Run));
-            MethodInfo head = typeof(InnerPatchMods).GetMethod(nameof(InnerPatchMods.ConcordHead));
+            MethodBase target = HarmonyVersions.Method(typeof(InnerPatchHeadTarget), nameof(InnerPatchHeadTarget.Run));
+            MethodInfo head = HarmonyVersions.Method(typeof(InnerPatchMods), nameof(InnerPatchMods.ConcordHead));
             Injection injection = new Injection(head, new InjectAt.Head(), "test.concord", 0);
 
-            string reason = SupportMatrix.Validate(
+            string? reason = SupportMatrix.Validate(
                 target,
                 new[] { injection },
-                FakeInnerPrefixes(typeof(InnerPatchHelper).GetMethod(nameof(InnerPatchHelper.Step))));
+                FakeInnerPrefixes(HarmonyVersions.Method(typeof(InnerPatchHelper), nameof(InnerPatchHelper.Step))));
 
             Assert.Null(reason);
         }
@@ -145,18 +143,18 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void Validate_InnerPatch_InvokeInjectionOnSameCallSite_Accepted()
         {
-            MethodBase target = typeof(InnerPatchInvokeTarget).GetMethod(nameof(InnerPatchInvokeTarget.Run));
-            MethodInfo beforeStep = typeof(InnerPatchMods).GetMethod(nameof(InnerPatchMods.BeforeStep));
+            MethodBase target = HarmonyVersions.Method(typeof(InnerPatchInvokeTarget), nameof(InnerPatchInvokeTarget.Run));
+            MethodInfo beforeStep = HarmonyVersions.Method(typeof(InnerPatchMods), nameof(InnerPatchMods.BeforeStep));
             Injection injection = new Injection(
                 beforeStep,
                 new InjectAt.Invoke(typeof(InnerPatchHelper), nameof(InnerPatchHelper.Step), At.Head, 0),
                 "test.concord",
                 0);
 
-            string reason = SupportMatrix.Validate(
+            string? reason = SupportMatrix.Validate(
                 target,
                 new[] { injection },
-                FakeInnerPrefixes(typeof(InnerPatchHelper).GetMethod(nameof(InnerPatchHelper.Step))));
+                FakeInnerPrefixes(HarmonyVersions.Method(typeof(InnerPatchHelper), nameof(InnerPatchHelper.Step))));
 
             Assert.Null(reason);
         }
@@ -164,14 +162,14 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void Validate_InnerPatch_InjectionBodyCallsInnerMethod_Rejected()
         {
-            MethodBase target = typeof(InnerPatchHeadTarget).GetMethod(nameof(InnerPatchHeadTarget.Run));
-            MethodInfo head = typeof(InnerPatchMods).GetMethod(nameof(InnerPatchMods.HeadThatCallsStep));
+            MethodBase target = HarmonyVersions.Method(typeof(InnerPatchHeadTarget), nameof(InnerPatchHeadTarget.Run));
+            MethodInfo head = HarmonyVersions.Method(typeof(InnerPatchMods), nameof(InnerPatchMods.HeadThatCallsStep));
             Injection injection = new Injection(head, new InjectAt.Head(), "test.concord", 0);
 
-            string reason = SupportMatrix.Validate(
+            string? reason = SupportMatrix.Validate(
                 target,
                 new[] { injection },
-                FakeInnerPrefixes(typeof(InnerPatchHelper).GetMethod(nameof(InnerPatchHelper.Step))));
+                FakeInnerPrefixes(HarmonyVersions.Method(typeof(InnerPatchHelper), nameof(InnerPatchHelper.Step))));
 
             Assert.NotNull(reason);
             Assert.Contains("counts by position", reason);
@@ -180,14 +178,14 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void Validate_InnerPatch_TranspilerInjection_Rejected()
         {
-            MethodBase target = typeof(InnerPatchHeadTarget).GetMethod(nameof(InnerPatchHeadTarget.Run));
-            MethodInfo head = typeof(InnerPatchMods).GetMethod(nameof(InnerPatchMods.ConcordHead));
+            MethodBase target = HarmonyVersions.Method(typeof(InnerPatchHeadTarget), nameof(InnerPatchHeadTarget.Run));
+            MethodInfo head = HarmonyVersions.Method(typeof(InnerPatchMods), nameof(InnerPatchMods.ConcordHead));
             Injection injection = new Injection(head, new InjectAt.Transpiler(false), "test.concord", 0);
 
-            string reason = SupportMatrix.Validate(
+            string? reason = SupportMatrix.Validate(
                 target,
                 new[] { injection },
-                FakeInnerPrefixes(typeof(InnerPatchHelper).GetMethod(nameof(InnerPatchHelper.Step))));
+                FakeInnerPrefixes(HarmonyVersions.Method(typeof(InnerPatchHelper), nameof(InnerPatchHelper.Step))));
 
             Assert.NotNull(reason);
             Assert.Contains("transpiler injection", reason);
@@ -196,8 +194,8 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void Validate_InnerPatchWithUnresolvedInnerMethod_Accepted()
         {
-            MethodBase target = typeof(InnerPatchHeadTarget).GetMethod(nameof(InnerPatchHeadTarget.Run));
-            MethodInfo head = typeof(InnerPatchMods).GetMethod(nameof(InnerPatchMods.HeadThatCallsStep));
+            MethodBase target = HarmonyVersions.Method(typeof(InnerPatchHeadTarget), nameof(InnerPatchHeadTarget.Run));
+            MethodInfo head = HarmonyVersions.Method(typeof(InnerPatchMods), nameof(InnerPatchMods.HeadThatCallsStep));
             Injection injection = new Injection(head, new InjectAt.Head(), "test.concord", 0);
 
             Patch patch = new Patch(
@@ -210,7 +208,7 @@ namespace Concord.Harmony.Tests
                 false);
             Patches patchInfo = new Patches(null, null, null, null, new Patch[] { patch }, null);
 
-            string reason = SupportMatrix.Validate(target, new[] { injection }, patchInfo);
+            string? reason = SupportMatrix.Validate(target, new[] { injection }, patchInfo);
 
             Assert.Null(reason);
         }
@@ -275,31 +273,46 @@ namespace Concord.Harmony.Tests
     {
         internal static readonly Assembly HarmonyAssembly = typeof(HarmonyLib.Harmony).Assembly;
 
-        internal static bool InfixesAreReal => HarmonyAssembly.GetName().Version.Major >= 3;
+        internal static bool InfixesAreReal => HarmonyAssembly.GetName().Version!.Major >= 3;
+
+        internal static MethodInfo Method(Type type, string name)
+        {
+            return type.GetMethod(name) ?? throw new InvalidOperationException(type.Name + "." + name + " not found");
+        }
+
+        internal static FieldInfo Field(Type type, string name)
+        {
+            return type.GetField(name) ?? throw new InvalidOperationException(type.Name + "." + name + " not found");
+        }
+
+        internal static Type HarmonyType(string name)
+        {
+            return HarmonyAssembly.GetType(name) ?? throw new InvalidOperationException(name + " not found in " + HarmonyAssembly.GetName().Name);
+        }
 
         internal static object InnerMethodSelector(MethodInfo inner, params int[] positions)
         {
-            Type type = HarmonyAssembly.GetType("HarmonyLib.InnerMethod");
-            return Activator.CreateInstance(type, new object[] { inner, positions });
+            Type type = HarmonyType("HarmonyLib.InnerMethod");
+            return Activator.CreateInstance(type, new object[] { inner, positions })!;
         }
 
         internal static object InnerTargetSelector(FieldInfo field, string kind, params int[] positions)
         {
-            Type targetType = HarmonyAssembly.GetType("HarmonyLib.InnerTarget");
-            Type kindType = HarmonyAssembly.GetType("HarmonyLib.InnerTargetKind");
-            return Activator.CreateInstance(targetType, new object[] { field, Enum.Parse(kindType, kind), positions });
+            Type targetType = HarmonyType("HarmonyLib.InnerTarget");
+            Type kindType = HarmonyType("HarmonyLib.InnerTargetKind");
+            return Activator.CreateInstance(targetType, new object[] { field, Enum.Parse(kindType, kind), positions })!;
         }
 
         internal static HarmonyMethod Fix(MethodInfo fixMethod, object selector, string fieldName)
         {
             HarmonyMethod method = new HarmonyMethod(fixMethod);
-            typeof(HarmonyMethod).GetField(fieldName).SetValue(method, selector);
+            Field(typeof(HarmonyMethod), fieldName).SetValue(method, selector);
             return method;
         }
 
         internal static Patch InfixPatch(HarmonyMethod fix)
         {
-            return (Patch)Activator.CreateInstance(typeof(Patch), new object[] { fix, 0, "test.inner.owner" });
+            return (Patch)Activator.CreateInstance(typeof(Patch), new object[] { fix, 0, "test.inner.owner" })!;
         }
 
         internal static Patches WithInnerFinalizer(Patch patch)
@@ -307,17 +320,17 @@ namespace Concord.Harmony.Tests
             ConstructorInfo seven = typeof(Patches).GetConstructor(new[]
             {
                 typeof(Patch[]), typeof(Patch[]), typeof(Patch[]), typeof(Patch[]), typeof(Patch[]), typeof(Patch[]), typeof(Patch[]),
-            });
-            return (Patches)seven.Invoke(new object[] { null, null, null, null, null, null, new[] { patch } });
+            }) ?? throw new InvalidOperationException("Patches constructor taking seven Patch[] parameters not found");
+            return (Patches)seven.Invoke(new object?[] { null, null, null, null, null, null, new[] { patch } })!;
         }
     }
 
     [Collection("HarmonySerial")]
     public sealed class InfixV3CoexistenceTests
     {
-        private static readonly MethodInfo Step = typeof(InnerPatchHelper).GetMethod(nameof(InnerPatchHelper.Step));
+        private static readonly MethodInfo Step = HarmonyVersions.Method(typeof(InnerPatchHelper), nameof(InnerPatchHelper.Step));
 
-        private static readonly MethodInfo InnerPrefix = typeof(InfixMods).GetMethod(nameof(InfixMods.InnerPrefix));
+        private static readonly MethodInfo InnerPrefix = HarmonyVersions.Method(typeof(InfixMods), nameof(InfixMods.InnerPrefix));
 
         [Fact]
         public void HarmonyInfix_AndConcordHead_BothRunInObservedOrder()
@@ -327,11 +340,11 @@ namespace Concord.Harmony.Tests
                 return;
             }
 
-            MethodInfo target = typeof(InfixOrderTarget).GetMethod(nameof(InfixOrderTarget.Run));
-            MethodInfo head = typeof(InnerPatchMods).GetMethod(nameof(InnerPatchMods.ConcordHead));
+            MethodInfo target = HarmonyVersions.Method(typeof(InfixOrderTarget), nameof(InfixOrderTarget.Run));
+            MethodInfo head = HarmonyVersions.Method(typeof(InnerPatchMods), nameof(InnerPatchMods.ConcordHead));
             HarmonyLib.Harmony harmony = new HarmonyLib.Harmony("test.infix.order");
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
 
             try
             {
@@ -372,11 +385,11 @@ namespace Concord.Harmony.Tests
                 return;
             }
 
-            MethodInfo target = typeof(InfixInvokeTarget).GetMethod(nameof(InfixInvokeTarget.Run));
-            MethodInfo beforeStep = typeof(InnerPatchMods).GetMethod(nameof(InnerPatchMods.BeforeStep));
+            MethodInfo target = HarmonyVersions.Method(typeof(InfixInvokeTarget), nameof(InfixInvokeTarget.Run));
+            MethodInfo beforeStep = HarmonyVersions.Method(typeof(InnerPatchMods), nameof(InnerPatchMods.BeforeStep));
             HarmonyLib.Harmony harmony = new HarmonyLib.Harmony("test.infix.invoke");
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
 
             try
             {
@@ -416,11 +429,11 @@ namespace Concord.Harmony.Tests
                 return;
             }
 
-            MethodInfo target = typeof(InfixHazardTarget).GetMethod(nameof(InfixHazardTarget.Run));
-            MethodInfo head = typeof(InnerPatchMods).GetMethod(nameof(InnerPatchMods.HeadThatCallsStep));
+            MethodInfo target = HarmonyVersions.Method(typeof(InfixHazardTarget), nameof(InfixHazardTarget.Run));
+            MethodInfo head = HarmonyVersions.Method(typeof(InnerPatchMods), nameof(InnerPatchMods.HeadThatCallsStep));
             HarmonyLib.Harmony harmony = new HarmonyLib.Harmony("test.infix.hazard");
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
             Injection injection = new Injection(head, new InjectAt.Head(), "test.concord", 0);
 
             try
@@ -457,9 +470,9 @@ namespace Concord.Harmony.Tests
                 return;
             }
 
-            MethodBase target = typeof(InfixFieldTarget).GetMethod(nameof(InfixFieldTarget.Run));
-            MethodInfo head = typeof(InnerPatchMods).GetMethod(nameof(InnerPatchMods.ConcordHead));
-            FieldInfo counter = typeof(InfixHelperState).GetField(nameof(InfixHelperState.Counter));
+            MethodBase target = HarmonyVersions.Method(typeof(InfixFieldTarget), nameof(InfixFieldTarget.Run));
+            MethodInfo head = HarmonyVersions.Method(typeof(InnerPatchMods), nameof(InnerPatchMods.ConcordHead));
+            FieldInfo counter = HarmonyVersions.Field(typeof(InfixHelperState), nameof(InfixHelperState.Counter));
 
             HarmonyMethod fix = HarmonyVersions.Fix(
                 InnerPrefix,
@@ -467,7 +480,7 @@ namespace Concord.Harmony.Tests
                 "innerTarget");
             Patches patchInfo = new Patches(null, null, null, null, new[] { HarmonyVersions.InfixPatch(fix) }, null);
 
-            string reason = SupportMatrix.Validate(
+            string? reason = SupportMatrix.Validate(
                 target,
                 new[] { new Injection(head, new InjectAt.Head(), "test.concord", 0) },
                 patchInfo);
@@ -484,15 +497,15 @@ namespace Concord.Harmony.Tests
                 return;
             }
 
-            MethodBase target = typeof(InfixOrderTarget).GetMethod(nameof(InfixOrderTarget.Run));
-            MethodInfo head = typeof(InnerPatchMods).GetMethod(nameof(InnerPatchMods.HeadThatCallsStep));
+            MethodBase target = HarmonyVersions.Method(typeof(InfixOrderTarget), nameof(InfixOrderTarget.Run));
+            MethodInfo head = HarmonyVersions.Method(typeof(InnerPatchMods), nameof(InnerPatchMods.HeadThatCallsStep));
 
             HarmonyMethod fix = HarmonyVersions.Fix(InnerPrefix, HarmonyVersions.InnerMethodSelector(Step), "innerMethod");
             Patches patchInfo = HarmonyVersions.WithInnerFinalizer(HarmonyVersions.InfixPatch(fix));
 
             Assert.True(SupportMatrix.HasInnerPatches(patchInfo));
 
-            string reason = SupportMatrix.Validate(
+            string? reason = SupportMatrix.Validate(
                 target,
                 new[] { new Injection(head, new InjectAt.Head(), "test.concord", 0) },
                 patchInfo);

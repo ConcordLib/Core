@@ -1,0 +1,2 @@
+[*.cs]
+dotnet_diagnostic.SA1414.severity = none # analyzer throws on __arglist, see ForeignVarargTarget

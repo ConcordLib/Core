@@ -1,6 +1,5 @@
-#nullable disable
-
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using Concord.Detour;
 using Concord.Emit;
@@ -9,15 +8,34 @@ using HarmonyLib;
 namespace Concord.Harmony;
 
 /// <summary>
-///     Hooks Harmony so Concord hears about a patch before it lands, instead of noticing afterwards.
-///     <c>PatchFunctions.UpdateWrapper</c> is the one place every Harmony path funnels through:
-///     <c>Patch</c>, <c>PatchAll</c>, <c>PatchClassProcessor</c>, <c>Unpatch</c> and <c>UnpatchAll</c> all
-///     call it, so a single hook has no coverage gaps and catches unpatch for free.
+///     Hears about a patch before it lands. <c>PatchFunctions.UpdateWrapper</c> is the one place every
+///     path that patches the original goes, so unpatch comes free. <c>ReversePatch</c> never arrives.
 /// </summary>
 internal static class UpdateWrapperHook
 {
-    private static readonly MethodInfo NotifyMethod =
+    internal const string SuppressBlockedMarker = "[Concord.Coex] suppress-blocked";
+
+    internal const string SuppressFailedMarker = "[Concord.Coex] suppress-failed";
+
+    internal const string ComposeRefusedMarker = "[Concord.Coex] compose-refused";
+
+    internal const string ComposeUnownedMarker = "[Concord.Coex] compose-unowned";
+
+    private static readonly MethodInfo? NotifyMethod =
         typeof(UpdateWrapperHook).GetMethod(nameof(Notify), BindingFlags.NonPublic | BindingFlags.Static);
+
+    private static readonly MethodInfo? NotifyForeignCopyMethod =
+        typeof(UpdateWrapperHook).GetMethod(nameof(NotifyForeignCopy), BindingFlags.NonPublic | BindingFlags.Static);
+
+    private static readonly HashSet<string> SuppressionRefusalsLogged = new HashSet<string>(StringComparer.Ordinal);
+
+    private static readonly Dictionary<MethodBase, IDetourHandle> ComposedForeign = new Dictionary<MethodBase, IDetourHandle>();
+
+    private static readonly Dictionary<Assembly, IDetourHandle> HookHandles = new Dictionary<Assembly, IDetourHandle>();
+
+    private static readonly HashSet<MethodBase> HarmonyBuilt = new HashSet<MethodBase>();
+
+    private static SharedStateWrite? sharedStateWrite;
 
     // Concord's own rebuilds re-enter UpdateWrapper (TryRoute -> harmony.Patch -> UpdateWrapper). At that
     // moment the route state is still Raw, because Bridge is only set once TryRoute returns, so a guard on
@@ -25,9 +43,19 @@ internal static class UpdateWrapperHook
     [ThreadStatic]
     private static int suppressDepth;
 
-    private static IForeignPatchObserver observer;
+    private static bool watchingForCopies;
 
-    private static IDetourHandle hookHandle;
+    private static IForeignPatchObserver? observer;
+
+    private static IForeignPatchDecider? decider;
+
+    private static Action<string>? logger;
+
+    private static IDetourBackend? composeBackend;
+
+    private static IOwnsBodyQuery? ownsBodyBackend;
+
+    internal static Func<MethodBase, bool>? OwnsBodyOverride { get; set; }
 
     /// <summary>
     ///     Installs the notifier. Safe to call more than once. Later calls only re-point the observer,
@@ -40,38 +68,39 @@ internal static class UpdateWrapperHook
     internal static bool TryInstall(IForeignPatchObserver target, IDetourBackend rawBackend, Action<string> log)
     {
         observer = target;
+        decider = target as IForeignPatchDecider;
+        logger = log;
+        composeBackend = rawBackend;
+        ownsBodyBackend = rawBackend as IOwnsBodyQuery;
 
-        if (hookHandle != null)
-        {
-            return true;
-        }
-
-        MethodInfo updateWrapper = ResolveUpdateWrapper();
-        if (updateWrapper == null)
-        {
-            log(CoexistenceLogMarkers.HookUnavailable + " HarmonyLib.PatchFunctions.UpdateWrapper was not found. Late contention stays unrecoverable");
-            return false;
-        }
-
-        if (NotifyMethod == null)
+        if (NotifyMethod == null || NotifyForeignCopyMethod == null)
         {
             log(CoexistenceLogMarkers.HookUnavailable + " the notify injection method was not found");
             return false;
         }
 
-        try
+        WatchForLaterCopies();
+
+        int armed;
+        if (HarmonyLockScope.Available)
         {
-            Injection notify = new Injection(NotifyMethod, new InjectAt.Head(), "concord.hook", 0);
-            hookHandle = rawBackend.ApplyComposed(updateWrapper, new[] { notify });
+            using (HarmonyLockScope.Enter())
+            {
+                armed = InstallEveryLoadedCopy(rawBackend, log);
+            }
         }
-        catch (Exception ex)
+        else
         {
-            observer = null;
-            log(CoexistenceLogMarkers.HookUnavailable + " " + ex.Message);
+            armed = InstallEveryLoadedCopy(rawBackend, log);
+        }
+
+        if (armed == 0)
+        {
+            log(CoexistenceLogMarkers.HookUnavailable +
+                " no loaded assembly carries HarmonyLib.PatchFunctions.UpdateWrapper. Late contention stays unrecoverable");
             return false;
         }
 
-        log(CoexistenceLogMarkers.HookInstalled + " " + HarmonyVersionText() + " #" + typeof(HarmonyLib.Harmony).Assembly.GetHashCode());
         return true;
     }
 
@@ -94,13 +123,61 @@ internal static class UpdateWrapperHook
     internal static void DetachObserver()
     {
         observer = null;
+        decider = null;
+        composeBackend = null;
+        ownsBodyBackend = null;
+        OwnsBodyOverride = null;
+        DropComposedForeign();
+
+        lock (SuppressionRefusalsLogged)
+        {
+            SuppressionRefusalsLogged.Clear();
+        }
     }
 
-    private static string HarmonyVersionText()
+    internal static string HarmonyVersionText()
+    {
+        return VersionTextOf(typeof(HarmonyLib.Harmony).Assembly);
+    }
+
+    internal static bool IsHookedOn(Assembly copy)
+    {
+        if (copy == null)
+        {
+            return false;
+        }
+
+        lock (HookHandles)
+        {
+            return HookHandles.ContainsKey(copy);
+        }
+    }
+
+    internal static void StopWatchingForCopies()
+    {
+        lock (HookHandles)
+        {
+            if (!watchingForCopies)
+            {
+                return;
+            }
+
+            watchingForCopies = false;
+        }
+
+        AppDomain.CurrentDomain.AssemblyLoad -= OnAssemblyLoad;
+    }
+
+    private static string VersionTextOf(Assembly copy)
     {
         const string marker = "Version=";
-        string full = typeof(HarmonyLib.Harmony).Assembly.FullName;
-        int start = full == null ? -1 : full.IndexOf(marker, StringComparison.Ordinal);
+        string? full = copy.FullName;
+        if (full == null)
+        {
+            return "unknown";
+        }
+
+        int start = full.IndexOf(marker, StringComparison.Ordinal);
 
         if (start < 0)
         {
@@ -112,24 +189,373 @@ internal static class UpdateWrapperHook
         return end < 0 ? full.Substring(start) : full.Substring(start, end - start);
     }
 
-    private static MethodInfo ResolveUpdateWrapper()
+    private static int InstallEveryLoadedCopy(IDetourBackend rawBackend, Action<string> log)
     {
-        Type patchFunctions = typeof(HarmonyLib.Harmony).Assembly.GetType("HarmonyLib.PatchFunctions");
+        int armed = 0;
+        foreach (Assembly loaded in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            if (TryInstallFor(loaded, rawBackend, log))
+            {
+                armed++;
+            }
+        }
+
+        return armed;
+    }
+
+    private static void WatchForLaterCopies()
+    {
+        lock (HookHandles)
+        {
+            if (watchingForCopies)
+            {
+                return;
+            }
+
+            watchingForCopies = true;
+        }
+
+        AppDomain.CurrentDomain.AssemblyLoad += OnAssemblyLoad;
+    }
+
+    private static void OnAssemblyLoad(object? sender, AssemblyLoadEventArgs args)
+    {
+        IDetourBackend? backend = composeBackend;
+        Action<string>? log = logger;
+
+        if (backend == null || log == null)
+        {
+            return;
+        }
+
+        try
+        {
+            TryInstallFor(args.LoadedAssembly, backend, log);
+        }
+        catch (Exception ex)
+        {
+            log(CoexistenceLogMarkers.HookUnavailable + " arming a late Harmony copy failed: " + ex.Message);
+        }
+    }
+
+    private static bool TryInstallFor(Assembly copy, IDetourBackend rawBackend, Action<string> log)
+    {
+        lock (HookHandles)
+        {
+            if (HookHandles.ContainsKey(copy))
+            {
+                return true;
+            }
+        }
+
+        MethodInfo? updateWrapper;
+        try
+        {
+            if (copy.GetType("HarmonyLib.Harmony") == null)
+            {
+                return false;
+            }
+
+            string? refusal = SupportMatrix.BackstopRefusal(VersionTextOf(copy), copy);
+            if (refusal != null)
+            {
+                log(CoexistenceLogMarkers.HookUnavailable + " " + Describe(copy) + ": " + refusal);
+                return false;
+            }
+
+            updateWrapper = ResolveUpdateWrapper(copy);
+        }
+        catch (Exception ex)
+        {
+            log(CoexistenceLogMarkers.HookUnavailable + " " + Describe(copy) + ": " + ex.Message);
+            return false;
+        }
+
+        if (updateWrapper == null)
+        {
+            log(CoexistenceLogMarkers.HookUnavailable + " " + Describe(copy) +
+                " carries no HarmonyLib.PatchFunctions.UpdateWrapper, so patches made through that copy stay invisible");
+            return false;
+        }
+
+        IDetourHandle handle;
+        try
+        {
+            MethodInfo notifyMethod = (copy == typeof(HarmonyLib.Harmony).Assembly ? NotifyMethod : NotifyForeignCopyMethod)!;
+            Injection notify = new Injection(notifyMethod, new InjectAt.Head(), "concord.hook", 0);
+            handle = rawBackend.ApplyComposed(updateWrapper, new[] { notify });
+        }
+        catch (Exception ex)
+        {
+            log(CoexistenceLogMarkers.HookUnavailable + " " + Describe(copy) + ": " + ex.Message);
+            return false;
+        }
+
+        lock (HookHandles)
+        {
+            if (HookHandles.ContainsKey(copy))
+            {
+                handle.Dispose();
+                return true;
+            }
+
+            HookHandles[copy] = handle;
+        }
+
+        log(CoexistenceLogMarkers.HookInstalled + " " + Describe(copy));
+        return true;
+    }
+
+    private static MethodInfo? ResolveUpdateWrapper(Assembly copy)
+    {
+        Type? patchFunctions = copy.GetType("HarmonyLib.PatchFunctions");
         return patchFunctions?.GetMethod("UpdateWrapper", BindingFlags.NonPublic | BindingFlags.Static);
     }
 
     // Mirrors internal static MethodInfo PatchFunctions.UpdateWrapper(MethodBase, PatchInfo). Concord binds
     // target parameters positionally after the ControlHandle, so the full arity has to be declared even
     // though only `original` is read.
-    private static void Notify(ControlHandle<MethodInfo> ch, MethodBase original, PatchInfo patchInfo)
+    private static void Notify(ControlHandle<MethodInfo> ch, MethodBase? original, PatchInfo patchInfo)
     {
         if (suppressDepth > 0 || original == null)
         {
             return;
         }
 
-        IForeignPatchObserver current = observer;
+        MethodInfo? stub = StubForSuppressedRebuild(original, patchInfo);
+        if (stub != null)
+        {
+            ch.ReturnValue = stub;
+            ch.Cancel();
+            return;
+        }
+
+        IForeignPatchObserver? current = observer;
         current?.OnForeignPatchPending(original, patchInfo);
+    }
+
+    private static void NotifyForeignCopy(MethodBase? original)
+    {
+        if (suppressDepth > 0 || original == null)
+        {
+            return;
+        }
+
+        IForeignPatchObserver? current = observer;
+        current?.OnForeignPatchPending(original, null!);
+    }
+
+    private static MethodInfo? StubForSuppressedRebuild(MethodBase original, PatchInfo patchInfo)
+    {
+        IForeignPatchDecider? current = decider;
+        if (current == null)
+        {
+            return null;
+        }
+
+        string? refused = SuppressionGate.Validate(original)
+                         ?? HarmonyApiHonesty.SuppressionReason(SharedStateWriteHere())
+                         ?? HarmonyBuiltRefusal(original);
+        if (refused != null)
+        {
+            bool firstForThisReason;
+            lock (SuppressionRefusalsLogged)
+            {
+                firstForThisReason = SuppressionRefusalsLogged.Add(refused);
+            }
+
+            if (firstForThisReason)
+            {
+                logger?.Invoke(SuppressBlockedMarker + " " + Describe(original) + ": " + refused);
+            }
+
+            return MarkHarmonyBuiltAndFail(original);
+        }
+
+        try
+        {
+            MethodInfo stub = OriginalStubs.For(original);
+            if (!current.TrySuppressForeignRebuild(original, patchInfo))
+            {
+                return MarkHarmonyBuiltAndFail(original);
+            }
+
+            bool replicate = SharedStateWriteHere() == SharedStateWrite.InsideUpdateWrapper;
+            if (replicate)
+            {
+                HarmonyApiHonesty.ValidateSurvivingMetadata(patchInfo);
+            }
+
+            if (!ComposeForeignPatches(original, patchInfo))
+            {
+                return MarkHarmonyBuiltAndFail(original);
+            }
+
+            if (replicate)
+            {
+                HarmonyApiHonesty.ReplicateSharedStateWrite(original, stub, patchInfo);
+            }
+
+            return stub;
+        }
+        catch (Exception ex)
+        {
+            logger?.Invoke(SuppressFailedMarker + " " + Describe(original) + ": " + ex.Message);
+            return MarkHarmonyBuiltAndFail(original);
+        }
+    }
+
+    private static MethodInfo? MarkHarmonyBuiltAndFail(MethodBase original)
+    {
+        MethodBase key = MethodIdentity.Normalize(original);
+
+        lock (HarmonyBuilt)
+        {
+            HarmonyBuilt.Add(key);
+        }
+
+        DropComposedFor(key);
+        return null;
+    }
+
+    private static void DropComposedFor(MethodBase key)
+    {
+        IDetourHandle? stale;
+        lock (ComposedForeign)
+        {
+            if (!ComposedForeign.TryGetValue(key, out stale))
+            {
+                return;
+            }
+
+            ComposedForeign.Remove(key);
+        }
+
+        try
+        {
+            using (Suppress())
+            {
+                stale.Dispose();
+            }
+        }
+        catch (Exception ex)
+        {
+            logger?.Invoke(SuppressFailedMarker + " " + Describe(key) +
+                ": dropping the previous composed patch set after a refused rebuild failed: " + ex.Message);
+        }
+    }
+
+    private static SharedStateWrite SharedStateWriteHere()
+    {
+        SharedStateWrite? known = sharedStateWrite;
+        if (known == null)
+        {
+            known = HarmonyApiHonesty.Classify();
+            sharedStateWrite = known;
+        }
+
+        return known.Value;
+    }
+
+    private static string? HarmonyBuiltRefusal(MethodBase original)
+    {
+        bool built;
+        lock (HarmonyBuilt)
+        {
+            built = HarmonyBuilt.Contains(MethodIdentity.Normalize(original));
+        }
+
+        if (!built)
+        {
+            return null;
+        }
+
+        return "Harmony already built a wrapper for " + Describe(original) +
+               " and a body written after that never runs, so Harmony keeps building this method";
+    }
+
+    private static bool ComposeForeignPatches(MethodBase original, PatchInfo patchInfo)
+    {
+        IDetourBackend? backend = composeBackend;
+        if (backend == null || !OwnsBody(original))
+        {
+            logger?.Invoke(ComposeUnownedMarker + " " + Describe(original) +
+                ": the decider claimed this target but Concord holds no body for it, so Harmony's patches were not folded into one");
+            return false;
+        }
+
+        ForeignPatchConverter.Conversion converted = ForeignPatchConverter.Convert(original, patchInfo);
+        if (converted.Refusals.Count > 0)
+        {
+            ForeignPatchConverter.Refusal first = converted.Refusals[0];
+            logger?.Invoke(ComposeRefusedMarker + " " + Describe(original) + " owner '" + first.Owner + "': " + first.Reason +
+                ". Harmony keeps this method, so its own patches still run, but Concord's injections on it do not");
+            return false;
+        }
+
+        MethodBase key = MethodIdentity.Normalize(original);
+
+        using (Suppress())
+        {
+            lock (ComposedForeign)
+            {
+                if (ComposedForeign.TryGetValue(key, out IDetourHandle? previous))
+                {
+                    ComposedForeign.Remove(key);
+                    previous.Dispose();
+                }
+
+                if (converted.Injections.Count > 0)
+                {
+                    ComposedForeign[key] = backend.ApplyComposed(original, converted.Injections);
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private static bool OwnsBody(MethodBase target)
+    {
+        Func<MethodBase, bool>? supplied = OwnsBodyOverride;
+        if (supplied != null)
+        {
+            return supplied(target);
+        }
+
+        return ownsBodyBackend != null && ownsBodyBackend.OwnsBody(target);
+    }
+
+    private static void DropComposedForeign()
+    {
+        List<IDetourHandle> held;
+        lock (ComposedForeign)
+        {
+            held = new List<IDetourHandle>(ComposedForeign.Values);
+            ComposedForeign.Clear();
+        }
+
+        foreach (IDetourHandle handle in held)
+        {
+            try
+            {
+                handle.Dispose();
+            }
+            catch (Exception ex)
+            {
+                logger?.Invoke(SuppressFailedMarker + " releasing a composed Harmony patch set failed: " + ex.Message);
+            }
+        }
+    }
+
+    private static string Describe(MethodBase target)
+    {
+        return (target.DeclaringType?.Name ?? "<module>") + "." + target.Name;
+    }
+
+    private static string Describe(Assembly copy)
+    {
+        return VersionTextOf(copy) + " #" + copy.GetHashCode();
     }
 
     private sealed class SuppressScope : IDisposable

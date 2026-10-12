@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModMetaData>
+    <name>Concord Waylith RimWorld Probe</name>
+    <packageId>CryptikLemur.WaylithRimProbe</packageId>
+    <author>CryptikLemur</author>
+    <supportedVersions>
+        <li>1.7</li>
+    </supportedVersions>
+    <modDependencies>
+        <li>
+            <packageId>concordlib.concord</packageId>
+            <displayName>Concord</displayName>
+        </li>
+        <li>
+            <packageId>brrainz.harmony</packageId>
+            <displayName>Harmony</displayName>
+        </li>
+    </modDependencies>
+    <loadAfter>
+        <li>concordlib.concord</li>
+        <li>brrainz.harmony</li>
+    </loadAfter>
+    <description>Integration probe for the Concord body-replacement backend on RimWorld. Installs the backend, patches a mod method and a real game method through Concord, and measures what happens when Harmony and Concord share a process and a method. Prints an [RPROBE] report to stdout. Not for players.</description>
+</ModMetaData>

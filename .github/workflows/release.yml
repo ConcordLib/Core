@@ -1,21 +1,5 @@
 name: CI & Release
 
-# Build, test, pack, and release in one pipeline. The full game-dependent solution
-# (Concord.slnx) is not buildable on hosted runners, so this exercises Concord.ci.slnx,
-# which excludes the runtime adapters and TestMod (they reference game assemblies via
-# a local GameDir).
-#
-# The file is named release.yml because nuget.org Trusted Publishing pins the OIDC policy
-# to a workflow filename; the publish job must live in release.yml for the token to validate.
-#
-# The release job depends on the full test matrix (test), the mono leg (test-mono), and the
-# SonarCloud scan (sonar), so a release cannot cut or publish unless every required test leg
-# passes and the quality gate is green (the scan blocks on sonar.qualitygate.wait). It only runs
-# on pushes to main (not PRs): semantic-release cuts the v* tag + GitHub Release, then the
-# job packs Concord.Ref, Concord.Analyzers, Concord.Generators, and Concord.Runtime (versions
-# stamped from the tag by MinVer) and publishes to nuget.org via Trusted Publishing (OIDC ->
-# short-lived API key; no stored key). --skip-duplicate makes a re-run on the same commit idempotent.
-
 on:
   push:
     branches: [main]
@@ -37,109 +21,45 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: Build & Pack
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-          # global.json (10.0.100, rollForward latestFeature) pins the exact SDK;
-          # '10.0.x' here ensures the matching band is installed and available.
-
-      - name: Cache NuGet
-        uses: actions/cache@v4
-        with:
-          path: ~/.nuget/packages
-          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', 'global.json') }}
-          restore-keys: ${{ runner.os }}-nuget-
-
-      - name: Restore
-        run: dotnet restore Concord.ci.slnx
-
-      - name: Build
-        run: dotnet build Concord.ci.slnx -c Release --no-restore
-
-      # Produce the compile-time-only Concord.Ref nupkg (ref/ folder, no lib/).
-      - name: Pack reference assembly
-        run: dotnet pack src/Concord.Ref/Concord.Ref.csproj -c Release -o artifacts
-
-      # Concord.Harmony is a real (lib/) package, not merged into Concord.dll: it needs a
-      # 0Harmony reference and Concord.Ref keeps its public metadata free of third-party types.
-      - name: Pack Harmony host
-        run: dotnet pack src/Concord.Harmony/Concord.Harmony.csproj -c Release -o artifacts
-
-      - name: Pack HarmonyX host
-        run: dotnet pack src/Concord.HarmonyX/Concord.HarmonyX.csproj -c Release -o artifacts
-
-      - name: Upload runtime assembly
-        uses: actions/upload-artifact@v4
-        with:
-          name: concord-runtime
-          path: |
-            Assemblies/net10.0/Concord.dll
-            Assemblies/netstandard2.0/Concord.dll
-          if-no-files-found: error
-
-      - name: Upload ref package
-        uses: actions/upload-artifact@v4
-        with:
-          name: concord-ref-nupkg
-          path: artifacts/Concord.Ref.*.nupkg
-          if-no-files-found: error
-
-  # SonarCloud must analyse through the .NET scanner, not Automatic Analysis. Automatic
-  # Analysis never runs MSBuild, so it cannot see <Nullable>enable</Nullable> from
-  # Directory.Build.props and reported ~110 phantom S8970 "null-forgiving operator is
-  # pointless" issues. The begin/build/end sandwich runs SonarAnalyzer as a Roslyn analyzer
-  # inside the real compilation, so it reads the same properties the compiler does.
-  # Automatic Analysis must stay off in project settings; with both enabled SonarCloud
-  # rejects the CI report.
   sonar:
     name: SonarCloud
     runs-on: ubuntu-latest
-    # Secrets are withheld from fork PRs, so the scanner could never authenticate there;
-    # skip rather than leave a permanently red required check on outside contributions.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      && (github.event_name != 'workflow_dispatch' || inputs.runtime_version == '')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          fetch-depth: 0     # blame data for new-code detection; a shallow clone dates every line to the checkout
+          fetch-depth: 0
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: '10.0.x'
 
-      # The scanner is a Java application regardless of the language being analysed.
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Cache NuGet
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.nuget/packages
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', 'global.json') }}
           restore-keys: ${{ runner.os }}-nuget-
 
       - name: Cache SonarCloud packages
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.sonar/cache
           key: ${{ runner.os }}-sonar
           restore-keys: ${{ runner.os }}-sonar
 
       - name: Install scanner
-        run: dotnet tool install --global dotnet-sonarscanner
+        run: dotnet tool install --global dotnet-sonarscanner --version 11.3.0
 
-      # No --no-incremental/--no-restore on the build below: the scanner only sees files that
-      # actually compile in this step, so a build skipped as up-to-date yields an empty report.
       - name: Analyse
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -153,7 +73,7 @@ jobs:
             /d:sonar.host.url="https://sonarcloud.io" \
             /d:sonar.scanner.scanAll=false \
             /d:sonar.cs.opencover.reportsPaths="coverage/**/coverage.opencover.xml" \
-            /d:sonar.coverage.exclusions="tests/**,bench/**" \
+            /d:sonar.coverage.exclusions="tests/**,bench/**,src/Concord.HarmonyX/**" \
             /d:sonar.qualitygate.wait=true
           dotnet build Concord.ci.slnx -c Release
           dotnet build src/Concord.HarmonyX/Concord.HarmonyX.csproj -c Release
@@ -164,42 +84,30 @@ jobs:
 
   test:
     name: Test · ${{ matrix.label }}
-    needs: build
+    if: github.event_name != 'workflow_dispatch' || inputs.runtime_version == ''
     runs-on: ${{ matrix.runner }}
-    # fail-fast off so one flaky platform doesn't cancel the rest; experimental cells
-    # (arm64 / x64-on-intel-mac) don't fail the overall run until promoted below.
     continue-on-error: ${{ matrix.experimental }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Canonical trio — required (experimental: false).
           - { label: linux-x64,    runner: ubuntu-24.04,   experimental: false, testFilter: '' }
           - { label: windows-x64,  runner: windows-latest, experimental: false, testFilter: '' }
           - { label: macos-arm64,  runner: macos-latest,   experimental: false, testFilter: '' }
-          # Extended coverage — informational until green, then flip experimental to false.
-          # macos-x64 (macos-13, Intel) is dropped: GitHub is retiring Intel mac runners, so
-          # it is slow/scarce to allocate and stalled every release without ever completing.
-          # Apple Silicon macOS is still covered by the required macos-arm64 cell.
+          # TODO(arm64): flip experimental to false once this cell is green
           - { label: linux-arm64,  runner: ubuntu-24.04-arm, experimental: true,  testFilter: '' }
-          # Concord.Harmony.Tests is filtered out here because MonoMod has no win-arm64 support:
-          # every test that installs a detour throws "The runtime's Abi field is not set, and is
-          # unusable (MonoMod.Core.Platforms.Runtimes.Core100Runtime)". MonoMod#279 is still open,
-          # and the "Add Windows-ARM64 support" commit (e8e742c) sits on a branch that has diverged
-          # from master, so no released MonoMod.Core carries the fix and a version bump cannot help.
-          # Everything else passes on this runner, so the cell is filtered rather than dropped:
-          # it still guards the other ~700 tests on arm64. Remove the filter when MonoMod ships it.
+          # TODO(MonoMod#279): drop the testFilter when MonoMod.Core ships win-arm64
           - { label: windows-arm64,runner: windows-11-arm,   experimental: false, testFilter: 'FullyQualifiedName!~Concord.Harmony.Tests' }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: '10.0.x'
 
       - name: Cache NuGet
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.nuget/packages
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', 'global.json') }}
@@ -213,6 +121,7 @@ jobs:
 
       - name: Test (net472)
         if: startsWith(matrix.runner, 'windows')
+        shell: pwsh
         run: |
           $failed = @()
           $suites = @(
@@ -241,20 +150,20 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: test-results-${{ matrix.label }}
           path: test-results/**/*.trx
 
   test-mono:
     name: Test · mono (net472)
-    needs: build
+    if: github.event_name != 'workflow_dispatch' || inputs.runtime_version == ''
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: '10.0.x'
 
@@ -264,7 +173,7 @@ jobs:
           sudo apt-get install -y mono-complete
 
       - name: Cache NuGet
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.nuget/packages
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', 'global.json') }}
@@ -281,11 +190,8 @@ jobs:
       - name: Run suites under mono
         run: |
           set -e
-          # Pick the newest cached runner. A stale older xunit.runner.console (e.g. 2.9.2)
-          # left in the cache would make mono fail to load the tests' xunit.assert 2.9.3 with
-          # a FileNotFoundException; sort -V | tail -1 selects the version the restore pulled.
           RUNNER=$(find ~/.nuget/packages/xunit.runner.console -name xunit.console.exe -path '*net472*' | sort -V | tail -1)
-          for dll in Detour Emit AttachedData Orchestration HarmonyX; do
+          for dll in Detour Emit AttachedData Orchestration Harmony HarmonyX; do
             mono "$RUNNER" "tests/Concord.$dll.Tests/bin/Release/net472/Concord.$dll.Tests.dll"
           done
 
@@ -295,57 +201,70 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     env:
-      # Hoisted to env because the secrets context is not valid in step-level `if`.
       RUNTIME_DISPATCH_REPOS: ${{ secrets.RUNTIME_DISPATCH_REPOS }}
     permissions:
-      contents: write        # semantic-release: push tag, create GitHub Release
-      issues: write          # semantic-release: comment on resolved issues
-      pull-requests: write   # semantic-release: comment on merged PRs
-      id-token: write        # Trusted Publishing: GitHub OIDC token for NuGet login
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          fetch-depth: 0     # semantic-release walks commit history; MinVer reads tags
+          fetch-depth: 0
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: '10.0.x'
 
       - name: Cache NuGet
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.nuget/packages
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', 'global.json') }}
           restore-keys: ${{ runner.os }}-nuget-
 
-      # A build for packing only; the test/test-mono jobs already gated correctness.
       - name: Build
         run: dotnet build Concord.ci.slnx -c Release
 
+      - name: Smoke pack
+        run: |
+          set -euo pipefail
+          dotnet pack src/Concord.Ref/Concord.Ref.csproj -c Release -o "$RUNNER_TEMP/pack-smoke"
+          dotnet pack src/Concord.Analyzers/Concord.Analyzers.csproj -c Release -o "$RUNNER_TEMP/pack-smoke"
+          dotnet pack src/Concord.Generators/Concord.Generators.csproj -c Release -o "$RUNNER_TEMP/pack-smoke"
+          dotnet pack src/Concord.Harmony/Concord.Harmony.csproj -c Release -o "$RUNNER_TEMP/pack-smoke"
+          dotnet pack src/Concord.HarmonyX/Concord.HarmonyX.csproj -c Release -o "$RUNNER_TEMP/pack-smoke"
+          dotnet pack src/Concord/Concord.csproj -c Release -o "$RUNNER_TEMP/pack-smoke"
+
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
+
+      - name: Snapshot tags on HEAD
+        env:
+          LC_ALL: C
+        run: git tag --points-at HEAD | sort > "$RUNNER_TEMP/tags-before"
 
       - name: Semantic release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # conventionalcommits preset: the angular default ignores the `!`
-        # breaking-change shorthand; the preset package must be installed alongside.
-        run: npx -y -p semantic-release@24 -p conventional-changelog-conventionalcommits@9 semantic-release
+        run: npx -y -p semantic-release@24.2.9 -p conventional-changelog-conventionalcommits@9.3.1 semantic-release
 
-      # semantic-release tags HEAD when it cuts a release; no tag means nothing to publish.
       - name: Detect release tag
         id: tag
+        env:
+          LC_ALL: C
         run: |
-          TAG=$(git tag --points-at HEAD | grep '^v' | head -1 || true)
-          if [ -n "$TAG" ]; then
-            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-            echo "Publishing $TAG"
-          else
-            echo "No release tag on HEAD; skipping publish."
-          fi
+          set -euo pipefail
+          git tag --points-at HEAD | sort > "$RUNNER_TEMP/tags-after"
+          TAG=$(grep '^v' "$RUNNER_TEMP/tags-after" | sort -V | tail -1 || true)
+          RELEASED=$(comm -13 "$RUNNER_TEMP/tags-before" "$RUNNER_TEMP/tags-after" | grep '^v' | sort -V | tail -1 || true)
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "released=$RELEASED" >> "$GITHUB_OUTPUT"
+          echo "newest v-tag on HEAD: ${TAG:-none}"
+          echo "cut by this run: ${RELEASED:-none}"
 
       - name: Pack
         if: steps.tag.outputs.tag != ''
@@ -373,16 +292,16 @@ jobs:
           --skip-duplicate
 
       - name: Announce on Discord
-        if: steps.tag.outputs.tag != ''
+        if: steps.tag.outputs.released != ''
         continue-on-error: true
         env:
           WEBHOOK: ${{ secrets.NEO_MODS_DISCORD_WEBHOOK_URL }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          NOTES=$(gh release view "${{ steps.tag.outputs.tag }}" --json body -q .body | head -c 1600)
-          URL=$(gh release view "${{ steps.tag.outputs.tag }}" --json url -q .url)
-          CONTENT=$(printf '**Concord %s** — now on NuGet\n\n%s\n\n%s' "${{ steps.tag.outputs.tag }}" "$NOTES" "$URL")
+          NOTES=$(gh release view "${{ steps.tag.outputs.released }}" --json body -q .body | head -c 1600)
+          URL=$(gh release view "${{ steps.tag.outputs.released }}" --json url -q .url)
+          CONTENT=$(printf '**Concord %s** — now on NuGet\n\n%s\n\n%s' "${{ steps.tag.outputs.released }}" "$NOTES" "$URL")
           STATUS=$(curl -sS -o response.txt -w '%{http_code}' -X POST "${WEBHOOK}?thread_id=1522736349583638711&wait=true" \
             -H "Content-Type: application/json" \
             -d "$(jq -n --arg c "$CONTENT" '{content:$c, allowed_mentions:{parse:[]}}')")
@@ -392,12 +311,6 @@ jobs:
             echo "::warning::Discord announce failed with HTTP $STATUS (release itself is unaffected)"
           fi
 
-      # Runtime repositories bundle Core's Concord.dll, so a new Core release must rebuild
-      # and re-release them. GITHUB_TOKEN cannot trigger workflows in another repo, so mint
-      # a short-lived token from a GitHub App installed on the runtime repos. The repo list
-      # lives in the RUNTIME_DISPATCH_REPOS secret; when it is absent these steps no-op.
-      # Masking runs first because secret auto-masking covers only the whole comma-joined
-      # value, not the individual names an error message might echo.
       - name: Mask runtime repository names
         if: steps.tag.outputs.tag != '' && env.RUNTIME_DISPATCH_REPOS != ''
         run: |
@@ -408,9 +321,9 @@ jobs:
           done
 
       - name: Generate runtime dispatch token
-        if: steps.tag.outputs.tag != '' && env.RUNTIME_DISPATCH_REPOS != ''
+        if: steps.tag.outputs.released != '' && env.RUNTIME_DISPATCH_REPOS != ''
         id: apptoken
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
         with:
           app-id: ${{ vars.RUNTIME_DISPATCH_APP_ID }}
           private-key: ${{ secrets.RUNTIME_DISPATCH_APP_PRIVATE_KEY }}
@@ -418,7 +331,7 @@ jobs:
           repositories: ${{ env.RUNTIME_DISPATCH_REPOS }}
 
       - name: Trigger runtime rebuilds
-        if: steps.tag.outputs.tag != '' && env.RUNTIME_DISPATCH_REPOS != ''
+        if: steps.tag.outputs.released != '' && env.RUNTIME_DISPATCH_REPOS != ''
         env:
           GH_TOKEN: ${{ steps.apptoken.outputs.token }}
         run: |
@@ -428,11 +341,9 @@ jobs:
             repo=$(echo "$repo" | xargs)
             gh api "repos/ConcordLib/$repo/dispatches" \
               -f event_type=core-released \
-              -F "client_payload[core_version]=${{ steps.tag.outputs.tag }}"
+              -F "client_payload[core_version]=${{ steps.tag.outputs.released }}"
           done
 
-  # Retry path for a runtime dispatch that was skipped or failed after Core was already
-  # published. Supplying no runtime_version preserves the existing build-only manual run.
   dispatch-runtime:
     name: Dispatch runtime rebuild
     if: github.event_name == 'workflow_dispatch' && inputs.runtime_version != ''
@@ -440,9 +351,14 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Mask runtime repository name
+        env:
+          RUNTIME_REPOSITORY: ${{ inputs.runtime_repository }}
+        run: echo "::add-mask::${RUNTIME_REPOSITORY}"
+
       - name: Generate runtime-repository token
         id: apptoken
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
         with:
           app-id: ${{ vars.RUNTIME_DISPATCH_APP_ID }}
           private-key: ${{ secrets.RUNTIME_DISPATCH_APP_PRIVATE_KEY }}
@@ -456,7 +372,6 @@ jobs:
           RUNTIME_VERSION: ${{ inputs.runtime_version }}
         run: |
           set -euo pipefail
-          echo "::add-mask::${RUNTIME_REPOSITORY}"
           gh api "repos/ConcordLib/${RUNTIME_REPOSITORY}/dispatches" \
             -f event_type=core-released \
             -F "client_payload[core_version]=${RUNTIME_VERSION}"

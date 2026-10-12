@@ -81,4 +81,10 @@ public enum At {
     ///     <c>Name</c> when more than one matches.
     /// </summary>
     Local,
+
+    /// <summary>
+    ///     Run the injection method when the target throws. The body reads the exception, and can
+    ///     replace the return value or stop the throw, neither of which <see cref="Finally" /> can do.
+    /// </summary>
+    Catch,
 }

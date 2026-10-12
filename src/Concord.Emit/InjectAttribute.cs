@@ -244,6 +244,7 @@ public sealed class InjectAttribute : Attribute {
                 Concord.At.Finally => new InjectAt.Finally(),
                 Concord.At.Transpiler => new InjectAt.Transpiler(false),
                 Concord.At.TranspilerFinal => new InjectAt.Transpiler(true),
+                Concord.At.Catch => new InjectAt.Catch(),
                 _ => throw new ConcordEmitException("CONC116", $"Unsupported injection position '{At}'."),
             };
         }

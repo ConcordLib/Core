@@ -17,27 +17,47 @@ public static class PatchDeclarationScanner {
     private const string InjectNewOnPrefix = "[InjectNew] on ";
 
     /// <summary>
-    ///     Scans every type in <paramref name="assembly" /> and processes each <see cref="PatchAttribute" />
-    ///     declaration. Per-type <see cref="ConcordDeclarationException" />s are swallowed so one bad
-    ///     declaration cannot abort scanning the rest of the assembly.
+    ///     Scans every <see cref="PatchAttribute" /> declaration in <paramref name="assembly" />, reporting
+    ///     per-declaration errors to stderr and any trace listener.
     /// </summary>
     /// <param name="assembly">The assembly to scan.</param>
     /// <param name="patches">The applier that applies patches.</param>
     /// <param name="props">The registry that registers attached-properties.</param>
-    /// <param name="log">Receives each per-declaration error. Defaults to stderr and any trace listener.</param>
-    public static void ScanAssembly(Assembly assembly, IPatchApplier patches, IAttachedPropertyRegistry props, Action<string>? log = null) {
+    public static void ScanAssembly(Assembly assembly, IPatchApplier patches, IAttachedPropertyRegistry props) {
+        ScanAssembly(assembly, patches, props, null);
+    }
+
+    /// <summary>
+    ///     Scans every <see cref="PatchAttribute" /> declaration in <paramref name="assembly" />. A per-type
+    ///     <see cref="ConcordDeclarationException" /> is swallowed so one bad declaration cannot abort the rest.
+    /// </summary>
+    /// <param name="assembly">The assembly to scan.</param>
+    /// <param name="patches">The applier that applies patches.</param>
+    /// <param name="props">The registry that registers attached-properties.</param>
+    /// <param name="log">Receives each per-declaration error, or null for stderr and any trace listener.</param>
+    public static void ScanAssembly(Assembly assembly, IPatchApplier patches, IAttachedPropertyRegistry props, Action<string>? log) {
         ScanDeclarations(assembly.GetTypes(), patches, props, log);
     }
 
     /// <summary>
-    ///     Scans the given declaration types, tolerating per-declaration failures exactly like
-    ///     <see cref="ScanAssembly" />.
+    ///     Scans the given declaration types, reporting per-declaration errors to stderr and any trace listener.
     /// </summary>
     /// <param name="declarations">The declaration types to scan.</param>
     /// <param name="patches">The applier that applies patches.</param>
     /// <param name="props">The registry that registers attached-properties.</param>
-    /// <param name="log">Receives each per-declaration error. Defaults to stderr and any trace listener.</param>
-    public static void ScanDeclarations(IEnumerable<Type> declarations, IPatchApplier patches, IAttachedPropertyRegistry props, Action<string>? log = null) {
+    public static void ScanDeclarations(IEnumerable<Type> declarations, IPatchApplier patches, IAttachedPropertyRegistry props) {
+        ScanDeclarations(declarations, patches, props, null);
+    }
+
+    /// <summary>
+    ///     Scans the given declaration types, tolerating per-declaration failures exactly like
+    ///     <see cref="ScanAssembly(Assembly, IPatchApplier, IAttachedPropertyRegistry, Action{string})" />.
+    /// </summary>
+    /// <param name="declarations">The declaration types to scan.</param>
+    /// <param name="patches">The applier that applies patches.</param>
+    /// <param name="props">The registry that registers attached-properties.</param>
+    /// <param name="log">Receives each per-declaration error, or null for stderr and any trace listener.</param>
+    public static void ScanDeclarations(IEnumerable<Type> declarations, IPatchApplier patches, IAttachedPropertyRegistry props, Action<string>? log) {
         foreach (Type type in declarations) {
             try {
                 ScanType(type, patches, props);
@@ -142,7 +162,7 @@ public static class PatchDeclarationScanner {
     ///     Registers every extended enum declaration among <paramref name="declarations" /> and assigns their
     ///     member fields. Callers run this before any injection, because an injection body can read a member.
     ///     Per-declaration <see cref="ConcordDeclarationException" />s are swallowed the same way
-    ///     <see cref="ScanDeclarations" /> swallows them.
+    ///     <see cref="ScanDeclarations(IEnumerable{Type}, IPatchApplier, IAttachedPropertyRegistry)" /> swallows them.
     /// </summary>
     /// <param name="declarations">The declaration types to inspect.</param>
     public static void ScanExtendedEnums(IEnumerable<Type> declarations) {

@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <RootNamespace>Concord.Waylith.DetourCancelProbe</RootNamespace>
+    <AssemblyName>DetourCancelProbe</AssemblyName>
+    <OutputPath>bin/probe</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <DebugType>embedded</DebugType>
+    <Optimize>true</Optimize>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <HarmonyDir Condition="'$(HarmonyDir)' == ''">/mnt/games/RimWorld/Mods/Harmony-net10/1.7/Assemblies</HarmonyDir>
+    <NoWarn>$(NoWarn);CS1701;CS1702;NU1503</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Using Remove="@(Using)" />
+    <Reference Remove="Concord" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="0Harmony">
+      <HintPath>$(HarmonyDir)/0Harmony.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="HarmonyExists" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="!Exists('$(HarmonyDir)/0Harmony.dll')"
+           Text="0Harmony.dll not found under $(HarmonyDir). Point -p:HarmonyDir=&lt;dir&gt; at a net10 Harmony build." />
+  </Target>
+
+</Project>

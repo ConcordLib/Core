@@ -122,4 +122,10 @@ public abstract record InjectAt {
         /// </summary>
         public SliceRange? Slice { get; init; }
     }
+
+    /// <summary>
+    ///     Runs the injection inside a synthesized <c>catch</c> over the head injections and the target body.
+    ///     The body reads the thrown exception, and a <see cref="ControlHandle" /> lets it stop the throw.
+    /// </summary>
+    public sealed record Catch : InjectAt;
 }

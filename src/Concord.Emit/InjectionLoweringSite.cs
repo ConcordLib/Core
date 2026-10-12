@@ -34,4 +34,10 @@ internal readonly record struct InjectionLoweringSite(
     bool InsideAround,
     IReadOnlyDictionary<int, VariableDefinition>? CaptureBinding,
     IReadOnlyDictionary<int, VariableDefinition>? BoundConstants,
-    LocalHandleLowering? LocalHandles = null);
+    LocalHandleLowering? LocalHandles = null) {
+    public bool InsideCatch { get; init; }
+
+    public InjectAt? At { get; init; }
+
+    public bool ForeignOrigin { get; init; }
+}

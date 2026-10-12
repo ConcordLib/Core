@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Concord.Host.Adapter</RootNamespace>
+    <AssemblyName>Concord.Host.Adapter</AssemblyName>
+    <ConcordDir Condition="'$(ConcordDir)' == ''">$(MSBuildThisFileDirectory)../../Assemblies/$(TargetFramework)</ConcordDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Using Include="System.Reflection.Metadata"/>
+    <Using Include="System.Reflection.Metadata.Ecma335"/>
+    <Using Include="Concord.Emit"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Order-only: build the merged runtime first, but do not let MSBuild pick its reference,
+         which resolves to the metadata-only Concord.Ref output instead of the ILRepack result. -->
+    <ProjectReference Include="../Concord/Concord.csproj" ReferenceOutputAssembly="false"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Concord">
+      <HintPath>../../Assemblies/$(TargetFramework)/Concord.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <UsingTask TaskName="ReadConcordBuildSha" TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <AssemblyPath ParameterType="System.String" Required="true"/>
+      <Sha ParameterType="System.String" Output="true"/>
+    </ParameterGroup>
+    <Task>
+      <Code Type="Fragment" Language="cs">
+        <![CDATA[
+        string version = System.Diagnostics.FileVersionInfo.GetVersionInfo(AssemblyPath).ProductVersion ?? "";
+        int plus = version.IndexOf('+');
+        Sha = plus < 0 ? "" : version.Substring(plus + 1);
+        ]]>
+      </Code>
+    </Task>
+  </UsingTask>
+
+  <Target Name="StampConcordBuild" BeforeTargets="GetAssemblyAttributes"
+          Condition="Exists('$(ConcordDir)/Concord.dll')">
+    <ReadConcordBuildSha AssemblyPath="$(ConcordDir)/Concord.dll">
+      <Output TaskParameter="Sha" PropertyName="ConcordBuildSha"/>
+    </ReadConcordBuildSha>
+    <ItemGroup>
+      <AssemblyMetadata Include="ConcordBuild" Value="$(ConcordBuildSha)" Condition="'$(ConcordBuildSha)' != ''"/>
+    </ItemGroup>
+  </Target>
+
+</Project>

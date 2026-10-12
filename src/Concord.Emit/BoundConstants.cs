@@ -16,13 +16,17 @@ internal static class BoundConstants {
     private static MethodInfo TypeFromHandle =>
         typeof(Type).GetMethod(nameof(Type.GetTypeFromHandle), [typeof(RuntimeTypeHandle)])!;
 
+    internal static bool IsBound(ParameterInfo parameter) {
+        return parameter.GetCustomAttribute<BoundAttribute>() is not null;
+    }
+
     internal static Dictionary<int, object?> Resolve(MethodBase injectionMethod, IReadOnlyDictionary<string, object?>? boundArguments) {
         ParameterInfo[] parameters = injectionMethod.GetParameters();
         int offset = injectionMethod.IsStatic ? 0 : 1;
         Dictionary<int, object?> resolved = new Dictionary<int, object?>();
 
         for (int i = 0; i < parameters.Length; i++) {
-            if (parameters[i].GetCustomAttribute<BoundAttribute>() is null) {
+            if (!IsBound(parameters[i])) {
                 continue;
             }
 
@@ -73,7 +77,7 @@ internal static class BoundConstants {
 
     internal static void RejectDeclarations(MethodBase injectionMethod, string position) {
         foreach (ParameterInfo parameter in injectionMethod.GetParameters()) {
-            if (parameter.GetCustomAttribute<BoundAttribute>() is not null) {
+            if (IsBound(parameter)) {
                 throw new ConcordEmitException(
                     Unbindable,
                     BoundParameter + parameter.Name + OnOwner + injectionMethod.Name + "' is not supported at " + position + ".");
@@ -146,7 +150,7 @@ internal static class BoundConstants {
         foreach (string name in boundArguments.Keys) {
             bool matched = false;
             foreach (ParameterInfo parameter in parameters) {
-                if (parameter.Name == name && parameter.GetCustomAttribute<BoundAttribute>() is not null) {
+                if (parameter.Name == name && IsBound(parameter)) {
                     matched = true;
                     break;
                 }

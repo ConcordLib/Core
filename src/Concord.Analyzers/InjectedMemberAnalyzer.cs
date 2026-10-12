@@ -236,6 +236,16 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     /// </summary>
     public const string CaptureAndLocalDiagnosticId = "CONCORD050";
 
+    /// <summary>
+    ///     Diagnostic id for an At.Catch injection whose exception parameter is not one System.Exception.
+    /// </summary>
+    public const string InvalidCatchExceptionDiagnosticId = "CONCORD051";
+
+    /// <summary>
+    ///     Diagnostic id for a ControlHandle.Cancel(bool) call in an injection that is not at At.Head.
+    /// </summary>
+    public const string CancelSkipPositionDiagnosticId = "CONCORD052";
+
     private const string ConcordPatchesNamespace = "Concord.Patches";    private const string ConcordNamespace = "Concord";
     private const string OperationTypeName = "Operation";
     private const string VoidOperationPrefix = "VoidOperation<";
@@ -244,7 +254,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
 
     // Mirrors WrapperComposer.SupportsLocalBinding's message. The two lists are deliberate twins:
     // the analyzer cannot reference Concord.Emit, so changing one means changing the other.
-    private const string LocalPositionHelp = "[Local] is supported at At.Return, At.Tail, At.Finally, At.Local, and the At.Head and " +
+    private const string LocalPositionHelp = "[Local] is supported at At.Return, At.Tail, At.Finally, At.Catch, At.Local, and the At.Head and " +
                                              "At.Tail shifts of At.Invoke and At.NewObj.";
 
     // Mirrors WrapperComposer.LocalWriteHelp. The two lists are deliberate twins: the analyzer
@@ -629,6 +639,15 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         true,
         LocalWriteHelp);
 
+    private static readonly DiagnosticDescriptor InvalidCatchExceptionRule = new(
+        InvalidCatchExceptionDiagnosticId,
+        "Catch injection exception parameter is invalid",
+        "Injection method '{0}' at At.Catch {1}",
+        ConcordPatchesNamespace,
+        DiagnosticSeverity.Error,
+        true,
+        "An At.Catch injection reads the thrown exception through a single parameter typed System.Exception.");
+
     private static readonly DiagnosticDescriptor LocalParameterWriteRule = new(
         LocalParameterWriteDiagnosticId,
         "Local parameter is written",
@@ -649,6 +668,18 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         true,
         "[Capture] binds an argument of the matched call and [Local] binds a local of the target body. One parameter " +
         "cannot be both, and the runtime would silently keep the local and throw the capture away.");
+
+    private static readonly DiagnosticDescriptor CancelSkipPositionRule = new(
+        CancelSkipPositionDiagnosticId,
+        "Cancel skips later heads outside At.Head",
+        "Injection method '{0}' calls the ControlHandle.Cancel(bool) overload at {1}, which has no later head " +
+        "injections to skip. Call Cancel() instead, or move the call to an At.Head injection.",
+        ConcordPatchesNamespace,
+        DiagnosticSeverity.Error,
+        true,
+        "The Cancel(bool) overload is only valid in an At.Head injection, because only a head injection has later " +
+        "head injections to skip. Call Cancel() instead, which cancels the original target invocation at any " +
+        "position, or move the call to an At.Head injection.");
 
     private enum MetadataMemberKind {
         Field,
@@ -701,7 +732,9 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             ConflictingLocalPositionSelectorRule,
             InvalidLocalPositionRule,
             LocalParameterWriteRule,
-            CaptureAndLocalRule);
+            CaptureAndLocalRule,
+            InvalidCatchExceptionRule,
+            CancelSkipPositionRule);
 
     /// <inheritdoc />
     public override void Initialize(AnalysisContext context) {
@@ -710,6 +743,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         context.RegisterSymbolAction(AnalyzeNamedType, SymbolKind.NamedType);
         context.RegisterSymbolStartAction(AnalyzeStateSlots, SymbolKind.NamedType);
         context.RegisterCompilationStartAction(AnalyzeEnumMemberIds);
+        context.RegisterSyntaxNodeAction(AnalyzeCancelSkipCall, SyntaxKind.InvocationExpression);
     }
 
     private static void AnalyzeNamedType(SymbolAnalysisContext context) {
@@ -1027,7 +1061,7 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     private static bool SupportsLocalBinding(InjectionDeclaration declaration) {
         return declaration.TargetsCallSite
             ? declaration.AtName is "Head" or "Tail"
-            : declaration.AtName is "Return" or "Tail" or "Finally" or "Local";
+            : declaration.AtName is "Return" or "Tail" or "Finally" or "Catch" or "Local";
     }
 
     // Twin of WrapperComposer.SupportsLocalWrite. Keep both in step; the analyzer targets
@@ -1036,6 +1070,10 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         return declaration.TargetsCallSite
             ? declaration.AtName is "Head" or "Tail"
             : declaration.AtName == "Local";
+    }
+
+    private static bool SupportsCancelSkip(InjectionDeclaration declaration) {
+        return !declaration.TargetsCallSite && declaration.AtName == "Head";
     }
 
     private static bool IsLocalHandleType(ITypeSymbol type) {
@@ -1122,6 +1160,38 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
         StateSlotCollector collector = new StateSlotCollector(patchType, patchTarget.TargetType);
         context.RegisterSyntaxNodeAction(collector.Collect, SyntaxKind.InvocationExpression);
         context.RegisterSymbolEndAction(collector.Report);
+    }
+
+    private static void AnalyzeCancelSkipCall(SyntaxNodeAnalysisContext context) {
+        if (context.Node is not InvocationExpressionSyntax invocation ||
+            invocation.ArgumentList.Arguments.Count != 1 ||
+            invocation.Expression is not MemberAccessExpressionSyntax access ||
+            access.Name.Identifier.ValueText != "Cancel") {
+            return;
+        }
+
+        if (context.SemanticModel.GetSymbolInfo(invocation, context.CancellationToken).Symbol is not IMethodSymbol called ||
+            called.Parameters.Length != 1 ||
+            called.ContainingType is null ||
+            !IsControlHandleType(called.ContainingType, out _)) {
+            return;
+        }
+
+        if (invocation.FirstAncestorOrSelf<MethodDeclarationSyntax>() is not MethodDeclarationSyntax enclosing ||
+            context.SemanticModel.GetDeclaredSymbol(enclosing, context.CancellationToken) is not IMethodSymbol injectionMethod) {
+            return;
+        }
+
+        InjectionDeclaration? declaration = TryGetInjectionDeclaration(injectionMethod);
+        if (declaration is null || SupportsCancelSkip(declaration)) {
+            return;
+        }
+
+        context.ReportDiagnostic(Diagnostic.Create(
+            CancelSkipPositionRule,
+            invocation.GetLocation(),
+            injectionMethod.Name,
+            PositionName(declaration)));
     }
 
     private static void ResolveCallSiteArguments(
@@ -2169,6 +2239,11 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
             return;
         }
 
+        if (TargetsCatch(injection) && IsExceptionType(parameter.Type) && !BindsTargetParameter(target, parameter)) {
+            ValidateCatchExceptionParameter(context, injection, parameter, state);
+            return;
+        }
+
         IParameterSymbol? targetParameter = target.Parameters.FirstOrDefault(candidate => candidate.Name == parameter.Name);
         if (targetParameter is null || !SymbolEqualityComparer.Default.Equals(targetParameter.Type, parameter.Type)) {
             ReportInvalidInjectionSignature(
@@ -2193,6 +2268,65 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
                     ? $"target parameter '{targetParameter.Name}' is passed by reference. Declare it '{RefKeyword(targetParameter.RefKind)}' on the injection too"
                     : $"target parameter '{targetParameter.Name}' is passed by value. Drop the byref modifier on the injection");
         }
+    }
+
+    private static bool TargetsCatch(InjectionInfo injection) {
+        return !injection.TargetsInvoke && AtMemberName(injection.Attribute, "at") == "Catch";
+    }
+
+    private static bool BindsTargetParameter(InjectionTarget target, IParameterSymbol parameter) {
+        IParameterSymbol? targetParameter = target.Parameters.FirstOrDefault(candidate => candidate.Name == parameter.Name);
+
+        return targetParameter is not null && SymbolEqualityComparer.Default.Equals(targetParameter.Type, parameter.Type);
+    }
+
+    private static bool IsExceptionType(ITypeSymbol type) {
+        for (ITypeSymbol? current = type; current is not null; current = current.BaseType) {
+            if (IsSystemException(current)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsSystemException(ITypeSymbol type) {
+        return type.Name == "Exception" && type.ContainingNamespace?.ToDisplayString() == "System";
+    }
+
+    private static void ValidateCatchExceptionParameter(
+        SymbolAnalysisContext context,
+        InjectionInfo injection,
+        IParameterSymbol parameter,
+        ParameterValidationState state) {
+        if (IsByRef(parameter.RefKind)) {
+            context.ReportDiagnostic(Diagnostic.Create(
+                InvalidCatchExceptionRule,
+                LocationOf(parameter),
+                injection.Method.Name,
+                $"declares exception parameter '{parameter.Name}' by reference. The thrown exception arrives by value"));
+            return;
+        }
+
+        if (!IsSystemException(parameter.Type)) {
+            context.ReportDiagnostic(Diagnostic.Create(
+                InvalidCatchExceptionRule,
+                LocationOf(parameter),
+                injection.Method.Name,
+                $"declares exception parameter '{parameter.Name}' as '{parameter.Type.ToDisplayString()}'. The thrown exception arrives as System.Exception"));
+            return;
+        }
+
+        if (state.HasCatchException) {
+            context.ReportDiagnostic(Diagnostic.Create(
+                InvalidCatchExceptionRule,
+                LocationOf(parameter),
+                injection.Method.Name,
+                $"declares a second System.Exception parameter '{parameter.Name}'. The thrown exception arrives as one System.Exception parameter"));
+            return;
+        }
+
+        state.HasCatchException = true;
     }
 
     private static bool IsByRef(RefKind refKind) {
@@ -4063,6 +4197,8 @@ public sealed class InjectedMemberAnalyzer : DiagnosticAnalyzer {
     }
 
     private sealed class ParameterValidationState {
+        public bool HasCatchException { get; set; }
+
         public bool HasControlHandle { get; set; }
 
         public bool HasOperation { get; set; }

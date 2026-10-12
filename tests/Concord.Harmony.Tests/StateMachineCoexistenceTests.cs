@@ -38,7 +38,7 @@ namespace Concord.Harmony.Tests
             {
                 if (nested.Name.Contains("Iterate"))
                 {
-                    MethodInfo moveNext = nested.GetMethod("MoveNext", BindingFlags.NonPublic | BindingFlags.Instance);
+                    MethodInfo? moveNext = nested.GetMethod("MoveNext", BindingFlags.NonPublic | BindingFlags.Instance);
                     if (moveNext != null)
                     {
                         return moveNext;
@@ -71,6 +71,11 @@ namespace Concord.Harmony.Tests
     [Collection("HarmonySerial")]
     public sealed class StateMachineCoexistenceTests
     {
+        private static MethodInfo Method(Type type, string name)
+        {
+            return type.GetMethod(name) ?? throw new InvalidOperationException(type.Name + "." + name + " not found");
+        }
+
         private static Injection MakeHeadInjection(MethodInfo method, string owner, PatchBody body)
         {
             return new Injection(method, new InjectAt.Head(), owner, 0) { Body = body };
@@ -82,9 +87,9 @@ namespace Concord.Harmony.Tests
         public void Validate_StateMachineBodyOnMoveNextTarget_IsAccepted()
         {
             MethodInfo moveNext = StateMachineTarget.ResolveIterateMoveNext();
-            MethodInfo headMethod = typeof(StateMachineMods).GetMethod(nameof(StateMachineMods.ConcordHead));
+            MethodInfo headMethod = Method(typeof(StateMachineMods), nameof(StateMachineMods.ConcordHead));
 
-            string reason = SupportMatrix.Validate(moveNext, new[] { MakeHeadInjection(headMethod, "test.sm", PatchBody.StateMachine) }, null);
+            string? reason = SupportMatrix.Validate(moveNext, new[] { MakeHeadInjection(headMethod, "test.sm", PatchBody.StateMachine) }, null);
 
             Assert.Null(reason);
         }
@@ -94,10 +99,10 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void HarmonyOnDeclaredIterator_ConcordOnMoveNext_IsNotContested()
         {
-            MethodInfo declared = typeof(StateMachineTarget).GetMethod(nameof(StateMachineTarget.Iterate));
+            MethodInfo declared = Method(typeof(StateMachineTarget), nameof(StateMachineTarget.Iterate));
             MethodInfo moveNext = StateMachineTarget.ResolveIterateMoveNext();
-            MethodInfo headMethod = typeof(StateMachineMods).GetMethod(nameof(StateMachineMods.ConcordHead));
-            MethodInfo postfix = typeof(StateMachineMods).GetMethod(nameof(StateMachineMods.DeclaredPostfix));
+            MethodInfo headMethod = Method(typeof(StateMachineMods), nameof(StateMachineMods.ConcordHead));
+            MethodInfo postfix = Method(typeof(StateMachineMods), nameof(StateMachineMods.DeclaredPostfix));
 
             HarmonyLib.Harmony harmony = new HarmonyLib.Harmony("test.sm.declared");
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
@@ -123,13 +128,13 @@ namespace Concord.Harmony.Tests
         public void HarmonyOnMoveNext_ConcordStateMachineOnMoveNext_RoutesAndBothRun()
         {
             MethodInfo moveNext = StateMachineTarget.ResolveIterateMoveNext();
-            MethodInfo headMethod = typeof(StateMachineMods).GetMethod(nameof(StateMachineMods.ConcordHead));
-            MethodInfo postfix = typeof(StateMachineMods).GetMethod(nameof(StateMachineMods.MoveNextPostfix));
+            MethodInfo headMethod = Method(typeof(StateMachineMods), nameof(StateMachineMods.ConcordHead));
+            MethodInfo postfix = Method(typeof(StateMachineMods), nameof(StateMachineMods.MoveNextPostfix));
 
             HarmonyLib.Harmony harmony = new HarmonyLib.Harmony("test.sm.movenext");
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
             try
             {
                 harmony.Patch(moveNext, postfix: new HarmonyMethod(postfix));
@@ -163,10 +168,10 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void HarmonyOnMoveNext_ConcordDeclaredOnDeclaredMethod_IsNotContested()
         {
-            MethodInfo declared = typeof(StateMachineTarget).GetMethod(nameof(StateMachineTarget.Iterate));
+            MethodInfo declared = Method(typeof(StateMachineTarget), nameof(StateMachineTarget.Iterate));
             MethodInfo moveNext = StateMachineTarget.ResolveIterateMoveNext();
-            MethodInfo headMethod = typeof(StateMachineMods).GetMethod(nameof(StateMachineMods.ConcordHead));
-            MethodInfo postfix = typeof(StateMachineMods).GetMethod(nameof(StateMachineMods.MoveNextPostfix));
+            MethodInfo headMethod = Method(typeof(StateMachineMods), nameof(StateMachineMods.ConcordHead));
+            MethodInfo postfix = Method(typeof(StateMachineMods), nameof(StateMachineMods.MoveNextPostfix));
 
             HarmonyLib.Harmony harmony = new HarmonyLib.Harmony("test.sm.split");
             HarmonyBridge bridge = new HarmonyBridge(_ => { });

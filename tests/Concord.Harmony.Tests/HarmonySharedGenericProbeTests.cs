@@ -83,8 +83,8 @@ namespace Concord.Harmony.Tests
         public void HarmonyPostfixOnRefTypeInstantiation()
         {
             HarmonyLib.Harmony harmony = new HarmonyLib.Harmony("probe.shared.generic");
-            MethodInfo target = typeof(HarmonyProbeBox<string>).GetMethod(nameof(HarmonyProbeBox<string>.Ping));
-            MethodInfo postfix = typeof(HarmonyProbePatches).GetMethod(nameof(HarmonyProbePatches.Postfix));
+            MethodInfo target = Method(typeof(HarmonyProbeBox<string>), nameof(HarmonyProbeBox<string>.Ping));
+            MethodInfo postfix = Method(typeof(HarmonyProbePatches), nameof(HarmonyProbePatches.Postfix));
             harmony.Patch(target, postfix: new HarmonyMethod(postfix));
             try
             {
@@ -108,13 +108,13 @@ namespace Concord.Harmony.Tests
             }
 
             HarmonyLib.Harmony harmony = new HarmonyLib.Harmony("probe.bridge.shared.generic");
-            MethodInfo target = typeof(BridgeProbeBox<string>).GetMethod(nameof(BridgeProbeBox<string>.Compute));
-            MethodInfo postfix = typeof(BridgeProbeMods).GetMethod(nameof(BridgeProbeMods.HarmonyPostfix));
-            MethodInfo head = typeof(BridgeProbeMods).GetMethod(nameof(BridgeProbeMods.ConcordHead));
+            MethodInfo target = Method(typeof(BridgeProbeBox<string>), nameof(BridgeProbeBox<string>.Compute));
+            MethodInfo postfix = Method(typeof(BridgeProbeMods), nameof(BridgeProbeMods.HarmonyPostfix));
+            MethodInfo head = Method(typeof(BridgeProbeMods), nameof(BridgeProbeMods.ConcordHead));
             harmony.Patch(target, postfix: new HarmonyMethod(postfix));
 
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
             try
             {
                 result = bridge.TryRoute(target, new[] { new Injection(head, new InjectAt.Head(), "test.bridge", 0) }, forceRoute: true);
@@ -148,17 +148,17 @@ namespace Concord.Harmony.Tests
             }
 
             HarmonyLib.Harmony harmony = new HarmonyLib.Harmony("probe.bridge.shared.generic.two");
-            MethodInfo text = typeof(BridgeProbeBox<string>).GetMethod(nameof(BridgeProbeBox<string>.Compute));
-            MethodInfo version = typeof(BridgeProbeBox<Version>).GetMethod(nameof(BridgeProbeBox<Version>.Compute));
-            MethodInfo postfix = typeof(BridgeProbeMods).GetMethod(nameof(BridgeProbeMods.HarmonyPostfix));
-            MethodInfo headA = typeof(BridgeProbeMods).GetMethod(nameof(BridgeProbeMods.ConcordHead));
-            MethodInfo headB = typeof(BridgeProbeMods).GetMethod(nameof(BridgeProbeMods.ConcordHeadB));
+            MethodInfo text = Method(typeof(BridgeProbeBox<string>), nameof(BridgeProbeBox<string>.Compute));
+            MethodInfo version = Method(typeof(BridgeProbeBox<Version>), nameof(BridgeProbeBox<Version>.Compute));
+            MethodInfo postfix = Method(typeof(BridgeProbeMods), nameof(BridgeProbeMods.HarmonyPostfix));
+            MethodInfo headA = Method(typeof(BridgeProbeMods), nameof(BridgeProbeMods.ConcordHead));
+            MethodInfo headB = Method(typeof(BridgeProbeMods), nameof(BridgeProbeMods.ConcordHeadB));
             harmony.Patch(text, postfix: new HarmonyMethod(postfix));
             harmony.Patch(version, postfix: new HarmonyMethod(postfix));
 
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
-            ForeignRouteResult a = null;
-            ForeignRouteResult b = null;
+            ForeignRouteResult? a = null;
+            ForeignRouteResult? b = null;
             try
             {
                 a = bridge.TryRoute(text, new[] { new Injection(headA, new InjectAt.Head(), "test.bridge.a", 0) }, forceRoute: true);
@@ -190,8 +190,8 @@ namespace Concord.Harmony.Tests
         public void HarmonyDictionaryReadingBodyOnRefTypeInstantiation()
         {
             HarmonyLib.Harmony harmony = new HarmonyLib.Harmony("probe.shared.generic.dict");
-            MethodInfo target = typeof(HarmonyProbeBox<string>).GetMethod(nameof(HarmonyProbeBox<string>.Describe));
-            MethodInfo postfix = typeof(HarmonyProbePatches).GetMethod(nameof(HarmonyProbePatches.Append));
+            MethodInfo target = Method(typeof(HarmonyProbeBox<string>), nameof(HarmonyProbeBox<string>.Describe));
+            MethodInfo postfix = Method(typeof(HarmonyProbePatches), nameof(HarmonyProbePatches.Append));
             harmony.Patch(target, postfix: new HarmonyMethod(postfix));
             try
             {
@@ -203,6 +203,11 @@ namespace Concord.Harmony.Tests
             {
                 TestUnpatch.Own(harmony, "probe.shared.generic.dict");
             }
+        }
+
+        private static MethodInfo Method(Type type, string name)
+        {
+            return type.GetMethod(name) ?? throw new InvalidOperationException(type.Name + "." + name + " not found");
         }
     }
 }

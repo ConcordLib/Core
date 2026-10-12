@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Concord.Emit;
 using Mono.Cecil;
+using Mono.Cecil.Cil;
 using Xunit;
 
 namespace Concord.Orchestration.Tests;
@@ -44,8 +45,26 @@ public sealed class PublicSurfaceTests {
         List<string> leaks = new List<string>();
 
         foreach (Assembly assembly in RefGlobbedAssemblies()) {
-            foreach (Type type in assembly.GetExportedTypes()) {
+            Type[] types = ScannedTypes(assembly);
+
+            // An assembly that yields no types would pass this test having tested nothing, which is
+            // the failure mode the whole file exists to prevent.
+            Assert.NotEmpty(types);
+
+            foreach (Type type in types) {
+                foreach (Type used in DeclarationTypes(type)) {
+                    if (BannedNamespaces.Any(banned => IsIn(used, banned))) {
+                        leaks.Add($"{assembly.GetName().Name}: {type.FullName} declaration exposes {used.FullName}");
+                    }
+                }
+
                 foreach (MemberInfo member in type.GetMembers(Declared).Where(VisibleOutsideAssembly)) {
+                    // Nested types come back from GetMembers too, and ScannedTypes already walks them
+                    // as types in their own right, which reaches strictly more than a signature walk.
+                    if (member is Type) {
+                        continue;
+                    }
+
                     foreach (Type used in SignatureTypes(member)) {
                         if (BannedNamespaces.Any(banned => IsIn(used, banned))) {
                             leaks.Add($"{assembly.GetName().Name}: {type.FullName}.{member.Name} exposes {used.FullName}");
@@ -55,7 +74,8 @@ public sealed class PublicSurfaceTests {
             }
         }
 
-        Assert.Empty(leaks);
+        // Assert.Empty truncates its collection, so the one time this fires you cannot read what leaked.
+        Assert.True(leaks.Count == 0, string.Join(Environment.NewLine, leaks));
     }
 
     // Read out of Concord.Ref.csproj itself rather than restated here. A sixth project joining the
@@ -167,6 +187,115 @@ public sealed class PublicSurfaceTests {
         Assert.Equal(composer.GetRawConstantValue(), AnalyzerConstant("LocalWriteHelp"));
     }
 
+    [Fact]
+    public void LocalBindingPositionsMatchTheAnalyzersTwin() {
+        Assert.Equal(ComposerAcceptedPositions("SupportsLocalBinding"), AnalyzerAcceptedPositions("SupportsLocalBinding"));
+    }
+
+    [Fact]
+    public void LocalWritePositionsMatchTheAnalyzersTwin() {
+        Assert.Equal(ComposerAcceptedPositions("SupportsLocalWrite"), AnalyzerAcceptedPositions("SupportsLocalWrite"));
+    }
+
+    [Fact]
+    public void CancelSkipPositionsMatchTheAnalyzersTwin() {
+        Assert.Equal(ComposerAcceptedPositions("SupportsCancelSkip"), AnalyzerAcceptedPositions("SupportsCancelSkip"));
+    }
+
+    private static string[] ComposerAcceptedPositions(string predicateName) {
+        MethodInfo predicate = typeof(WrapperComposer).GetMethod(
+                                   predicateName, BindingFlags.NonPublic | BindingFlags.Static, null, [typeof(InjectAt)], null)
+                               ?? throw new InvalidOperationException($"WrapperComposer has no private static '{predicateName}(InjectAt)'.");
+        SortedSet<string> accepted = new SortedSet<string>(StringComparer.Ordinal);
+        string[]? callSiteShifts = null;
+        string firstCallSite = string.Empty;
+
+        foreach (Type position in typeof(InjectAt).GetNestedTypes().Where(candidate => typeof(InjectAt).IsAssignableFrom(candidate))) {
+            if (!TakesAShift(position)) {
+                if (Accepts(predicate, Construct(position, At.Head))) {
+                    accepted.Add(position.Name);
+                }
+
+                continue;
+            }
+
+            string[] shifts = ((At[])Enum.GetValues(typeof(At)))
+                .Where(shift => Accepts(predicate, Construct(position, shift)))
+                .Select(shift => shift.ToString())
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToArray();
+
+            if (callSiteShifts is null) {
+                callSiteShifts = shifts;
+                firstCallSite = position.Name;
+            } else {
+                Assert.True(
+                    callSiteShifts.SequenceEqual(shifts),
+                    $"InjectAt.{firstCallSite} accepts shifts [{string.Join(", ", callSiteShifts)}] but InjectAt.{position.Name} accepts "
+                    + $"[{string.Join(", ", shifts)}]. The analyzer's twin runs one shared call-site branch and cannot express a "
+                    + "difference between them.");
+            }
+
+            accepted.UnionWith(shifts);
+        }
+
+        return accepted.ToArray();
+    }
+
+    private static bool Accepts(MethodInfo predicate, InjectAt at) {
+        return (bool)predicate.Invoke(null, [at])!;
+    }
+
+    private static bool TakesAShift(Type position) {
+        return PrimaryConstructor(position).GetParameters().Any(parameter => parameter.ParameterType == typeof(At));
+    }
+
+    private static ConstructorInfo PrimaryConstructor(Type position) {
+        return position.GetConstructors().OrderByDescending(candidate => candidate.GetParameters().Length).First();
+    }
+
+    private static InjectAt Construct(Type position, At shift) {
+        ConstructorInfo constructor = PrimaryConstructor(position);
+        object?[] arguments = constructor.GetParameters()
+            .Select(parameter => parameter.ParameterType == typeof(At) ? (object?)shift
+                : parameter.ParameterType == typeof(Type) ? typeof(PublicSurfaceTests)
+                : parameter.ParameterType == typeof(string) ? "Anything"
+                : parameter.ParameterType == typeof(object) ? 1
+                : parameter.ParameterType.IsValueType ? Activator.CreateInstance(parameter.ParameterType)
+                : null)
+            .ToArray();
+
+        try {
+            return (InjectAt)constructor.Invoke(arguments);
+        } catch (Exception failure) {
+            throw new InvalidOperationException(
+                $"PublicSurfaceTests cannot construct InjectAt.{position.Name}, so it cannot ask either predicate about it.", failure);
+        }
+    }
+
+    private static string[] AnalyzerAcceptedPositions(string predicateName) {
+        string path = Path.Combine(AppContext.BaseDirectory, "Concord.Analyzers.dll");
+        using ModuleDefinition module = ModuleDefinition.ReadModule(path);
+        TypeDefinition type = module.GetType("Concord.Analyzers.InjectedMemberAnalyzer")
+                              ?? throw new InvalidOperationException("Concord.Analyzers.dll has no InjectedMemberAnalyzer.");
+        MethodDefinition method = type.Methods.FirstOrDefault(candidate => candidate.Name == predicateName)
+                                  ?? throw new InvalidOperationException($"InjectedMemberAnalyzer has no method '{predicateName}'.");
+        SortedSet<string> names = new SortedSet<string>(StringComparer.Ordinal);
+
+        foreach (Instruction instruction in method.Body.Instructions) {
+            if (instruction.OpCode == OpCodes.Ldstr) {
+                names.Add((string)instruction.Operand);
+            }
+        }
+
+        Assert.True(
+            names.Count > 0,
+            $"InjectedMemberAnalyzer.{predicateName} compiled to no string literals, so this test can no longer read its position "
+            + "list out of the IL and is passing without comparing anything.");
+
+        return names.ToArray();
+    }
+
     // Read out of the analyzer's metadata rather than by loading the type: InjectedMemberAnalyzer
     // derives from a Roslyn base class that this assembly does not reference, so Type.GetType on it
     // throws before it can reach the field.
@@ -180,32 +309,132 @@ public sealed class PublicSurfaceTests {
         return field.Constant;
     }
 
+    // GetExportedTypes stops at public-all-the-way, so a nested protected type on a public
+    // unsealed class is missing from it while still being reachable by deriving.
+    private static Type[] ScannedTypes(Assembly assembly) {
+        List<Type> found = new List<Type>();
+        Queue<Type> pending = new Queue<Type>(assembly.GetExportedTypes());
+
+        while (pending.Count > 0) {
+            Type type = pending.Dequeue();
+            found.Add(type);
+            foreach (Type nested in type.GetNestedTypes(Declared).Where(VisibleOutsideAssembly)) {
+                pending.Enqueue(nested);
+            }
+        }
+
+        return found.Distinct().ToArray();
+    }
+
+    // Explicit interface implementations need no case: the method is private, but the interface
+    // that forces the reference is in GetInterfaces.
+    private static IEnumerable<Type> DeclarationTypes(Type type) {
+        IEnumerable<Type> declared = type.BaseType is null ? [] : Expand(type.BaseType);
+
+        return declared
+            .Concat(type.GetInterfaces().SelectMany(Expand))
+            .Concat(GenericParameters(type).SelectMany(Expand))
+            .Concat(AttributeTypes(type));
+    }
+
+    // GetGenericArguments returns the parameters only on a definition; on a constructed type it
+    // returns the arguments, which belong to whatever named that type.
+    private static IEnumerable<Type> GenericParameters(MethodBase method) {
+        return method.IsGenericMethodDefinition ? method.GetGenericArguments() : [];
+    }
+
+    private static IEnumerable<Type> GenericParameters(Type type) {
+        return type.IsGenericTypeDefinition ? type.GetGenericArguments() : [];
+    }
+
+    // Read rather than instantiated, so a missing attribute assembly cannot throw here. Not covered:
+    // custom modifiers and default parameter values, neither of which C# can point at a Cecil type.
+    private static IEnumerable<Type> AttributeTypes(MemberInfo member) {
+        return member.GetCustomAttributesData().SelectMany(AttributeTypes);
+    }
+
+    private static IEnumerable<Type> AttributeTypes(ParameterInfo parameter) {
+        return parameter.GetCustomAttributesData().SelectMany(AttributeTypes);
+    }
+
+    private static IEnumerable<Type> AttributeTypes(CustomAttributeData attribute) {
+        return Expand(attribute.AttributeType)
+            .Concat(attribute.ConstructorArguments.SelectMany(ArgumentTypes))
+            .Concat(attribute.NamedArguments.Select(named => named.TypedValue).SelectMany(ArgumentTypes));
+    }
+
+    private static IEnumerable<Type> ArgumentTypes(CustomAttributeTypedArgument argument) {
+        IEnumerable<Type> declared = Expand(argument.ArgumentType);
+
+        return argument.Value is Type value ? declared.Concat(Expand(value)) : declared;
+    }
+
     private static IEnumerable<Type> SignatureTypes(MemberInfo member) {
+        IEnumerable<Type> attributes = AttributeTypes(member);
+
         switch (member) {
             case FieldInfo field:
-                return Expand(field.FieldType);
+                return attributes.Concat(Expand(field.FieldType));
             case PropertyInfo property:
-                return Expand(property.PropertyType).Concat(property.GetIndexParameters().SelectMany(p => Expand(p.ParameterType)));
+                return attributes
+                    .Concat(Expand(property.PropertyType))
+                    .Concat(property.GetIndexParameters().SelectMany(ParameterTypes));
             case MethodInfo method:
-                return Expand(method.ReturnType).Concat(method.GetParameters().SelectMany(p => Expand(p.ParameterType)));
+                return attributes
+                    .Concat(Expand(method.ReturnType))
+                    .Concat(AttributeTypes(method.ReturnParameter))
+                    .Concat(method.GetParameters().SelectMany(ParameterTypes))
+                    .Concat(GenericParameters(method).SelectMany(Expand));
             case ConstructorInfo constructor:
-                return constructor.GetParameters().SelectMany(p => Expand(p.ParameterType));
+                return attributes
+                    .Concat(constructor.GetParameters().SelectMany(ParameterTypes))
+                    .Concat(GenericParameters(constructor).SelectMany(Expand));
             case EventInfo declaredEvent:
-                return declaredEvent.EventHandlerType is null ? [] : Expand(declaredEvent.EventHandlerType);
+                return declaredEvent.EventHandlerType is null ? attributes : attributes.Concat(Expand(declaredEvent.EventHandlerType));
             default:
-                return [];
+                return attributes;
         }
+    }
+
+    private static IEnumerable<Type> ParameterTypes(ParameterInfo parameter) {
+        return Expand(parameter.ParameterType).Concat(AttributeTypes(parameter));
     }
 
     // A Cecil type hides just as well inside IReadOnlyList<VariableDefinition> or VariableDefinition[]
     // as it does on its own, so unwrap arrays, byrefs and generic arguments before testing.
     private static IEnumerable<Type> Expand(Type type) {
-        if (type.HasElementType) {
-            return Expand(type.GetElementType()!);
+        List<Type> found = new List<Type>();
+        Expand(type, new HashSet<Type>(), found);
+        return found;
+    }
+
+    // A generic parameter stands in for its constraints: T is namespaced to whoever declared it, so
+    // `where T : MethodDefinition` is only visible through GetGenericParameterConstraints.
+    private static void Expand(Type type, HashSet<Type> seen, List<Type> found) {
+        // `where T : IComparable<T>` walks back into T, so the visited set is load-bearing.
+        if (!seen.Add(type)) {
+            return;
         }
 
-        return type.IsGenericType
-            ? new[] { type }.Concat(type.GetGenericArguments().SelectMany(Expand))
-            : [type];
+        if (type.HasElementType) {
+            Expand(type.GetElementType()!, seen, found);
+            return;
+        }
+
+        if (type.IsGenericParameter) {
+            foreach (Type constraint in type.GetGenericParameterConstraints()) {
+                Expand(constraint, seen, found);
+            }
+
+            return;
+        }
+
+        found.Add(type);
+
+        if (type.IsGenericType) {
+            foreach (Type argument in type.GetGenericArguments()) {
+                Expand(argument, seen, found);
+            }
+        }
     }
 }

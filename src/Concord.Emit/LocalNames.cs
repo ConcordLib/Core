@@ -120,6 +120,10 @@ internal static class LocalNames {
         }
     }
 
+    internal static string? ModuleFile(Module module) {
+        return Locate(module, out _);
+    }
+
     private static int Token(MethodBase method) {
         try {
             return method.MetadataToken;

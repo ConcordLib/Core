@@ -4,7 +4,7 @@
     <TargetFramework></TargetFramework>
     <TargetFrameworks>net10.0;net472</TargetFrameworks>
     <IsPackable>false</IsPackable>
-    <Nullable>disable</Nullable>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
 
   <ItemGroup>
@@ -13,11 +13,7 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5"/>
   </ItemGroup>
 
-  <!-- Real Harmony, not a stub. -p:HarmonyV3=true builds the v3 preview into a cache, see HarmonyV3.targets. -->
-  <PropertyGroup>
-    <HarmonyV3Private>true</HarmonyV3Private>
-  </PropertyGroup>
-  <Import Project="$(MSBuildThisFileDirectory)../../HarmonyV3.targets"/>
+  <Import Project="$(MSBuildThisFileDirectory)../../Harmony.targets"/>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'net472'">
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all"/>

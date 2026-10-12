@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RootNamespace>Concord.Waylith.RimProbe</RootNamespace>
+    <AssemblyName>ConcordWaylithRimProbe</AssemblyName>
+    <OutputPath>bin/probe</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <DebugType>embedded</DebugType>
+    <DebugSymbols>true</DebugSymbols>
+    <EmbedAllSources>true</EmbedAllSources>
+    <Optimize>true</Optimize>
+    <GameDir Condition="'$(GameDir)' == ''">/mnt/games/SteamLibrary/steamapps/common/RimWorld</GameDir>
+    <HarmonyDir Condition="'$(HarmonyDir)' == ''">/mnt/games/RimWorld/Mods/Harmony-net10/1.7/Assemblies</HarmonyDir>
+    <ConcordDir Condition="'$(ConcordDir)' == ''">$(MSBuildThisFileDirectory)../../../../../Assemblies/net10.0</ConcordDir>
+    <NoWarn>$(NoWarn);CS1701;CS1702;CS8021;NU1503</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(GameDir)/Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityStubs">
+      <HintPath>$(GameDir)/UnityStubs.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>$(HarmonyDir)/0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Concord">
+      <HintPath>$(ConcordDir)/Concord.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="InputsExist" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="!Exists('$(GameDir)/Assembly-CSharp.dll')"
+           Text="Assembly-CSharp.dll not found under $(GameDir). Point -p:GameDir=&lt;dir&gt; at a RimWorld 1.7 install." />
+    <Error Condition="!Exists('$(HarmonyDir)/0Harmony.dll')"
+           Text="0Harmony.dll not found under $(HarmonyDir). Point -p:HarmonyDir=&lt;dir&gt; at the Harmony mod's 1.7 assemblies." />
+    <Error Condition="!Exists('$(ConcordDir)/Concord.dll')"
+           Text="Concord.dll not found under $(ConcordDir). Point -p:ConcordDir=&lt;dir&gt; at a built Concord Core." />
+  </Target>
+
+</Project>

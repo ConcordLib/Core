@@ -61,4 +61,20 @@ public static class CoexistenceLogMarkers {
     ///     body, so Concord dropped that injection and kept every other one on the target.
     /// </summary>
     public const string InjectionEvicted = "[Concord.Coex] injection-evicted";
+
+    /// <summary>
+    ///     A foreign patcher detoured a method whose body Concord owned, so Concord's injections on it
+    ///     stopped running and the method can never be owned again this process.
+    /// </summary>
+    public const string OwnedBodyDetoured = "[Concord.Coex] owned-body-detoured";
+
+    /// <summary>
+    ///     One Concord copy armed the notifier, tagged with that copy's identity.
+    /// </summary>
+    public const string ArmedCopy = "[Concord.Coex] armed-copy";
+
+    /// <summary>
+    ///     A method already carried foreign patches when the notifier armed, so they landed unseen.
+    /// </summary>
+    public const string ArmLost = "[Concord.Coex] arm-lost";
 }

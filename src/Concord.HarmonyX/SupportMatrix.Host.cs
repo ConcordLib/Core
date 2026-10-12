@@ -1,5 +1,3 @@
-#nullable disable
-
 using System.Collections.Generic;
 using System.Reflection;
 using Concord.Emit;
@@ -9,7 +7,7 @@ namespace Concord.Harmony
 {
     internal static partial class SupportMatrix
     {
-        internal static bool HasILManipulators(Patches patchInfo)
+        internal static bool HasILManipulators(Patches? patchInfo)
         {
             if (patchInfo == null)
             {
@@ -19,7 +17,7 @@ namespace Concord.Harmony
             return patchInfo.ILManipulators.Count > 0;
         }
 
-        private static partial string ValidateHost(MethodBase target, IReadOnlyList<Injection> added, Patches patchInfo)
+        private static partial string? ValidateHost(MethodBase target, IReadOnlyList<Injection> added, Patches? patchInfo)
         {
             if (HasILManipulators(patchInfo))
             {

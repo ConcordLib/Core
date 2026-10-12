@@ -16,7 +16,7 @@ public static class OriginalBody {
     ///     the first delegate argument.
     /// </returns>
     public static MethodInfo Clone(MethodBase original) {
-        using DynamicMethodDefinition dmd = new DynamicMethodDefinition(original);
+        using DynamicMethodDefinition dmd = BodyReader.Open(original);
         return dmd.Generate();
     }
 }

@@ -1,5 +1,3 @@
-#nullable disable
-
 using System;
 using System.Collections.Generic;
 using System.Reflection;
@@ -32,7 +30,7 @@ public sealed partial class HarmonyBridge
 
     private static partial IReadOnlyList<string> CollectForeignOwners(MethodBase target)
     {
-        Patches patchInfo = PatchProcessor.GetPatchInfo(target);
+        Patches? patchInfo = PatchProcessor.GetPatchInfo(target);
         if (patchInfo == null)
         {
             return Array.Empty<string>();

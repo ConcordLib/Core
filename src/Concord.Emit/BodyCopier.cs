@@ -41,13 +41,18 @@ internal static class BodyCopier {
         InjectedMemberMap emptyMembers = new InjectedMemberMap(new Dictionary<string, FieldInfo>(), new Dictionary<string, MethodInfo?>(), new Dictionary<string, AttachedFieldSlot>());
         foreach (Instruction source_instruction in sourceBody.Instructions) {
             Instruction copy = CloneInstruction(source_instruction, module, variableMap, emptyMembers);
+            InstructionOrigins.Record(copy, source_instruction.Offset);
             instructionMap[source_instruction] = copy;
             il.Append(copy);
             if (IsGetExecutingAssemblyCall(source_instruction)) {
                 copy.OpCode = OpCodes.Ldtoken;
                 copy.Operand = module.ImportReference(declaringType);
-                il.Append(Instruction.Create(OpCodes.Call, module.ImportReference(GetTypeFromHandle)));
-                il.Append(Instruction.Create(OpCodes.Callvirt, module.ImportReference(TypeAssemblyGetter)));
+                Instruction fromHandle = Instruction.Create(OpCodes.Call, module.ImportReference(GetTypeFromHandle));
+                Instruction assembly = Instruction.Create(OpCodes.Callvirt, module.ImportReference(TypeAssemblyGetter));
+                InstructionOrigins.Record(fromHandle, source_instruction.Offset);
+                InstructionOrigins.Record(assembly, source_instruction.Offset);
+                il.Append(fromHandle);
+                il.Append(assembly);
             }
         }
 
@@ -74,6 +79,10 @@ internal static class BodyCopier {
     ///     <see cref="ProtocolLocals.SpliceValue" /> instead of <see cref="ProtocolLocals.ReturnValue" />.
     /// </param>
     /// <param name="captureBinding">Maps an injection argument index to the call-site spill local it reads, if any.</param>
+    /// <param name="insideCatch">
+    ///     <see langword="true" /> when this body is copied into a synthesized catch handler, where
+    ///     <c>Cancel</c> stops the throw instead of skipping the target body.
+    /// </param>
     /// <returns>The copied and lowered instruction sequence.</returns>
     public static List<Instruction> CopyInjection(
         InjectionCopyRequest request,
@@ -82,7 +91,8 @@ internal static class BodyCopier {
         SpineTemplate? spineTemplate = null,
         List<SpineCopy>? spineCopies = null,
         bool insideAround = false,
-        IReadOnlyDictionary<int, VariableDefinition>? captureBinding = null) {
+        IReadOnlyDictionary<int, VariableDefinition>? captureBinding = null,
+        bool insideCatch = false) {
         MethodBody injectionBody = request.InjectionDefinition.Body;
         RejectConstructedLocalHandle(injectionBody, request.InjectionMethod);
         ModuleDefinition module = request.Destination.Module;
@@ -133,7 +143,7 @@ internal static class BodyCopier {
             insideAround,
             captureBinding,
             boundConstants,
-            localHandles);
+            localHandles) { InsideCatch = insideCatch, At = request.At, ForeignOrigin = request.ForeignOrigin };
 
         List<(Instruction Source, List<Instruction> Emitted)> entries =
             new List<(Instruction Source, List<Instruction> Emitted)>(injectionBody.Instructions.Count);
@@ -155,6 +165,7 @@ internal static class BodyCopier {
         }
 
         CopyInjectionHandlers(injectionBody, request.Destination.Body, instructionMap, module);
+        InstructionOrigins.RecordInjection(result, request.InjectionMethod);
 
         return result;
     }
@@ -249,6 +260,7 @@ internal static class BodyCopier {
 
         result.Add(spliceEnd);
         result.Add(Instruction.Create(OpCodes.Ldloc, resultLocal));
+        InstructionOrigins.RecordInjection(result, injectionMethod);
 
         return result;
     }
@@ -327,6 +339,7 @@ internal static class BodyCopier {
         }
 
         CopyInjectionHandlers(injectionBody, request.Destination.Body, instructionMap, module);
+        InstructionOrigins.RecordInjection(result, request.InjectionMethod);
 
         return result;
     }
@@ -690,8 +703,22 @@ internal static class BodyCopier {
 
     private static List<Instruction>? TryLowerControlCall(Instruction source, InjectionLoweringSite site) {
         ControlHandleLowering.ControlCallKind controlCall = ControlHandleLowering.ClassifyCall(source);
+        List<Instruction>? catchCall = ControlHandleLowering.LowerCatchCall(controlCall, site.InsideCatch, site.Locals, site.InjectionMethod);
+        if (catchCall is not null) {
+            return catchCall;
+        }
+
         if (controlCall == ControlHandleLowering.ControlCallKind.Cancel) {
             return new List<Instruction> { Instruction.Create(OpCodes.Ldc_I4_1), Instruction.Create(OpCodes.Stloc, site.Locals.Cancel) };
+        }
+
+        if (controlCall == ControlHandleLowering.ControlCallKind.CancelSkip) {
+            ControlHandleLowering.RequireHeadPosition(site.At, site.InjectionMethod);
+            return new List<Instruction> {
+                Instruction.Create(OpCodes.Stloc, site.ForeignOrigin ? site.Locals.SkipAffectingHeads : site.Locals.SkipRemainingHeads),
+                Instruction.Create(OpCodes.Ldc_I4_1),
+                Instruction.Create(OpCodes.Stloc, site.Locals.Cancel),
+            };
         }
 
         if (controlCall == ControlHandleLowering.ControlCallKind.GetReturnValue) {
@@ -1248,6 +1275,39 @@ internal static class BodyCopier {
         return Convert.ToInt32(operand);
     }
 
+    private static TypeReference ImportType(TypeReference type, ModuleDefinition module) {
+        TypeReference? rebuilt = SubstituteFunctionPointers(type, module);
+        return rebuilt ?? module.ImportReference(type.ResolveReflection());
+    }
+
+    private static TypeReference? SubstituteFunctionPointers(TypeReference type, ModuleDefinition module) {
+        if (IsFunctionPointer(type)) {
+            return module.ImportReference(typeof(IntPtr));
+        }
+
+        if (type is not TypeSpecification spec || type is GenericInstanceType) {
+            return null;
+        }
+
+        TypeReference? element = SubstituteFunctionPointers(spec.ElementType, module);
+        if (element is null) {
+            return null;
+        }
+
+        return type switch {
+            ArrayType array when array.IsVector => new ArrayType(element),
+            ArrayType array => new ArrayType(element, array.Rank),
+            ByReferenceType => new ByReferenceType(element),
+            PointerType => new PointerType(element),
+            PinnedType => new PinnedType(element),
+            _ => null,
+        };
+    }
+
+    private static bool IsFunctionPointer(TypeReference type) {
+        return type is FunctionPointerType || type.Name.Length == 0;
+    }
+
     private static Dictionary<VariableDefinition, VariableDefinition> AppendVariables(
         MethodBody source,
         MethodBody destination,
@@ -1257,7 +1317,7 @@ internal static class BodyCopier {
         foreach (VariableDefinition variable in source.Variables) {
             // ResolveReflection drops the pin, and an unpinned copy lets the GC move the buffer a
             // fixed statement is holding. Put the marker back.
-            TypeReference copiedType = module.ImportReference(variable.VariableType.ResolveReflection());
+            TypeReference copiedType = ImportType(variable.VariableType, module);
             VariableDefinition copy = new VariableDefinition(variable.IsPinned ? new PinnedType(copiedType) : copiedType);
             destination.Variables.Add(copy);
             map[variable] = copy;
@@ -1277,7 +1337,7 @@ internal static class BodyCopier {
         Dictionary<VariableDefinition, VariableDefinition> map =
             new Dictionary<VariableDefinition, VariableDefinition>(injectionBody.Variables.Count);
         foreach (VariableDefinition variable in injectionBody.Variables) {
-            VariableDefinition copy = new VariableDefinition(module.ImportReference(variable.VariableType.ResolveReflection()));
+            VariableDefinition copy = new VariableDefinition(ImportType(variable.VariableType, module));
             destination.Variables.Add(copy);
             map[variable] = copy;
         }
@@ -1372,7 +1432,7 @@ internal static class BodyCopier {
         Dictionary<VariableDefinition, VariableDefinition> variableMap,
         InjectedMemberMap injectedMembers) {
         return source.Operand switch {
-            TypeReference type => Instruction.Create(source.OpCode, module.ImportReference(type.ResolveReflection())),
+            TypeReference type => Instruction.Create(source.OpCode, ImportType(type, module)),
             FieldReference field => CloneFieldInstruction(source.OpCode, field, module, injectedMembers),
             MethodReference method => ImportMethod(source.OpCode, method, module),
             VariableDefinition variable => Instruction.Create(source.OpCode, variableMap[variable]),

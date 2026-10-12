@@ -31,13 +31,15 @@ public static class InjectionOrderer {
             return [];
         }
 
-        Dictionary<string, List<int>> owners = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+        Dictionary<string, List<int>> concordOwners = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+        Dictionary<string, List<int>> foreignOwners = new Dictionary<string, List<int>>(StringComparer.Ordinal);
         List<HashSet<int>> outgoing = new List<HashSet<int>>(count);
         for (int i = 0; i < count; i++) {
-            string owner = live[i].Injection.Owner;
-            if (!owners.TryGetValue(owner, out List<int>? nodes)) {
+            Injection injection = live[i].Injection;
+            Dictionary<string, List<int>> origin = injection.ForeignOrigin ? foreignOwners : concordOwners;
+            if (!origin.TryGetValue(injection.Owner, out List<int>? nodes)) {
                 nodes = [];
-                owners.Add(owner, nodes);
+                origin.Add(injection.Owner, nodes);
             }
 
             nodes.Add(i);
@@ -47,8 +49,11 @@ public static class InjectionOrderer {
         int[] incoming = new int[count];
         for (int i = 0; i < count; i++) {
             Injection injection = live[i].Injection;
-            AddEdges(i, injection.BeforeOwners, owners, outgoing, incoming, false);
-            AddEdges(i, injection.AfterOwners, owners, outgoing, incoming, true);
+            Dictionary<string, List<int>> sameOrigin = injection.ForeignOrigin ? foreignOwners : concordOwners;
+            Dictionary<string, List<int>> otherOrigin = injection.ForeignOrigin ? concordOwners : foreignOwners;
+            RejectLayeringConflict(live, injection, sameOrigin, otherOrigin);
+            AddEdges(i, injection.BeforeOwners, sameOrigin, outgoing, incoming, false);
+            AddEdges(i, injection.AfterOwners, sameOrigin, outgoing, incoming, true);
         }
 
         bool[] emitted = new bool[count];
@@ -73,6 +78,42 @@ public static class InjectionOrderer {
         }
 
         return result;
+    }
+
+    private static void RejectLayeringConflict(
+        IReadOnlyList<(long Seq, Injection Injection)> live,
+        Injection injection,
+        IReadOnlyDictionary<string, List<int>> sameOrigin,
+        IReadOnlyDictionary<string, List<int>> otherOrigin) {
+        RejectUnsatisfiable(live, injection, injection.BeforeOwners, sameOrigin, otherOrigin, true);
+        RejectUnsatisfiable(live, injection, injection.AfterOwners, sameOrigin, otherOrigin, false);
+    }
+
+    private static void RejectUnsatisfiable(
+        IReadOnlyList<(long Seq, Injection Injection)> live,
+        Injection injection,
+        IReadOnlyList<string> referencedOwners,
+        IReadOnlyDictionary<string, List<int>> sameOrigin,
+        IReadOnlyDictionary<string, List<int>> otherOrigin,
+        bool before) {
+        int layer = Layer(injection);
+        foreach (string owner in referencedOwners) {
+            if (sameOrigin.ContainsKey(owner) || !otherOrigin.TryGetValue(owner, out List<int>? referenced)) {
+                continue;
+            }
+
+            foreach (int node in referenced) {
+                int referencedLayer = Layer(live[node].Injection);
+                if (before ? referencedLayer >= layer : referencedLayer <= layer) {
+                    continue;
+                }
+
+                throw new ConcordEmitException(
+                    "CONC052",
+                    "Patch ordering cycle: " + injection.Owner + " -> " + owner + " -> " + injection.Owner
+                    + ". A foreign patch host always runs outside Concord.");
+            }
+        }
     }
 
     private static void AddEdges(
@@ -116,12 +157,34 @@ public static class InjectionOrderer {
     }
 
     private static bool RunsBefore((long Seq, Injection Injection) candidate, (long Seq, Injection Injection) current) {
+        int byLayer = Layer(candidate.Injection).CompareTo(Layer(current.Injection));
+        if (byLayer != 0) {
+            return byLayer < 0;
+        }
+
+        if (candidate.Injection.ForeignOrigin) {
+            return false;
+        }
+
         int byPriority = candidate.Injection.Priority.CompareTo(current.Injection.Priority);
         if (byPriority != 0) {
             return byPriority < 0;
         }
 
         return candidate.Seq > current.Seq;
+    }
+
+    private static int Layer(Injection injection) {
+        if (injection.ForeignOrigin) {
+            return ForeignRunsLast(injection.At) ? 2 : 0;
+        }
+
+        return injection.RunsAfterForeign ? 3 : 1;
+    }
+
+    private static bool ForeignRunsLast(InjectAt at) {
+        return at is InjectAt.Return or InjectAt.Tail or InjectAt.Finally or InjectAt.Catch
+            or InjectAt.Invoke { Shift: At.Tail } or InjectAt.NewObj { Shift: At.Tail };
     }
 
     private static ConcordEmitException BuildCycleError(

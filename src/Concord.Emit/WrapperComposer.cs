@@ -17,7 +17,7 @@ public static class WrapperComposer {
     // Mirrors InjectedMemberAnalyzer.LocalPositionHelp. The two lists are deliberate twins: the
     // analyzer cannot reference Concord.Emit, so changing one means changing the other.
     // PublicSurfaceTests.PositionHelpMatchesTheAnalyzersTwin reads both by reflection and fails on drift.
-    private const string LocalPositionHelp = "[Local] is supported at At.Return, At.Tail, At.Finally, At.Local, and the At.Head and " +
+    private const string LocalPositionHelp = "[Local] is supported at At.Return, At.Tail, At.Finally, At.Catch, At.Local, and the At.Head and " +
                                              "At.Tail shifts of At.Invoke and At.NewObj.";
 
     // Mirrors InjectedMemberAnalyzer.LocalWriteHelp. The two lists are deliberate twins: the
@@ -28,11 +28,29 @@ public static class WrapperComposer {
     private static readonly Dictionary<MethodBase, bool> SharedBodyCache = new Dictionary<MethodBase, bool>();
     private static readonly object SharedBodyGate = new object();
 
+    private static bool captureComposedBody;
+
     /// <summary>
     ///     Whether this runtime can host the shared generic receiver guard. .NET Framework refuses to
     ///     prepare the canonical instantiation, so shared reference-type instantiations stay rejected there.
     /// </summary>
     public static bool SharedGenericGuardSupported { get; } = !RuntimeInformation.FrameworkDescription.StartsWith(".NET Framework", StringComparison.Ordinal);
+
+    /// <summary>
+    ///     Whether a compose also describes its wrapper as a <see cref="ComposeResult.Body" />, per-instruction
+    ///     provenance included. Off by default: a detour backend reads neither, and describing costs a conversion.
+    /// </summary>
+    public static bool CaptureComposedBody {
+        get {
+            return captureComposedBody;
+        }
+
+        set {
+            // Origins record during the compose, so a caller flipping only this would get all-null offsets.
+            captureComposedBody = value;
+            InstructionOrigins.Enabled = value;
+        }
+    }
 
     /// <summary>
     ///     Creates a wrapper method for a target and a copy of the original body.
@@ -215,6 +233,8 @@ public static class WrapperComposer {
             return;
         }
 
+        BodyReader.Reject(resolved);
+
         if (injection.Body == PatchBody.Declared) {
             RejectStubOnlyPosition(declared, injection);
             return;
@@ -249,10 +269,8 @@ public static class WrapperComposer {
     }
 
     /// <summary>
-    ///     Rejects a target that is a reference-type generic instantiation. The runtime shares one
-    ///     compiled body across all reference-type instantiations of a generic method, so a detour
-    ///     installed for one instantiation runs for every other one. Value-type instantiations each
-    ///     get their own body and are safe.
+    ///     Rejects a target that is a reference-type generic instantiation. The runtime shares one body
+    ///     across every reference-type instantiation, so a detour on one runs for all of them.
     /// </summary>
     /// <param name="target">The method a detour is about to be installed for.</param>
     /// <exception cref="ConcordEmitException">Thrown with <c>CONC061</c> when the target is a reference-type instantiation.</exception>
@@ -376,6 +394,36 @@ public static class WrapperComposer {
         return SharesGenericBody(target);
     }
 
+    internal static bool SupportsCancelSkip(InjectAt at) {
+        return at is InjectAt.Head;
+    }
+
+    internal static bool HeadAffectsOriginal(Injection injection) {
+        MethodBase injectionMethod = injection.InjectionMethod;
+        if (ControlHandleLowering.ReturnsControl(injectionMethod)) {
+            return true;
+        }
+
+        using DynamicMethodDefinition injectionMethodDefinition = BodyReader.Open(injectionMethod);
+        MethodBody injectionBody = injectionMethodDefinition.Definition.Body;
+        if (ControlHandleLowering.InjectionMethodCancels(injectionBody) || ControlHandleLowering.InjectionMethodSetsReturnValue(injectionBody)) {
+            return true;
+        }
+
+        foreach (ParameterInfo parameter in injectionMethod.GetParameters()) {
+            Type parameterType = parameter.ParameterType;
+            if (ControlHandleLowering.IsControlHandleType(parameterType) || ControlHandleLowering.IsOperationType(parameterType) || BoundConstants.IsBound(parameter)) {
+                continue;
+            }
+
+            if (parameter.IsOut || parameter.IsRetval || parameterType.IsByRef || !parameterType.IsValueType) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     internal static bool IsSharedBodyGenericContextFree(MethodBase target) {
         MethodBase? probe = BuildProbeInstantiation(target);
         if (probe is null) {
@@ -383,8 +431,8 @@ public static class WrapperComposer {
         }
 
         try {
-            using DynamicMethodDefinition requested = new DynamicMethodDefinition(target);
-            using DynamicMethodDefinition other = new DynamicMethodDefinition(probe);
+            using DynamicMethodDefinition requested = BodyReader.Open(target);
+            using DynamicMethodDefinition other = BodyReader.Open(probe);
             return SameInstructions(requested.Definition, other.Definition);
         } catch (Exception) {
             return false;
@@ -481,20 +529,30 @@ public static class WrapperComposer {
         out List<Injection> preTranspilers,
         out List<Injection> finalTranspilers,
         out List<Injection> declarative) {
-        preTranspilers = new List<Injection>();
-        finalTranspilers = new List<Injection>();
+        List<Injection> foreignPre = new List<Injection>();
+        List<Injection> concordPre = new List<Injection>();
+        List<Injection> foreignFinal = new List<Injection>();
+        List<Injection> concordFinal = new List<Injection>();
         declarative = new List<Injection>();
 
         for (int i = 0; i < ordered.Count; i++) {
             Injection injection = ordered[i];
             if (injection.At is InjectAt.Transpiler { Final: false }) {
-                preTranspilers.Add(injection);
+                (injection.ForeignOrigin ? foreignPre : concordPre).Add(injection);
             } else if (injection.At is InjectAt.Transpiler { Final: true }) {
-                finalTranspilers.Add(injection);
+                (injection.ForeignOrigin ? foreignFinal : concordFinal).Add(injection);
             } else {
                 declarative.Add(injection);
             }
         }
+
+        preTranspilers = new List<Injection>(foreignPre.Count + concordPre.Count);
+        preTranspilers.AddRange(foreignPre);
+        preTranspilers.AddRange(concordPre);
+
+        finalTranspilers = new List<Injection>(foreignFinal.Count + concordFinal.Count);
+        finalTranspilers.AddRange(foreignFinal);
+        finalTranspilers.AddRange(concordFinal);
     }
 
     internal static void RunTranspilers(MethodDefinition wrapperDefinition, MethodBase resolved, IReadOnlyList<Injection> transpilers) {
@@ -566,6 +624,42 @@ public static class WrapperComposer {
         }
 
         return false;
+    }
+
+    private static bool HasCatchInjection(IReadOnlyList<Injection> ordered) {
+        for (int i = 0; i < ordered.Count; i++) {
+            if (ordered[i].At is InjectAt.Catch) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static List<Instruction> CopyCancelLanding(
+        MethodDefinition wrapperDefinition,
+        MethodBase target,
+        IReadOnlyList<Injection> ordered,
+        ProtocolLocals locals,
+        Instruction resume) {
+        List<List<Instruction>> bodies = new List<List<Instruction>>();
+        for (int i = ordered.Count - 1; i >= 0; i--) {
+            Injection injection = ordered[i];
+            if ((!injection.ForeignOrigin && !injection.ReplayOnCancel) || injection.At is not (InjectAt.Return { By: 0 } or InjectAt.Tail)) {
+                continue;
+            }
+
+            InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
+            using DynamicMethodDefinition injectionMethodDefinition = BodyReader.Open(injection.InjectionMethod);
+            bodies.Add(
+                BodyCopier.CopyInjection(
+                    new InjectionCopyRequest(injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers) { BoundArguments = injection.BoundArguments, At = injection.At, ForeignOrigin = injection.ForeignOrigin },
+                    locals,
+                    resume));
+            PrefixSharedGenericGuard(wrapperDefinition, injection, bodies, bodies.Count - 1, resume);
+        }
+
+        return ChainBodies(bodies, resume);
     }
 
     /// <summary>
@@ -676,8 +770,8 @@ public static class WrapperComposer {
     ///     Rejects <see cref="LocalHandle{T}" /> at a position that can read a local but not usefully write
     ///     one. Write-legal positions are a strict subset of <see cref="SupportsLocalBinding" />: by
     ///     <see cref="InjectAt.Return" /> and <see cref="InjectAt.Tail" /> the target body has finished with
-    ///     its locals, so the write is dead, and <see cref="InjectAt.Finally" /> is the same plus unreachable
-    ///     on the throwing path. Every other unsupported position is already rejected by
+    ///     its locals, so the write is dead, and <see cref="InjectAt.Finally" /> and <see cref="InjectAt.Catch" />
+    ///     add the throwing path, where the write is dead too. Every other unsupported position is rejected by
     ///     <see cref="RejectMisplacedLocals" />.
     /// </summary>
     /// <param name="ordered">The full injection list being composed for <paramref name="target" />.</param>
@@ -713,7 +807,7 @@ public static class WrapperComposer {
     // the analyzer cannot reference this assembly. Keep both in step.
     private static bool SupportsLocalBinding(InjectAt at) {
         return at switch {
-            InjectAt.Return or InjectAt.Tail or InjectAt.Finally or InjectAt.Local => true,
+            InjectAt.Return or InjectAt.Tail or InjectAt.Finally or InjectAt.Catch or InjectAt.Local => true,
             InjectAt.Invoke invoke => invoke.Shift is At.Head or At.Tail,
             InjectAt.NewObj newObj => newObj.Shift is At.Head or At.Tail,
             _ => false,
@@ -955,7 +1049,9 @@ public static class WrapperComposer {
         }
 
         for (int i = firstNewBody; i < bodies.Count; i++) {
-            bodies[i].InsertRange(0, BuildSharedGenericGuard(wrapperDefinition.Module, injection.RequestedInstantiation, skipTo));
+            List<Instruction> guard = BuildSharedGenericGuard(wrapperDefinition.Module, injection.RequestedInstantiation, skipTo);
+            InstructionOrigins.RecordInjection(guard, injection.InjectionMethod);
+            bodies[i].InsertRange(0, guard);
         }
     }
 
@@ -1056,7 +1152,7 @@ public static class WrapperComposer {
 
         MethodBase resolved = target;
 
-        using DynamicMethodDefinition source = new DynamicMethodDefinition(resolved);
+        using DynamicMethodDefinition source = BodyReader.Open(resolved);
         Type returnType = ResolveReturnType(resolved);
         Type[] parameterTypes = ResolveParameterTypes(resolved);
 
@@ -1070,14 +1166,39 @@ public static class WrapperComposer {
 
         AssembleInto(wrapper.Definition, resolved, declarative, returnType, rawLocalCount);
         RunTranspilers(wrapper.Definition, resolved, finalTranspilers);
+        DescribeComposedBody(wrapper.Definition, resolved, out ComposedBody? body, out string? bodyRejection);
         MethodInfo wrapperMethod = wrapper.Generate();
-        return new ComposeResult(wrapperMethod, () => OriginalBody.Clone(resolved), rejected);
+        return new ComposeResult(wrapperMethod, () => OriginalBody.Clone(resolved), rejected, body, bodyRejection);
+    }
+
+    // Eager, because the wrapper definition dies with this method's using. A side channel only: the
+    // detour path reads neither output, so nothing here may fail a compose it would have completed.
+    private static void DescribeComposedBody(MethodDefinition definition, MethodBase resolved, out ComposedBody? body, out string? rejection) {
+        body = null;
+        rejection = null;
+        if (!CaptureComposedBody) {
+            return;
+        }
+
+        ComposedBody described;
+        try {
+            described = ComposedBodyFactory.Create(definition, new TranspilerContext(resolved));
+        } catch (Exception failure) {
+            rejection = $"The composed body for '{resolved.DeclaringType?.Name}.{resolved.Name}' cannot be described without Cecil: " +
+                (failure is ConcordEmitException ? failure.Message : failure.GetType().Name + ": " + failure.Message);
+            return;
+        }
+
+        rejection = TokenizableOperands.Reject(described, resolved);
+        if (rejection is null) {
+            body = described;
+        }
     }
 
     private static string ComposeDumpOnce(MethodBase target, IReadOnlyList<Injection> ordered) {
         MethodBase resolved = target;
 
-        using DynamicMethodDefinition source = new DynamicMethodDefinition(resolved);
+        using DynamicMethodDefinition source = BodyReader.Open(resolved);
         Type returnType = ResolveReturnType(resolved);
         Type[] parameterTypes = ResolveParameterTypes(resolved);
 
@@ -1102,6 +1223,7 @@ public static class WrapperComposer {
         ITranspilerContext context) {
         TranspilerContext writeContext = RequireConcreteContext(context);
         MethodBase resolved = target;
+        BodyReader.Reject(resolved);
         Type returnType = ResolveReturnType(resolved);
         Type[] parameterTypes = ResolveParameterTypes(resolved);
 
@@ -1144,6 +1266,7 @@ public static class WrapperComposer {
         bool isVoid = returnType == typeof(void);
 
         bool hasAround = HasWholeMethodAround(ordered);
+        bool hasCatch = HasCatchInjection(ordered);
 
         bool needsCtorGuard = hasAround && target.IsConstructor;
 
@@ -1154,10 +1277,22 @@ public static class WrapperComposer {
         HashSet<int> referencedSlots = SpineTemplate.ReferencedLocalIndices(body.Instructions, body.Variables);
 
         Dictionary<Type, VariableDefinition> stateLocals = AllocateStateLocals(ordered, wrapperDefinition, target);
+
+        VariableDefinition? caughtException = null;
+        VariableDefinition? catchDecision = null;
+        if (hasCatch) {
+            caughtException = new VariableDefinition(module.ImportReference(typeof(Exception)));
+            catchDecision = new VariableDefinition(module.ImportReference(typeof(int)));
+            body.Variables.Add(caughtException);
+            body.Variables.Add(catchDecision);
+        }
+
         ProtocolLocals locals = DeclareLocals(body, module, returnType, isVoid, hasAround && !isVoid, needsCtorGuard, stateLocals) with {
             RawLocalCount = rawLocalCount,
             SearchLocalCount = searchLocalCount,
             ReferencedSlots = referencedSlots,
+            CaughtException = caughtException,
+            CatchDecision = catchDecision,
         };
 
         List<Instruction> spine = new List<Instruction>(body.Instructions);
@@ -1174,8 +1309,10 @@ public static class WrapperComposer {
 
         NormalizeReturnSitesIfNeeded(ordered, spine, locals, afterSpine, isVoid, hasAround, body.ExceptionHandlers);
 
+        Instruction resume = hasAround ? epilogueStart : afterSpine;
+        List<Instruction> cancelLanding = CopyCancelLanding(wrapperDefinition, target, ordered, locals, resume);
         Instruction guardStart = Instruction.Create(OpCodes.Ldloc, locals.Cancel);
-        Instruction guardBranch = Instruction.Create(OpCodes.Brtrue, hasAround ? epilogueStart : afterSpine);
+        Instruction guardBranch = Instruction.Create(OpCodes.Brtrue, resume);
         Instruction finallyEnd = Instruction.Create(OpCodes.Endfinally);
         Instruction leaveEpilogue = Instruction.Create(OpCodes.Leave, epilogueStart);
 
@@ -1188,7 +1325,12 @@ public static class WrapperComposer {
             new List<Injection>(),
             new List<List<Instruction>>());
 
-        bool hasHead = DispatchInjections(context, anchors, buffers, out Injection? aroundInjection, out Instruction? lastExit);
+        Instruction? catchEnd = hasCatch ? Instruction.Create(OpCodes.Ldloc, catchDecision!) : null;
+
+        DispatchState dispatched = DispatchInjections(context, anchors, buffers, catchEnd);
+        bool hasHead = dispatched.HasHead;
+        Injection? aroundInjection = dispatched.AroundInjection;
+        Instruction? lastExit = dispatched.LastExit;
 
         if (lastExit is not null) {
             List<Instruction> tails = ChainBodies(buffers.TailBodies, lastExit);
@@ -1216,12 +1358,42 @@ public static class WrapperComposer {
                 $"Target '{target.DeclaringType?.Name}.{target.Name}' has both an At.Finally injection and a whole-method Around. An Around already owns the whole body. Write the finally inside it.");
         }
 
+        List<Instruction> catchBody = catchEnd is null ? [] : ChainBodies(dispatched.CatchBodies, catchEnd);
+        if (catchBody.Count > 0 && hasAround) {
+            throw new ConcordEmitException(
+                "CONC138",
+                $"Target '{target.DeclaringType?.Name}.{target.Name}' has both an At.Catch injection and a whole-method Around. An Around already owns the whole body. Write the try/catch inside it.");
+        }
+
+        if (hasHead && cancelLanding.Count > 0) {
+            List<Instruction> skipped = aroundBody ?? spine;
+            guardBranch.OpCode = OpCodes.Brfalse;
+            guardBranch.Operand = skipped[0];
+            skipped.InsertRange(0, cancelLanding);
+        }
+
         List<Instruction> assembled = AssembleFinalBody(
             new AssembledBodyParts(heads, hasHead, guardStart, guardBranch, aroundBody, spine, afterSpine, returns, epilogue, finallyBody, finallyEnd, leaveEpilogue));
+
+        List<Instruction> catchHandler = [];
+        if (catchBody.Count > 0) {
+            catchHandler = BuildCatchHandler(caughtException!, catchEnd!, catchBody, epilogueStart);
+            SpliceCatchRegion(assembled, afterSpine, leaveEpilogue, catchHandler);
+        }
 
         body.Instructions.Clear();
         foreach (Instruction instruction in assembled) {
             body.Instructions.Add(instruction);
+        }
+
+        if (catchHandler.Count > 0) {
+            body.ExceptionHandlers.Add(new ExceptionHandler(ExceptionHandlerType.Catch) {
+                CatchType = module.ImportReference(typeof(Exception)),
+                TryStart = assembled[0],
+                TryEnd = catchHandler[0],
+                HandlerStart = catchHandler[0],
+                HandlerEnd = finallyBody.Count > 0 ? finallyBody[0] : epilogueStart,
+            });
         }
 
         if (finallyBody.Count > 0) {
@@ -1274,13 +1446,12 @@ public static class WrapperComposer {
         }
     }
 
-    private static bool DispatchInjections(
+    private static DispatchState DispatchInjections(
         WrapperAssembly context,
         AssemblyAnchors anchors,
         InjectionBuffers buffers,
-        out Injection? aroundInjection,
-        out Instruction? lastExit) {
-        DispatchState state = default;
+        Instruction? catchEnd) {
+        DispatchState state = new DispatchState(false, null, null, catchEnd, new List<List<Instruction>>());
 
         // At.Local, At.Constant, At.Invoke and At.NewObj all count By against this, never the live
         // spine. A store splice ends in 'stloc slot' and a value injection opens with 'ldloc slot',
@@ -1305,9 +1476,7 @@ public static class WrapperComposer {
             }
         }
 
-        aroundInjection = state.AroundInjection;
-        lastExit = state.LastExit;
-        return state.HasHead;
+        return state;
     }
 
     private static DispatchState DispatchInjection(
@@ -1322,6 +1491,17 @@ public static class WrapperComposer {
             int firstHeadBody = buffers.HeadBodies.Count;
             ProcessHeadInjection(new InjectionSiteContext(injection, context.WrapperDefinition, context.Target, context.Locals), anchors.GuardStart, context.IsVoid, ref hasHead, buffers.HeadBodies);
             PrefixSharedGenericGuard(context.WrapperDefinition, injection, buffers.HeadBodies, firstHeadBody, anchors.GuardStart);
+            if (!injection.ForeignOrigin) {
+                List<Instruction> skipGuards = [Instruction.Create(OpCodes.Ldloc, context.Locals.SkipRemainingHeads), Instruction.Create(OpCodes.Brtrue, anchors.GuardStart)];
+                if (HeadAffectsOriginal(injection)) {
+                    skipGuards.Add(Instruction.Create(OpCodes.Ldloc, context.Locals.SkipAffectingHeads));
+                    skipGuards.Add(Instruction.Create(OpCodes.Brtrue, anchors.GuardStart));
+                }
+
+                InstructionOrigins.RecordInjection(skipGuards, injection.InjectionMethod);
+                buffers.HeadBodies[firstHeadBody].InsertRange(0, skipGuards);
+            }
+
             return state with { HasHead = hasHead };
         }
 
@@ -1362,6 +1542,11 @@ public static class WrapperComposer {
 
         if (injection.At is InjectAt.Finally) {
             ProcessFinallyInjection(new InjectionSiteContext(injection, context.WrapperDefinition, context.Target, context.Locals), anchors.FinallyEnd, buffers.FinallyBodies);
+            return state;
+        }
+
+        if (injection.At is InjectAt.Catch) {
+            ProcessCatchInjection(new InjectionSiteContext(injection, context.WrapperDefinition, context.Target, context.Locals), state.CatchEnd!, state.CatchBodies);
             return state;
         }
 
@@ -1475,15 +1660,16 @@ public static class WrapperComposer {
         List<List<Instruction>> heads) {
         hasHead = true;
         InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(site.Injection.InjectionMethod.DeclaringType!, site.Target);
-        using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(site.Injection.InjectionMethod);
+        using DynamicMethodDefinition injectionMethodDefinition = BodyReader.Open(site.Injection.InjectionMethod);
         GuardCancelWithoutReturn(
             injectionMethodDefinition.Definition.Body,
             site.Target,
             isVoid,
-            ControlHandleLowering.ReturnsControl(site.Injection.InjectionMethod));
+            ControlHandleLowering.ReturnsControl(site.Injection.InjectionMethod),
+            site.Injection.ForeignOrigin);
         heads.Add(
             BodyCopier.CopyInjection(
-                new InjectionCopyRequest(injectionMethodDefinition.Definition, site.WrapperDefinition, site.Target, site.Injection.InjectionMethod, injectedMembers) { BoundArguments = site.Injection.BoundArguments },
+                new InjectionCopyRequest(injectionMethodDefinition.Definition, site.WrapperDefinition, site.Target, site.Injection.InjectionMethod, injectedMembers) { BoundArguments = site.Injection.BoundArguments, At = site.Injection.At, ForeignOrigin = site.Injection.ForeignOrigin },
                 site.Locals,
                 guardStart));
     }
@@ -1497,12 +1683,121 @@ public static class WrapperComposer {
         }
 
         InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injectionMethod.DeclaringType!, site.Target);
-        using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injectionMethod);
+        using DynamicMethodDefinition injectionMethodDefinition = BodyReader.Open(injectionMethod);
         finallyBodies.Add(
             BodyCopier.CopyInjection(
-                new InjectionCopyRequest(injectionMethodDefinition.Definition, site.WrapperDefinition, site.Target, injectionMethod, injectedMembers) { BoundArguments = site.Injection.BoundArguments },
+                new InjectionCopyRequest(injectionMethodDefinition.Definition, site.WrapperDefinition, site.Target, injectionMethod, injectedMembers) { BoundArguments = site.Injection.BoundArguments, At = site.Injection.At, ForeignOrigin = site.Injection.ForeignOrigin },
                 site.Locals,
                 finallyEnd));
+    }
+
+    private static void ProcessCatchInjection(InjectionSiteContext site, Instruction catchEnd, List<List<Instruction>> catchBodies) {
+        MethodBase injectionMethod = site.Injection.InjectionMethod;
+        InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injectionMethod.DeclaringType!, site.Target);
+        using DynamicMethodDefinition injectionMethodDefinition = BodyReader.Open(injectionMethod);
+        catchBodies.Add(
+            BodyCopier.CopyInjection(
+                new InjectionCopyRequest(injectionMethodDefinition.Definition, site.WrapperDefinition, site.Target, injectionMethod, injectedMembers) { BoundArguments = site.Injection.BoundArguments, At = site.Injection.At, ForeignOrigin = site.Injection.ForeignOrigin },
+                site.Locals,
+                catchEnd,
+                captureBinding: ExceptionBinding(injectionMethod, site.Target, site.Locals),
+                insideCatch: true));
+    }
+
+    private static IReadOnlyDictionary<int, VariableDefinition>? ExceptionBinding(
+        MethodBase injectionMethod,
+        MethodBase target,
+        ProtocolLocals locals) {
+        ParameterInfo[] parameters = injectionMethod.GetParameters();
+        ParameterInfo[] targetParameters = target.GetParameters();
+        HashSet<int> localBound = LocalResolver.BoundArgIndices(injectionMethod);
+        int offset = injectionMethod.IsStatic ? 0 : 1;
+
+        Dictionary<int, VariableDefinition>? binding = null;
+        for (int i = 0; i < parameters.Length; i++) {
+            if (localBound.Contains(i + offset) || MatchesTargetArg(parameters[i], targetParameters)) {
+                continue;
+            }
+
+            Type parameterType = parameters[i].ParameterType;
+            if (!typeof(Exception).IsAssignableFrom(parameterType.IsByRef ? parameterType.GetElementType()! : parameterType)) {
+                continue;
+            }
+
+            if (parameterType.IsByRef) {
+                throw RejectCatchException(
+                    injectionMethod,
+                    target,
+                    $"declares exception parameter '{parameters[i].Name}' by reference as '{parameterType}'. " +
+                    "The thrown exception arrives as a by-value System.Exception parameter, so drop the ref, out or in.");
+            }
+
+            if (parameterType != typeof(Exception)) {
+                throw RejectCatchException(
+                    injectionMethod,
+                    target,
+                    $"declares exception parameter '{parameters[i].Name}' as '{parameterType}'. " +
+                    "The thrown exception arrives as System.Exception.");
+            }
+
+            if (binding is not null) {
+                throw RejectCatchException(
+                    injectionMethod,
+                    target,
+                    $"declares a second System.Exception parameter '{parameters[i].Name}'. The thrown exception " +
+                    "arrives as one System.Exception parameter.");
+            }
+
+            binding = new Dictionary<int, VariableDefinition>(1) { [i + offset] = locals.CaughtException! };
+        }
+
+        return binding;
+    }
+
+    private static ConcordEmitException RejectCatchException(MethodBase injectionMethod, MethodBase target, string tail) {
+        return new ConcordEmitException(
+            "CONC170",
+            $"Injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' on " +
+            $"'{target.DeclaringType?.Name}.{target.Name}' at At.Catch {tail}");
+    }
+
+    private static bool MatchesTargetArg(ParameterInfo parameter, ParameterInfo[] targetParameters) {
+        foreach (ParameterInfo targetParameter in targetParameters) {
+            if (parameter.Name == targetParameter.Name && parameter.ParameterType == targetParameter.ParameterType) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static List<Instruction> BuildCatchHandler(
+        VariableDefinition caughtException,
+        Instruction decisionLoad,
+        List<Instruction> catchBody,
+        Instruction epilogueStart) {
+        Instruction rethrow = Instruction.Create(OpCodes.Rethrow);
+
+        List<Instruction> handler = new List<Instruction> { Instruction.Create(OpCodes.Stloc, caughtException) };
+        handler.AddRange(catchBody);
+        handler.Add(decisionLoad);
+        handler.Add(Instruction.Create(OpCodes.Brfalse, rethrow));
+        handler.Add(Instruction.Create(OpCodes.Leave, epilogueStart));
+        handler.Add(rethrow);
+        return handler;
+    }
+
+    private static void SpliceCatchRegion(
+        List<Instruction> assembled,
+        Instruction afterSpine,
+        Instruction leaveEpilogue,
+        List<Instruction> catchHandler) {
+        int at = assembled.IndexOf(afterSpine) + 1;
+        if (!ReferenceEquals(assembled[at], leaveEpilogue)) {
+            assembled.Insert(at, leaveEpilogue);
+        }
+
+        assembled.InsertRange(at + 1, catchHandler);
     }
 
     private static Instruction ProcessTailInjection(
@@ -1524,9 +1819,9 @@ public static class WrapperComposer {
 
         Instruction lastExit = allExits[allExits.Count - 1];
         InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
-        using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
+        using DynamicMethodDefinition injectionMethodDefinition = BodyReader.Open(injection.InjectionMethod);
         List<Instruction> siteBody = BodyCopier.CopyInjection(
-            new InjectionCopyRequest(injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers) { BoundArguments = injection.BoundArguments },
+            new InjectionCopyRequest(injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers) { BoundArguments = injection.BoundArguments, At = injection.At, ForeignOrigin = injection.ForeignOrigin },
             locals,
             lastExit);
         tailBodies.Add(siteBody);
@@ -1553,10 +1848,10 @@ public static class WrapperComposer {
         List<Instruction> exits = SelectReturnExits(allExits, returnSite.By, target, injection);
 
         InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
-        using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
+        using DynamicMethodDefinition injectionMethodDefinition = BodyReader.Open(injection.InjectionMethod);
         foreach (Instruction exit in exits) {
             List<Instruction> siteBody = BodyCopier.CopyInjection(
-                new InjectionCopyRequest(injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers) { BoundArguments = injection.BoundArguments },
+                new InjectionCopyRequest(injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers) { BoundArguments = injection.BoundArguments, At = injection.At, ForeignOrigin = injection.ForeignOrigin },
                 locals,
                 exit);
             RedirectIntermediateBranches(spine, exit, siteBody[0]);
@@ -1587,10 +1882,10 @@ public static class WrapperComposer {
             List<Instruction> exits = SelectReturnExits(allExits, returnSite.By, target, injection);
 
             InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
-            using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
+            using DynamicMethodDefinition injectionMethodDefinition = BodyReader.Open(injection.InjectionMethod);
             foreach (Instruction exit in exits) {
                 List<Instruction> siteBody = BodyCopier.CopyInjection(
-                    new InjectionCopyRequest(injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers) { BoundArguments = injection.BoundArguments },
+                    new InjectionCopyRequest(injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers) { BoundArguments = injection.BoundArguments, At = injection.At, ForeignOrigin = injection.ForeignOrigin },
                     locals,
                     exit,
                     insideAround: true);
@@ -1632,9 +1927,9 @@ public static class WrapperComposer {
             Instruction lastExit = allExits[allExits.Count - 1];
 
             InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
-            using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
+            using DynamicMethodDefinition injectionMethodDefinition = BodyReader.Open(injection.InjectionMethod);
             List<Instruction> siteBody = BodyCopier.CopyInjection(
-                new InjectionCopyRequest(injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers) { BoundArguments = injection.BoundArguments },
+                new InjectionCopyRequest(injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers) { BoundArguments = injection.BoundArguments, At = injection.At, ForeignOrigin = injection.ForeignOrigin },
                 locals,
                 lastExit,
                 insideAround: true);
@@ -1738,10 +2033,8 @@ public static class WrapperComposer {
             spine);
     }
 
-    // At.Around replaces its site instead of inserting beside it, and the replacement's own copy of
-    // the call is how a second Around chains onto the first. The pre-splice snapshot still holds the
-    // instruction the first wrap removed, so Around has to keep counting live. Every other shift
-    // only inserts, which is what makes the snapshot both safe and necessary there.
+    // At.Around replaces its site, so the pre-splice snapshot still holds the instruction the first
+    // wrap removed and a second Around would chain onto a stale index. Every other shift only inserts.
     private static List<Instruction> SearchList(At shift, List<Instruction> spine, List<Instruction> preSpliceSpine) {
         return shift is At.Around ? spine : preSpliceSpine;
     }
@@ -1783,7 +2076,7 @@ public static class WrapperComposer {
         List<Instruction> spine) {
         Injection injection = site.Injection;
         InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, site.Target);
-        using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
+        using DynamicMethodDefinition injectionMethodDefinition = BodyReader.Open(injection.InjectionMethod);
 
         if (shift is At.Argument) {
             RewriteCallSiteArguments(site, arg, newObj, sites, injectionMethodDefinition.Definition, injectedMembers, spine);
@@ -1792,7 +2085,7 @@ public static class WrapperComposer {
 
         if (shift is At.Around) {
             InjectionCopyRequest wrapRequest = new InjectionCopyRequest(
-                injectionMethodDefinition.Definition, site.WrapperDefinition, site.Target, injection.InjectionMethod, injectedMembers);
+                injectionMethodDefinition.Definition, site.WrapperDefinition, site.Target, injection.InjectionMethod, injectedMembers) { ForeignOrigin = injection.ForeignOrigin };
             foreach (Instruction match in sites) {
                 WrapCallSite(spine, match, wrapRequest, newObj);
             }
@@ -1806,7 +2099,7 @@ public static class WrapperComposer {
             int siteIndex = SpliceIndexOf(spine, match);
             Instruction continuation = after ? spine[siteIndex + 1] : match;
             List<Instruction> invokeBody = BodyCopier.CopyInjection(
-                new InjectionCopyRequest(injectionMethodDefinition.Definition, site.WrapperDefinition, site.Target, injection.InjectionMethod, injectedMembers) { BoundArguments = injection.BoundArguments },
+                new InjectionCopyRequest(injectionMethodDefinition.Definition, site.WrapperDefinition, site.Target, injection.InjectionMethod, injectedMembers) { BoundArguments = injection.BoundArguments, At = injection.At, ForeignOrigin = injection.ForeignOrigin },
                 site.Locals,
                 continuation,
                 captureBinding: captureBinding);
@@ -2076,7 +2369,7 @@ public static class WrapperComposer {
         ValidateValueInjectionShape(injection.InjectionMethod, constant.Value.GetType(), target);
 
         InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
-        using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
+        using DynamicMethodDefinition injectionMethodDefinition = BodyReader.Open(injection.InjectionMethod);
 
         ModuleDefinition module = wrapperDefinition.Module;
         foreach (Instruction match in matches) {
@@ -2138,10 +2431,10 @@ public static class WrapperComposer {
         ValidateValueInjectionShape(injection.InjectionMethod, local.LocalType, target);
 
         InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(injection.InjectionMethod.DeclaringType!, target);
-        using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
+        using DynamicMethodDefinition injectionMethodDefinition = BodyReader.Open(injection.InjectionMethod);
 
         InjectionCopyRequest request = new InjectionCopyRequest(
-            injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers);
+            injectionMethodDefinition.Definition, wrapperDefinition, target, injection.InjectionMethod, injectedMembers) { ForeignOrigin = injection.ForeignOrigin };
         IReadOnlyDictionary<int, VariableDefinition> localBinding =
             LocalResolver.Bind(request, locals, null) ?? new Dictionary<int, VariableDefinition>();
         LocalHandleLowering? localHandles = LocalHandleLowering.Plan(
@@ -2198,7 +2491,7 @@ public static class WrapperComposer {
         }
 
         try {
-            using DynamicMethodDefinition original = new DynamicMethodDefinition(target);
+            using DynamicMethodDefinition original = BodyReader.Open(target);
             MethodBody body = original.Definition.Body;
             if (slot.Index >= body.Variables.Count) {
                 return true;
@@ -2358,7 +2651,7 @@ public static class WrapperComposer {
         }
 
         InjectedMemberMap injectedMembers = InjectedMemberResolver.Build(site.Injection.InjectionMethod.DeclaringType!, site.Target);
-        using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(site.Injection.InjectionMethod);
+        using DynamicMethodDefinition injectionMethodDefinition = BodyReader.Open(site.Injection.InjectionMethod);
         EnsureOperationInvokeNotInLoop(injectionMethodDefinition.Definition.Body, site.Injection.InjectionMethod);
         EnsureAroundInvokePlacement(injectionMethodDefinition.Definition, template.Handlers.Count > 0, site.Injection.InjectionMethod);
 
@@ -2368,7 +2661,7 @@ public static class WrapperComposer {
 
         List<SpineCopy> spineCopies = [];
         aroundBody = BodyCopier.CopyInjection(
-            new InjectionCopyRequest(injectionMethodDefinition.Definition, site.WrapperDefinition, site.Target, site.Injection.InjectionMethod, injectedMembers) { BoundArguments = site.Injection.BoundArguments },
+            new InjectionCopyRequest(injectionMethodDefinition.Definition, site.WrapperDefinition, site.Target, site.Injection.InjectionMethod, injectedMembers) { BoundArguments = site.Injection.BoundArguments, At = site.Injection.At, ForeignOrigin = site.Injection.ForeignOrigin },
             site.Locals,
             epilogueStart,
             template,
@@ -2390,7 +2683,7 @@ public static class WrapperComposer {
     }
 
     private static HashSet<VariableDefinition> CollectProtocolLocals(ProtocolLocals locals) {
-        HashSet<VariableDefinition> protocolLocals = [locals.Cancel];
+        HashSet<VariableDefinition> protocolLocals = [locals.Cancel, locals.SkipRemainingHeads, locals.SkipAffectingHeads];
         if (locals.HasReturn is not null) {
             protocolLocals.Add(locals.HasReturn);
         }
@@ -2721,6 +3014,10 @@ public static class WrapperComposer {
         IReadOnlyDictionary<Type, VariableDefinition> stateLocals) {
         VariableDefinition cancel = new VariableDefinition(module.ImportReference(typeof(bool)));
         body.Variables.Add(cancel);
+        VariableDefinition skipRemainingHeads = new VariableDefinition(module.ImportReference(typeof(bool)));
+        body.Variables.Add(skipRemainingHeads);
+        VariableDefinition skipAffectingHeads = new VariableDefinition(module.ImportReference(typeof(bool)));
+        body.Variables.Add(skipAffectingHeads);
         body.InitLocals = true;
 
         VariableDefinition? ctorBodyRan = null;
@@ -2733,7 +3030,7 @@ public static class WrapperComposer {
         }
 
         if (isVoid) {
-            return new ProtocolLocals(cancel, null, null, null, ctorBodyRan, ctorBodyRanTwice, stateLocals);
+            return new ProtocolLocals(cancel, skipRemainingHeads, skipAffectingHeads, null, null, null, ctorBodyRan, ctorBodyRanTwice, stateLocals);
         }
 
         VariableDefinition hasReturn = new VariableDefinition(module.ImportReference(typeof(bool)));
@@ -2747,7 +3044,7 @@ public static class WrapperComposer {
             body.Variables.Add(spliceValue);
         }
 
-        return new ProtocolLocals(cancel, hasReturn, returnValue, spliceValue, ctorBodyRan, ctorBodyRanTwice, stateLocals);
+        return new ProtocolLocals(cancel, skipRemainingHeads, skipAffectingHeads, hasReturn, returnValue, spliceValue, ctorBodyRan, ctorBodyRanTwice, stateLocals);
     }
 
     // One state local per patch declaration type, allocated up front so every injection body copied
@@ -2763,7 +3060,7 @@ public static class WrapperComposer {
                 continue;
             }
 
-            using DynamicMethodDefinition injectionMethodDefinition = new DynamicMethodDefinition(injection.InjectionMethod);
+            using DynamicMethodDefinition injectionMethodDefinition = BodyReader.Open(injection.InjectionMethod);
             CollectStateTypes(injectionMethodDefinition.Definition.Body, owner, target, declared);
         }
 
@@ -3000,8 +3297,8 @@ public static class WrapperComposer {
         return false;
     }
 
-    private static void GuardCancelWithoutReturn(MethodBody injectionMethodBody, MethodBase target, bool isVoid, bool returnsControl) {
-        if (isVoid) {
+    private static void GuardCancelWithoutReturn(MethodBody injectionMethodBody, MethodBase target, bool isVoid, bool returnsControl, bool foreignOrigin) {
+        if (isVoid || foreignOrigin) {
             return;
         }
 

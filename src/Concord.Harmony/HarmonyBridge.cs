@@ -1,5 +1,3 @@
-#nullable disable
-
 using System;
 using System.Collections.Generic;
 using System.Reflection;
@@ -16,6 +14,8 @@ namespace Concord.Harmony;
 /// </summary>
 public sealed partial class HarmonyBridge : IForeignPatchHost
 {
+    internal const string BackstopUnavailableMarker = "[Concord.Coex] backstop-unavailable";
+
     private const string BridgeOwner = "concord.bridge";
 
     private readonly HarmonyLib.Harmony harmony;
@@ -57,14 +57,18 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
 
     internal Action<MethodBase> RemoveParticipant { get; set; }
 
+    internal bool BackstopInstalled { get; private set; }
+
+    internal bool ReversePatchHookInstalled { get; private set; }
+
     /// <inheritdoc />
-    public IDisposable EnterHostLock()
+    public IDisposable? EnterHostLock()
     {
         return HarmonyLockScope.Available ? HarmonyLockScope.Enter() : null;
     }
 
     /// <inheritdoc />
-    public string ValidateRoute(MethodBase target, IReadOnlyList<Injection> added)
+    public string? ValidateRoute(MethodBase target, IReadOnlyList<Injection> added)
     {
         target = MethodIdentity.Normalize(target);
 
@@ -80,7 +84,7 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
     }
 
     /// <inheritdoc />
-    public string RevalidateRouted(MethodBase target, object hostPatchState)
+    public string? RevalidateRouted(MethodBase target, object hostPatchState)
     {
         target = MethodIdentity.Normalize(target);
 
@@ -95,7 +99,7 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
             return null;
         }
 
-        string reason = SupportMatrix.Validate(target, added, SupportMatrix.Incoming(patchInfo));
+        string? reason = SupportMatrix.Validate(target, added, SupportMatrix.Incoming(patchInfo));
         if (reason == null)
         {
             return null;
@@ -108,7 +112,10 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
     /// <inheritdoc />
     public bool TryInstallNotifier(IForeignPatchObserver observer, IDetourBackend rawBackend)
     {
-        return UpdateWrapperHook.TryInstall(observer, rawBackend, log);
+        bool notifier = UpdateWrapperHook.TryInstall(observer, rawBackend, log);
+        BackstopInstalled = TryInstallBackstop(rawBackend);
+        ReversePatchHookInstalled = BackstopInstalled && ReversePatchHook.TryInstall(rawBackend, log);
+        return notifier;
     }
 
     /// <inheritdoc />
@@ -123,7 +130,7 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
                 "Concord received host patch state of type '" + (hostPatchState?.GetType().Name ?? "null") + "' instead of a Harmony PatchInfo.");
         }
 
-        string reason = SupportMatrix.Validate(target, added, PatchProcessor.GetPatchInfo(target));
+        string? reason = SupportMatrix.Validate(target, added, PatchProcessor.GetPatchInfo(target));
         if (reason != null)
         {
             return ForeignRouteResult.Rejected(reason);
@@ -167,14 +174,14 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
                 return ForeignRouteResult.NotContested();
             }
 
-            string reason = SupportMatrix.Validate(target, added, patchInfo);
+            string? reason = SupportMatrix.Validate(target, added, patchInfo);
             if (reason != null)
             {
                 return ForeignRouteResult.Rejected(reason);
             }
 
             long[] owned = TranspilerParticipant.Registry.Add(hostTarget, added);
-            Exception failure;
+            Exception? failure;
             try
             {
                 failure = RunRebuild(hostTarget);
@@ -316,7 +323,7 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
             return target;
         }
 
-        Type definition = target.DeclaringType.GetGenericTypeDefinition();
+        Type definition = target.DeclaringType!.GetGenericTypeDefinition();
         MethodBase key = MethodIdentity.SharedBodyKey(target);
 
         foreach (MethodBase patched in HarmonyLib.Harmony.GetAllPatchedMethods())
@@ -370,15 +377,15 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
 
     private long[] ApplyToRoutedCore(MethodBase target, IReadOnlyList<Injection> added)
     {
-        Patches patchInfo = PatchProcessor.GetPatchInfo(target);
-        string reason = SupportMatrix.Validate(target, added, patchInfo);
+        Patches? patchInfo = PatchProcessor.GetPatchInfo(target);
+        string? reason = SupportMatrix.Validate(target, added, patchInfo);
         if (reason != null)
         {
             throw new InvalidOperationException(reason);
         }
 
         long[] owned = TranspilerParticipant.Registry.Add(target, added);
-        Exception failure;
+        Exception? failure;
         try
         {
             failure = RunRebuild(target);
@@ -396,6 +403,18 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
         }
 
         return owned;
+    }
+
+    private bool TryInstallBackstop(IDetourBackend rawBackend)
+    {
+        string? refusal = SupportMatrix.BackstopRefusal();
+        if (refusal != null)
+        {
+            log(BackstopUnavailableMarker + " " + refusal);
+            return false;
+        }
+
+        return DetourMethodHook.TryInstall(rawBackend, log);
     }
 
     private void Withdraw(MethodBase target, PatchInfo patchInfo)
@@ -418,7 +437,7 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
 
         (long Seq, Injection Injection)[] removed = TranspilerParticipant.Registry.Remove(target, owned);
 
-        Exception failure;
+        Exception? failure;
         try
         {
             failure = RunRebuild(target);
@@ -429,7 +448,7 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
 
             try
             {
-                Exception restoreFailure = RunRebuild(target);
+                Exception? restoreFailure = RunRebuild(target);
                 if (restoreFailure != null)
                 {
                     LoseParticipant(target, restoreFailure);
@@ -468,7 +487,7 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
     private void RecoverSurvivors(MethodBase target, long[] droppedOwned)
     {
         TranspilerParticipant.Registry.Remove(target, droppedOwned);
-        Exception survivorFailure;
+        Exception? survivorFailure;
         try
         {
             survivorFailure = RunRebuild(target);
@@ -507,11 +526,11 @@ public sealed partial class HarmonyBridge : IForeignPatchHost
         }
     }
 
-    private Exception RunRebuild(MethodBase target)
+    private Exception? RunRebuild(MethodBase target)
     {
         TranspilerParticipant.LastStreamFailure = null;
         ReconcileParticipant(target);
-        Exception failure = TranspilerParticipant.LastStreamFailure;
+        Exception? failure = TranspilerParticipant.LastStreamFailure;
         TranspilerParticipant.LastStreamFailure = null;
         return failure;
     }

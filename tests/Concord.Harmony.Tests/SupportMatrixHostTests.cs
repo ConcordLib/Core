@@ -1,5 +1,3 @@
-#nullable disable
-
 using System;
 using System.Reflection;
 using Concord.Emit;
@@ -20,14 +18,19 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void HasInnerPatchesFalseForNormalTarget()
         {
-            MethodBase target = typeof(SupportMatrixTestTargets).GetMethod(nameof(SupportMatrixTestTargets.SimpleTarget));
-            Patches patchInfo = PatchProcessor.GetPatchInfo(target);
+            MethodBase target = Method(typeof(SupportMatrixTestTargets), nameof(SupportMatrixTestTargets.SimpleTarget));
+            Patches? patchInfo = PatchProcessor.GetPatchInfo(target);
 
-            string reason = SupportMatrix.Validate(target, Array.Empty<Injection>(), patchInfo);
+            string? reason = SupportMatrix.Validate(target, Array.Empty<Injection>(), patchInfo);
             Assert.Null(reason);
 
             bool hasInner = SupportMatrix.HasInnerPatches(patchInfo);
             Assert.False(hasInner);
+        }
+
+        private static MethodInfo Method(Type type, string name)
+        {
+            return type.GetMethod(name) ?? throw new InvalidOperationException(type.Name + "." + name + " not found");
         }
     }
 
@@ -36,27 +39,32 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void HasInnerPatchesReturnsTrueWhenInnerPrefixesNonEmpty()
         {
-            MethodInfo innerPatchMethod = typeof(SupportMatrixTestInjections).GetMethod(nameof(SupportMatrixTestInjections.SimplePrefix));
+            MethodInfo innerPatchMethod = Method(typeof(SupportMatrixTestInjections), nameof(SupportMatrixTestInjections.SimplePrefix));
             Patch innerPatch = new Patch(innerPatchMethod, 0, "test.inner.owner", 0, null, null, false);
             Patches patchInfo = new Patches(null, null, null, null, new Patch[] { innerPatch }, null);
 
             bool hasInner = SupportMatrix.HasInnerPatches(patchInfo);
             Assert.True(hasInner);
 
-            MethodBase target = typeof(SupportMatrixTestTargets).GetMethod(nameof(SupportMatrixTestTargets.SimpleTarget));
-            string reason = SupportMatrix.Validate(target, Array.Empty<Injection>(), patchInfo);
+            MethodBase target = Method(typeof(SupportMatrixTestTargets), nameof(SupportMatrixTestTargets.SimpleTarget));
+            string? reason = SupportMatrix.Validate(target, Array.Empty<Injection>(), patchInfo);
             Assert.Null(reason);
         }
 
         [Fact]
         public void HasInnerPatchesReturnsTrueWhenInnerPostfixesNonEmpty()
         {
-            MethodInfo innerPatchMethod = typeof(SupportMatrixTestInjections).GetMethod(nameof(SupportMatrixTestInjections.SimplePrefix));
+            MethodInfo innerPatchMethod = Method(typeof(SupportMatrixTestInjections), nameof(SupportMatrixTestInjections.SimplePrefix));
             Patch innerPatch = new Patch(innerPatchMethod, 0, "test.inner.owner", 0, null, null, false);
             Patches patchInfo = new Patches(null, null, null, null, null, new Patch[] { innerPatch });
 
             bool hasInner = SupportMatrix.HasInnerPatches(patchInfo);
             Assert.True(hasInner);
+        }
+
+        private static MethodInfo Method(Type type, string name)
+        {
+            return type.GetMethod(name) ?? throw new InvalidOperationException(type.Name + "." + name + " not found");
         }
     }
 }

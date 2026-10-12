@@ -22,6 +22,16 @@ public static class Patcher {
     private static readonly FanOutRegistry Properties = new FanOutRegistry();
 
     /// <summary>
+    ///     How many wrappers have ever been composed in this process, counting disposed ones, because the
+    ///     rooted list is never released. Non-zero means patching has started, which is all a backend swap needs.
+    /// </summary>
+    public static int PatchedTargetCount {
+        get {
+            return TargetDetourRegistry.RootedWrapperCount;
+        }
+    }
+
+    /// <summary>
     ///     Whether a composed wrapper is compiled at compose time rather than on its first call.
     ///     Off by default.
     /// </summary>
@@ -49,6 +59,15 @@ public static class Patcher {
     /// <param name="log">Receives each report, or null to fall back to <see cref="Trace" />.</param>
     public static void UseLog(Action<string>? log) {
         PatchLog.Sink = log;
+    }
+
+    /// <summary>
+    ///     Writes one report to the same log <see cref="UseLog" /> installed, so a detour backend in
+    ///     another assembly reports on the stream players already read rather than its own.
+    /// </summary>
+    /// <param name="message">The report.</param>
+    public static void WriteLog(string message) {
+        PatchLog.Write(message);
     }
 
     /// <summary>
@@ -124,7 +143,7 @@ public static class Patcher {
     /// <summary>
     ///     Applies a single explicit patch without scanning for attributes: composes
     ///     <paramref name="injectionMethod" /> onto <paramref name="target" /> at the given position
-    ///     (Head, Return, Tail, Around, Transpiler, or TranspilerFinal).
+    ///     (Head, Return, Tail, Around, Finally, Catch, Transpiler, or TranspilerFinal).
     /// </summary>
     /// <remarks>
     ///     The returned handle is retained in a static registry, so the detour stays applied even when the
@@ -134,15 +153,15 @@ public static class Patcher {
     /// <param name="injectionMethod">The injection method supplying the injected body.</param>
     /// <param name="at">
     ///     The injection position where the injection method runs relative to the target.
-    ///     <see cref="At.Constant" /> and <see cref="At.Argument" /> are not reachable through this method:
-    ///     use <see cref="InjectAttribute" /> for <see cref="At.Constant" />, or build an <see cref="Injection" />
-    ///     with an <see cref="InjectAt.Invoke" /> shifted <see cref="At.Argument" /> and apply it via
-    ///     <see cref="PatchInjection" /> for <see cref="At.Argument" />.
+    ///     <see cref="At.Constant" />, <see cref="At.Argument" /> and <see cref="At.Local" /> are not reachable
+    ///     through this method: use <see cref="InjectAttribute" /> for <see cref="At.Constant" />, or build an
+    ///     <see cref="Injection" /> around an <see cref="InjectAt.Invoke" /> shifted <see cref="At.Argument" />
+    ///     or an <see cref="InjectAt.Local" /> and apply it via <see cref="PatchInjection" />.
     /// </param>
     /// <returns>A handle that reverts the applied detour when disposed.</returns>
     /// <exception cref="ConcordEmitException">
-    ///     Thrown with code <c>CONC116</c> when <paramref name="at" /> is <see cref="At.Constant" /> or
-    ///     <see cref="At.Argument" />, neither of which this method can express.
+    ///     Thrown with code <c>CONC116</c> when <paramref name="at" /> is <see cref="At.Constant" />,
+    ///     <see cref="At.Argument" /> or <see cref="At.Local" />, none of which this method can express.
     /// </exception>
     public static IPatchHandle Patch(MethodBase target, MethodBase injectionMethod, At at) {
         if (injectionMethod.DeclaringType is null) {
@@ -158,9 +177,9 @@ public static class Patcher {
     }
 
     /// <summary>
-    ///     Applies a single, already-constructed <see cref="Injection" /> at any position it can express
-    ///     (Head, Return with a specific index, Tail, Around, or Invoke), composing it directly rather than
-    ///     through the simplified <see cref="At" /> enum used by <see cref="Patch" />.
+    ///     Applies a single, already-constructed <see cref="Injection" /> at any position <see cref="InjectAt" />
+    ///     can express, composing it directly rather than through the simplified <see cref="At" /> enum used by
+    ///     <see cref="Patch" />.
     /// </summary>
     /// <remarks>
     ///     The returned handle is retained in a static registry, so the detour stays applied even when the
@@ -386,6 +405,7 @@ public static class Patcher {
             At.Finally => new InjectAt.Finally(),
             At.Transpiler => new InjectAt.Transpiler(false),
             At.TranspilerFinal => new InjectAt.Transpiler(true),
+            At.Catch => new InjectAt.Catch(),
             _ => throw new ConcordEmitException("CONC116", $"Unsupported injection position '{at}'."),
         };
     }
