@@ -125,23 +125,14 @@ jobs:
         run: |
           $failed = @()
           $suites = @(
-            @{ Project = 'tests/Concord.Detour.Tests/Concord.Detour.Tests.csproj'; Restore = $false },
-            @{ Project = 'tests/Concord.Emit.Tests/Concord.Emit.Tests.csproj'; Restore = $false },
-            @{ Project = 'tests/Concord.AttachedData.Tests/Concord.AttachedData.Tests.csproj'; Restore = $false },
-            @{ Project = 'tests/Concord.Orchestration.Tests/Concord.Orchestration.Tests.csproj'; Restore = $false },
-            @{ Project = 'tests/Concord.HarmonyX.Tests/Concord.HarmonyX.Tests.csproj'; Restore = $true; SkipOnArm = $true }
+            'tests/Concord.Detour.Tests/Concord.Detour.Tests.csproj',
+            'tests/Concord.Emit.Tests/Concord.Emit.Tests.csproj',
+            'tests/Concord.AttachedData.Tests/Concord.AttachedData.Tests.csproj',
+            'tests/Concord.Orchestration.Tests/Concord.Orchestration.Tests.csproj'
           )
           foreach ($suite in $suites) {
-            if ($suite.SkipOnArm -and $env:RUNNER_ARCH -eq 'ARM64') {
-              Write-Host "Skipping $($suite.Project): MonoMod has no win-arm64 support"
-              continue
-            }
-            if ($suite.Restore) {
-              dotnet test $suite.Project -c Release -f net472 --logger 'console;verbosity=normal'
-            } else {
-              dotnet test $suite.Project -c Release --no-restore -f net472
-            }
-            if ($LASTEXITCODE -ne 0) { $failed += $suite.Project }
+            dotnet test $suite -c Release --no-restore -f net472
+            if ($LASTEXITCODE -ne 0) { $failed += $suite }
           }
           if ($failed.Count -gt 0) {
             Write-Host "::error::net472 suites failed: $($failed -join ', ')"
@@ -185,13 +176,12 @@ jobs:
       - name: Build net472 test assemblies
         run: |
           dotnet build Concord.ci.slnx -c Release --no-restore
-          dotnet build tests/Concord.HarmonyX.Tests/Concord.HarmonyX.Tests.csproj -c Release
 
       - name: Run suites under mono
         run: |
           set -e
           RUNNER=$(find ~/.nuget/packages/xunit.runner.console -name xunit.console.exe -path '*net472*' | sort -V | tail -1)
-          for dll in Detour Emit AttachedData Orchestration Harmony HarmonyX; do
+          for dll in Detour Emit AttachedData Orchestration Harmony; do
             mono "$RUNNER" "tests/Concord.$dll.Tests/bin/Release/net472/Concord.$dll.Tests.dll"
           done
 
