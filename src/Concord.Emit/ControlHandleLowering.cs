@@ -16,10 +16,13 @@ internal static class ControlHandleLowering {
     internal enum ControlCallKind {
         None,
         Cancel,
+        CancelSkip,
         GetReturnValue,
         SetReturnValue,
         SetState,
         GetState,
+        GetException,
+        Rethrow,
     }
 
     internal static int FindControlHandleArgIndex(MethodBase injectionMethod) {
@@ -137,13 +140,43 @@ internal static class ControlHandleLowering {
         }
 
         return resolved.Name switch {
-            "Cancel" => ControlCallKind.Cancel,
+            "Cancel" => resolved.GetParameters().Length == 1 ? ControlCallKind.CancelSkip : ControlCallKind.Cancel,
             "get_ReturnValue" => ControlCallKind.GetReturnValue,
             "set_ReturnValue" => ControlCallKind.SetReturnValue,
             "SetState" => ControlCallKind.SetState,
             "GetState" => ControlCallKind.GetState,
+            "get_Exception" => ControlCallKind.GetException,
+            "Rethrow" => ControlCallKind.Rethrow,
             _ => ControlCallKind.None,
         };
+    }
+
+    internal static List<Instruction>? LowerCatchCall(
+        ControlCallKind kind,
+        bool insideCatch,
+        ProtocolLocals locals,
+        MethodBase injectionMethod) {
+        if (kind == ControlCallKind.GetException) {
+            RequireCatchPosition(kind, insideCatch, injectionMethod);
+            return new List<Instruction> { Instruction.Create(OpCodes.Ldloc, RequireSlot(locals.CaughtException, kind, injectionMethod)) };
+        }
+
+        if (kind == ControlCallKind.Rethrow) {
+            RequireCatchPosition(kind, insideCatch, injectionMethod);
+            return new List<Instruction> {
+                Instruction.Create(OpCodes.Ldc_I4_0),
+                Instruction.Create(OpCodes.Stloc, RequireSlot(locals.CatchDecision, kind, injectionMethod)),
+            };
+        }
+
+        if (kind == ControlCallKind.Cancel && insideCatch) {
+            return new List<Instruction> {
+                Instruction.Create(OpCodes.Ldc_I4_1),
+                Instruction.Create(OpCodes.Stloc, RequireSlot(locals.CatchDecision, kind, injectionMethod)),
+            };
+        }
+
+        return null;
     }
 
     internal static Type? ResolveStateType(Instruction instruction) {
@@ -182,7 +215,8 @@ internal static class ControlHandleLowering {
 
     internal static bool InjectionMethodCancels(MethodBody injectionBody) {
         foreach (Instruction instruction in injectionBody.Instructions) {
-            if (ClassifyCall(instruction) == ControlCallKind.Cancel) {
+            ControlCallKind kind = ClassifyCall(instruction);
+            if (kind is ControlCallKind.Cancel or ControlCallKind.CancelSkip) {
                 return true;
             }
         }
@@ -230,6 +264,51 @@ internal static class ControlHandleLowering {
         }
 
         return -1;
+    }
+
+    internal static void RequireHeadPosition(InjectAt? at, MethodBase injectionMethod) {
+        if (at is not null && WrapperComposer.SupportsCancelSkip(at)) {
+            return;
+        }
+
+        throw new ConcordEmitException(
+            "CONC171",
+            "Injection '" + injectionMethod.DeclaringType?.Name + "." + injectionMethod.Name + "' calls " +
+            "the ControlHandle.Cancel(bool) overload outside At.Head. Only a head injection has later head injections " +
+            "to skip, so the overload is available at At.Head and nowhere else. Call Cancel() instead, or move the " +
+            "call to an At.Head injection.");
+    }
+
+    private static void RequireCatchPosition(ControlCallKind kind, bool insideCatch, MethodBase injectionMethod) {
+        if (insideCatch) {
+            return;
+        }
+
+        throw new ConcordEmitException(
+            "CONC168",
+            "Injection '" + injectionMethod.DeclaringType?.Name + "." + injectionMethod.Name + "' calls " +
+            CallName(kind) + " outside a catch handler. Both only exist while an exception is in flight, so they are " +
+            "available at At.Catch and nowhere else. Move the call to an At.Catch injection.");
+    }
+
+    private static VariableDefinition RequireSlot(VariableDefinition? slot, ControlCallKind kind, MethodBase injectionMethod) {
+        if (slot is not null) {
+            return slot;
+        }
+
+        throw new ConcordEmitException(
+            "CONC169",
+            "Concord bug: no catch slot exists for injection '" + injectionMethod.DeclaringType?.Name + "." + injectionMethod.Name +
+            "' even though it calls " + CallName(kind) + " inside a catch handler. Nothing in the patch declaration causes this. " +
+            "Report it with the declaration.");
+    }
+
+    private static string CallName(ControlCallKind kind) {
+        return kind switch {
+            ControlCallKind.GetException => "ControlHandle.Exception",
+            ControlCallKind.Rethrow => "ControlHandle.Rethrow()",
+            _ => "ControlHandle.Cancel()",
+        };
     }
 
     private static int ArgIndexOperand(object? operand) {

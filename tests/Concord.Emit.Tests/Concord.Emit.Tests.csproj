@@ -22,6 +22,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Concord.Emit/Concord.Emit.csproj"/>
     <ProjectReference Include="../../src/Concord.Detour/Concord.Detour.csproj"/>
+    <ProjectReference Include="../../src/Concord.Orchestration/Concord.Orchestration.csproj"/>
     <ProjectReference Include="../Concord.Emit.Tests.ForeignTargets/Concord.Emit.Tests.ForeignTargets.csproj"/>
   </ItemGroup>
 </Project>

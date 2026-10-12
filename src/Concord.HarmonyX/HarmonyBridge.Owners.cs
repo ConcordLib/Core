@@ -1,5 +1,3 @@
-#nullable disable
-
 using System;
 using System.Collections.Generic;
 using System.Reflection;
@@ -12,7 +10,7 @@ namespace Concord.Harmony;
 /// </content>
 public sealed partial class HarmonyBridge
 {
-    private static partial bool HasForeignPatch(Patches patchInfo)
+    private static partial bool HasForeignPatch(Patches? patchInfo)
     {
         if (patchInfo == null)
         {

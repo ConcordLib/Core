@@ -1,0 +1,7 @@
+<Project>
+
+  <ItemGroup>
+    <PackageReference Include="Lib.Harmony" Version="3.0.*-*" ExcludeAssets="$(HarmonyExcludeAssets)"/>
+  </ItemGroup>
+
+</Project>

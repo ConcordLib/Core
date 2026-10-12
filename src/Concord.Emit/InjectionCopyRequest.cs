@@ -22,4 +22,16 @@ internal readonly record struct InjectionCopyRequest(
     ///     Values bound to the injection's <see cref="BoundAttribute" /> parameters, keyed by parameter name.
     /// </summary>
     public IReadOnlyDictionary<string, object?>? BoundArguments { get; init; }
+
+    /// <summary>
+    ///     The position the injection was registered at, so lowering can refuse a call the position
+    ///     does not support.
+    /// </summary>
+    public InjectAt? At { get; init; }
+
+    /// <summary>
+    ///     Whether the injection was translated from a foreign patch, so lowering can give a cancel
+    ///     the narrower skip the foreign rulebook asks for.
+    /// </summary>
+    public bool ForeignOrigin { get; init; }
 }

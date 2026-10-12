@@ -30,7 +30,8 @@ public class CodeInstructionConverterTests
 
     private static Concord.ITranspilerContext NewStreamContext()
     {
-        MethodBase target = typeof(CodeInstructionConverterTests).GetMethod(nameof(NewGenerator), BindingFlags.NonPublic | BindingFlags.Static)!;
+        MethodBase target = typeof(CodeInstructionConverterTests).GetMethod(nameof(NewGenerator), BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidOperationException(nameof(CodeInstructionConverterTests) + "." + nameof(NewGenerator) + " not found");
         return WrapperComposer.CreateStreamContext(target);
     }
 
@@ -282,7 +283,9 @@ public class CodeInstructionConverterTests
 
     private static Concord.ITranspilerContext StructLocalStreamContext()
     {
-        return WrapperComposer.CreateStreamContext(typeof(CompactStructTarget).GetMethod(nameof(CompactStructTarget.Run))!);
+        MethodInfo target = typeof(CompactStructTarget).GetMethod(nameof(CompactStructTarget.Run))
+            ?? throw new InvalidOperationException(nameof(CompactStructTarget) + "." + nameof(CompactStructTarget.Run) + " not found");
+        return WrapperComposer.CreateStreamContext(target);
     }
 
     [Fact]

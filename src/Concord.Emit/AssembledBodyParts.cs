@@ -30,4 +30,10 @@ internal readonly record struct AssembledBodyParts(
     List<Instruction> Epilogue,
     List<Instruction> FinallyBody,
     Instruction FinallyEnd,
-    Instruction LeaveEpilogue);
+    Instruction LeaveEpilogue) {
+    public List<Instruction>? CatchBody { get; init; }
+
+    public Instruction? CatchEnd { get; init; }
+
+    public Instruction? LeaveCatchEpilogue { get; init; }
+}

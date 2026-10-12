@@ -6,6 +6,8 @@ namespace Concord.Emit;
 ///     Wrapper locals used to lower <see cref="ControlHandle" /> and <see cref="ControlHandle{T}" /> operations.
 /// </summary>
 /// <param name="Cancel">Boolean local that records whether the original target body should be skipped.</param>
+/// <param name="SkipRemainingHeads">Boolean local that records whether every head injection after the cancelling one should be skipped too.</param>
+/// <param name="SkipAffectingHeads">Boolean local that records whether the head injections after the cancelling one that affect the original should be skipped too.</param>
 /// <param name="HasReturn">Boolean local that records whether an explicit return value was supplied.</param>
 /// <param name="ReturnValue">Local that stores the wrapper return value for non-void targets.</param>
 /// <param name="SpliceValue">Local that carries the original body's result across an Around splice for non-void targets.</param>
@@ -14,6 +16,8 @@ namespace Concord.Emit;
 /// <param name="State">One state local per patch declaration type that uses a state slot on this target.</param>
 internal sealed record ProtocolLocals(
     VariableDefinition Cancel,
+    VariableDefinition SkipRemainingHeads,
+    VariableDefinition SkipAffectingHeads,
     VariableDefinition? HasReturn,
     VariableDefinition? ReturnValue,
     VariableDefinition? SpliceValue = null,
@@ -37,4 +41,14 @@ internal sealed record ProtocolLocals(
     ///     outside this set has no live use, so binding it would read zero forever.
     /// </summary>
     public HashSet<int> ReferencedSlots { get; init; } = [];
+
+    /// <summary>
+    ///     The exception a synthesized catch region stored, or null when the wrapper has no catch region.
+    /// </summary>
+    public VariableDefinition? CaughtException { get; init; }
+
+    /// <summary>
+    ///     A catch handler's decision slot: zero keeps the throw, nonzero stops it.
+    /// </summary>
+    public VariableDefinition? CatchDecision { get; init; }
 }

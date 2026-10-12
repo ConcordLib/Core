@@ -1,5 +1,3 @@
-#nullable disable
-
 using System;
 using System.Collections.Generic;
 using System.Reflection;
@@ -42,6 +40,19 @@ namespace Concord.Harmony.Tests
         }
     }
 
+    internal static class SupportMatrixResolve
+    {
+        internal static MethodInfo Method(Type type, string name)
+        {
+            return type.GetMethod(name) ?? throw new InvalidOperationException(type.Name + "." + name + " not found");
+        }
+
+        internal static ConstructorInfo Ctor(Type type)
+        {
+            return type.GetConstructor(Type.EmptyTypes) ?? throw new InvalidOperationException(type.Name + " parameterless constructor not found");
+        }
+    }
+
     internal sealed class GenericContainer<T>
     {
         [MethodImpl(MethodImplOptions.NoInlining)]
@@ -67,20 +78,20 @@ namespace Concord.Harmony.Tests
     {
         private static MethodBase CtorMethod()
         {
-            return typeof(object).GetConstructor(Type.EmptyTypes);
+            return SupportMatrixResolve.Ctor(typeof(object));
         }
 
         [Fact]
         public void AllowsConstructorWithAround()
         {
             MethodBase target = CtorMethod();
-            MethodBase injectionMethod = typeof(SupportMatrixTestInjections).GetMethod(nameof(SupportMatrixTestInjections.SimplePrefix));
+            MethodBase injectionMethod = SupportMatrixResolve.Method(typeof(SupportMatrixTestInjections), nameof(SupportMatrixTestInjections.SimplePrefix));
             Injection[] injections = new Injection[]
             {
                 new Injection(injectionMethod, new InjectAt.Around(), "test", 0)
             };
 
-            string reason = SupportMatrix.Validate(target, injections, null);
+            string? reason = SupportMatrix.Validate(target, injections, null);
             Assert.Null(reason);
         }
 
@@ -88,13 +99,13 @@ namespace Concord.Harmony.Tests
         public void AllowsConstructorWithHead()
         {
             MethodBase target = CtorMethod();
-            MethodBase injectionMethod = typeof(SupportMatrixTestInjections).GetMethod(nameof(SupportMatrixTestInjections.SimplePrefix));
+            MethodBase injectionMethod = SupportMatrixResolve.Method(typeof(SupportMatrixTestInjections), nameof(SupportMatrixTestInjections.SimplePrefix));
             Injection[] injections = new Injection[]
             {
                 new Injection(injectionMethod, new InjectAt.Head(), "test", 0)
             };
 
-            string reason = SupportMatrix.Validate(target, injections, null);
+            string? reason = SupportMatrix.Validate(target, injections, null);
             Assert.Null(reason);
         }
     }
@@ -106,14 +117,14 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void AcceptsAsyncEntryMethodWhenInjectionSelectsStateMachineBody()
         {
-            MethodBase target = typeof(SupportMatrixTestTargets).GetMethod(nameof(SupportMatrixTestTargets.AsyncTarget));
-            MethodBase injectionMethod = typeof(SupportMatrixTestInjections).GetMethod(nameof(SupportMatrixTestInjections.SimplePrefix));
+            MethodBase target = SupportMatrixResolve.Method(typeof(SupportMatrixTestTargets), nameof(SupportMatrixTestTargets.AsyncTarget));
+            MethodBase injectionMethod = SupportMatrixResolve.Method(typeof(SupportMatrixTestInjections), nameof(SupportMatrixTestInjections.SimplePrefix));
             Injection[] injections = new Injection[]
             {
                 new Injection(injectionMethod, new InjectAt.Head(), "test", 0) { Body = PatchBody.StateMachine }
             };
 
-            string reason = SupportMatrix.Validate(target, injections, null);
+            string? reason = SupportMatrix.Validate(target, injections, null);
             Assert.Null(reason);
         }
 
@@ -121,14 +132,14 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void AllowsAsyncEntryMethodWhenInjectionSelectsDeclaredBody()
         {
-            MethodBase target = typeof(SupportMatrixTestTargets).GetMethod(nameof(SupportMatrixTestTargets.AsyncTarget));
-            MethodBase injectionMethod = typeof(SupportMatrixTestInjections).GetMethod(nameof(SupportMatrixTestInjections.SimplePrefix));
+            MethodBase target = SupportMatrixResolve.Method(typeof(SupportMatrixTestTargets), nameof(SupportMatrixTestTargets.AsyncTarget));
+            MethodBase injectionMethod = SupportMatrixResolve.Method(typeof(SupportMatrixTestInjections), nameof(SupportMatrixTestInjections.SimplePrefix));
             Injection[] injections = new Injection[]
             {
                 new Injection(injectionMethod, new InjectAt.Head(), "test", 0)
             };
 
-            string reason = SupportMatrix.Validate(target, injections, null);
+            string? reason = SupportMatrix.Validate(target, injections, null);
             Assert.Null(reason);
         }
     }
@@ -138,7 +149,7 @@ namespace Concord.Harmony.Tests
     {
         private static Injection[] HeadInjection()
         {
-            MethodBase injectionMethod = typeof(SupportMatrixTestInjections).GetMethod(nameof(SupportMatrixTestInjections.SimplePrefix));
+            MethodBase injectionMethod = SupportMatrixResolve.Method(typeof(SupportMatrixTestInjections), nameof(SupportMatrixTestInjections.SimplePrefix));
             return new Injection[]
             {
                 new Injection(injectionMethod, new InjectAt.Head(), "test", 0)
@@ -149,20 +160,21 @@ namespace Concord.Harmony.Tests
         public void TryRouteRejectsSharedReferenceTypeGenericInstantiationWithGenericContextInBody()
         {
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
-            MethodBase target = typeof(GenericContainer<string>).GetMethod(nameof(GenericContainer<string>.Describe));
+            MethodBase target = SupportMatrixResolve.Method(typeof(GenericContainer<string>), nameof(GenericContainer<string>.Describe));
 
             ForeignRouteResult result = bridge.TryRoute(target, HeadInjection(), forceRoute: true);
 
             Assert.Equal(ForeignRouteKind.Rejected, result.Kind);
+            Assert.NotNull(result.Reason);
             Assert.Contains("generic", result.Reason.ToLower());
         }
 
         [Fact]
         public void ValidateRejectsSharedReferenceTypeGenericInstantiationWithGenericContextInBody()
         {
-            MethodBase target = typeof(GenericContainer<string>).GetMethod(nameof(GenericContainer<string>.Describe));
+            MethodBase target = SupportMatrixResolve.Method(typeof(GenericContainer<string>), nameof(GenericContainer<string>.Describe));
 
-            string reason = SupportMatrix.Validate(target, HeadInjection(), null);
+            string? reason = SupportMatrix.Validate(target, HeadInjection(), null);
 
             Assert.NotNull(reason);
             Assert.Contains("generic", reason.ToLower());
@@ -171,9 +183,9 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void ValidateRejectsSharedReferenceTypeGenericStaticMethod()
         {
-            MethodBase target = typeof(GenericContainer<string>).GetMethod(nameof(GenericContainer<string>.StaticCompute));
+            MethodBase target = SupportMatrixResolve.Method(typeof(GenericContainer<string>), nameof(GenericContainer<string>.StaticCompute));
 
-            string reason = SupportMatrix.Validate(target, HeadInjection(), null);
+            string? reason = SupportMatrix.Validate(target, HeadInjection(), null);
 
             Assert.NotNull(reason);
             Assert.Contains("generic", reason.ToLower());
@@ -187,9 +199,9 @@ namespace Concord.Harmony.Tests
                 return;
             }
 
-            MethodBase target = typeof(GenericContainer<string>).GetMethod(nameof(GenericContainer<string>.Compute));
+            MethodBase target = SupportMatrixResolve.Method(typeof(GenericContainer<string>), nameof(GenericContainer<string>.Compute));
 
-            string reason = SupportMatrix.Validate(target, HeadInjection(), null);
+            string? reason = SupportMatrix.Validate(target, HeadInjection(), null);
 
             Assert.Null(reason);
         }
@@ -202,8 +214,8 @@ namespace Concord.Harmony.Tests
         public void TryRouteRejectsMisshapedConstructorAroundAtEmitLayer()
         {
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
-            MethodBase target = typeof(object).GetConstructor(Type.EmptyTypes);
-            MethodBase injectionMethod = typeof(SupportMatrixTestInjections).GetMethod(nameof(SupportMatrixTestInjections.SimplePrefix));
+            MethodBase target = SupportMatrixResolve.Ctor(typeof(object));
+            MethodBase injectionMethod = SupportMatrixResolve.Method(typeof(SupportMatrixTestInjections), nameof(SupportMatrixTestInjections.SimplePrefix));
             Injection[] injections = new Injection[]
             {
                 new Injection(injectionMethod, new InjectAt.Around(), "test", 0)
@@ -218,8 +230,8 @@ namespace Concord.Harmony.Tests
         public void ApplyToRoutedRejectsMisshapedConstructorAroundAtEmitLayer()
         {
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
-            MethodBase target = typeof(object).GetConstructor(Type.EmptyTypes);
-            MethodBase injectionMethod = typeof(SupportMatrixTestInjections).GetMethod(nameof(SupportMatrixTestInjections.SimplePrefix));
+            MethodBase target = SupportMatrixResolve.Ctor(typeof(object));
+            MethodBase injectionMethod = SupportMatrixResolve.Method(typeof(SupportMatrixTestInjections), nameof(SupportMatrixTestInjections.SimplePrefix));
 
             bridge.TryRoute(target, new Injection[]
             {
@@ -247,8 +259,8 @@ namespace Concord.Harmony.Tests
             TranspilerParticipant.Log = msg => logs.Add(msg);
             TranspilerParticipant.LastStreamFailure = null;
 
-            MethodBase target = typeof(SupportMatrixTestTargets).GetMethod(nameof(SupportMatrixTestTargets.SimpleTarget));
-            MethodBase injectionMethod = typeof(SupportMatrixTestInjections).GetMethod(nameof(SupportMatrixTestInjections.SimplePrefix));
+            MethodBase target = SupportMatrixResolve.Method(typeof(SupportMatrixTestTargets), nameof(SupportMatrixTestTargets.SimpleTarget));
+            MethodBase injectionMethod = SupportMatrixResolve.Method(typeof(SupportMatrixTestInjections), nameof(SupportMatrixTestInjections.SimplePrefix));
             TranspilerParticipant.Registry.Add(target, new Injection[]
             {
                 new Injection(injectionMethod, new InjectAt.Head(), "test", 0)

@@ -16,9 +16,29 @@ public sealed class ControlHandle<T> {
     public T ReturnValue { get; set; } = default!;
 
     /// <summary>
+    ///     The exception an At.Catch injection caught. Only an At.Catch injection can read it.
+    /// </summary>
+    public System.Exception Exception { get; } = null!;
+
+    /// <summary>
     ///     Marks the current injection as cancelling the original target invocation.
     /// </summary>
     public void Cancel() { } // NOSONAR recognized control call; concord lowers this into wrapper IL, body is never executed as-is
+
+    /// <summary>
+    ///     Cancels the original target invocation, and when <paramref name="skipRemainingHeads" /> is
+    ///     <see langword="true" /> also stops the head injections that would have run after this one.
+    /// </summary>
+    /// <param name="skipRemainingHeads">
+    ///     <see langword="true" /> to skip every later head injection as well as the target body;
+    ///     <see langword="false" /> only the target body. The overload is valid only in an At.Head injection.
+    /// </param>
+    public void Cancel(bool skipRemainingHeads) { } // NOSONAR recognized control call; concord lowers this into wrapper IL, body is never executed as-is
+
+    /// <summary>
+    ///     Resumes the throw a Cancel call stopped. Only an At.Catch injection can call it.
+    /// </summary>
+    public void Rethrow() { } // NOSONAR recognized control call; concord lowers this into wrapper IL, body is never executed as-is
 
     /// <summary>
     ///     Stores a value in this call's state slot. The slot is scoped to the declaring patch

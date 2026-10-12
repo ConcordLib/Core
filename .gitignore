@@ -14,3 +14,5 @@ Assemblies/
 
 # Coverage reports produced by `dotnet test --collect`
 coverage/
+
+tests/Concord.Host.Adapter.Tests/Integration/*/out/

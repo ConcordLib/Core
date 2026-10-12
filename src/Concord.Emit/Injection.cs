@@ -36,6 +36,24 @@ public sealed record Injection(MethodBase InjectionMethod, InjectAt At, string O
     public Type? RequestedInstantiation { get; set; }
 
     /// <summary>
+    ///     Whether a foreign patch host owns this injection instead of Concord. Foreign injections keep
+    ///     the host's own ordering and always run outside Concord's.
+    /// </summary>
+    public bool ForeignOrigin { get; set; }
+
+    /// <summary>
+    ///     Whether this injection also runs on the landing a cancelling head injection branches to,
+    ///     which a Concord-owned injection is otherwise skipped on.
+    /// </summary>
+    public bool ReplayOnCancel { get; set; }
+
+    /// <summary>
+    ///     Whether this injection runs after every foreign injection on the target, whichever side of
+    ///     Concord the position normally puts them on.
+    /// </summary>
+    public bool RunsAfterForeign { get; set; }
+
+    /// <summary>
     ///     The patch owners that should run after this injection.
     /// </summary>
     public IReadOnlyList<string> BeforeOwners { get; set; } = [];

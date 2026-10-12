@@ -43,6 +43,7 @@ internal static class CecilCodeConverter {
 
         foreach (Instruction instruction in body.Instructions) {
             CodeInstruction converted = new CodeInstruction(MapOpCode(instruction.OpCode), MapOperandToClr(instruction, context));
+            InstructionOrigins.CarryOver(instruction, converted);
             if (context.LabelsByInstruction.TryGetValue(instruction, out Label label)) {
                 converted.labels.Add(label);
             }
@@ -75,7 +76,9 @@ internal static class CecilCodeConverter {
 
         List<Instruction> emitted = new List<Instruction>(instructions.Count);
         foreach (CodeInstruction instruction in instructions) {
-            emitted.Add(CreateInstruction(instruction, definition, localsByIndex, module));
+            Instruction created = CreateInstruction(instruction, definition, localsByIndex, module);
+            InstructionOrigins.CarryOver(instruction, created);
+            emitted.Add(created);
         }
 
         Dictionary<Label, Instruction> instructionByLabel = BuildLabelMap(instructions, emitted);

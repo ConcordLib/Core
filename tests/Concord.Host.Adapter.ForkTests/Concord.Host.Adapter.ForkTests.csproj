@@ -1,0 +1,68 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Concord.Host.Adapter.ForkTests</RootNamespace>
+    <AssemblyName>Concord.Host.Adapter.ForkTests</AssemblyName>
+    <OutputType>Exe</OutputType>
+    <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ForkRuntimeDir Condition="'$(ForkRuntimeDir)' == ''">/mnt/games/SteamLibrary/steamapps/common/RimWorld</ForkRuntimeDir>
+    <HarmonyDir Condition="'$(HarmonyDir)' == ''">/mnt/games/RimWorld/Mods/Harmony-net10/1.7/Assemblies</HarmonyDir>
+    <SkipForkRuntimeOverlay Condition="'$(SkipForkRuntimeOverlay)' == ''">false</SkipForkRuntimeOverlay>
+    <NoWarn>$(NoWarn);xUnit3003</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Using Include="System.Reflection.Metadata"/>
+    <Using Include="System.Reflection.Metadata.Ecma335"/>
+    <Using Include="Concord.Emit"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="dnlib" Version="4.5.0"/>
+    <PackageReference Include="xunit.v3" Version="4.0.1"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../Concord.Host.Adapter.Tests/RealBodies.cs" Link="RealBodies.cs"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Concord.Host.Adapter/Concord.Host.Adapter.csproj"/>
+    <!-- Order-only: build the merged runtime first, but do not let MSBuild pick its reference,
+         which resolves to the metadata-only Concord.Ref output instead of the ILRepack result. -->
+    <ProjectReference Include="../../src/Concord/Concord.csproj" ReferenceOutputAssembly="false"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Concord">
+      <HintPath>../../Assemblies/$(TargetFramework)/Concord.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('$(HarmonyDir)/0Harmony.dll')">
+    <Reference Include="0Harmony">
+      <HintPath>$(HarmonyDir)/0Harmony.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="RequireForkRuntime" BeforeTargets="Build"
+          Condition="'$(SkipForkRuntimeOverlay)' != 'true' And !Exists('$(ForkRuntimeDir)/libcoreclr.so')">
+    <Error Text="ForkRuntimeDir '$(ForkRuntimeDir)' has no libcoreclr.so, so the facts in this project would silently run off-fork and report every fact [SKIP]. Pass -p:ForkRuntimeDir=&lt;path&gt; pointing at the fork runtime, or -p:SkipForkRuntimeOverlay=true to build off-fork on purpose."/>
+  </Target>
+
+  <Target Name="OverlayForkRuntime" AfterTargets="Build"
+          Condition="Exists('$(ForkRuntimeDir)/libcoreclr.so')">
+    <ItemGroup>
+      <ForkCandidate Include="$(ForkRuntimeDir)/*"/>
+      <ForkOverlay Include="@(ForkCandidate)" Condition="Exists('$(OutDir)%(Filename)%(Extension)')"/>
+    </ItemGroup>
+    <Copy SourceFiles="@(ForkOverlay)" DestinationFolder="$(OutDir)"/>
+    <Message Importance="high" Text="fork overlay: @(ForkOverlay->Count()) files from $(ForkRuntimeDir)"/>
+  </Target>
+
+</Project>

@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <RootNamespace>Concord.Waylith.ReachCensus.Fixture</RootNamespace>
+    <AssemblyName>ReachCensusFixture</AssemblyName>
+    <OutputPath>bin/fixture</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <DebugType>embedded</DebugType>
+    <NoWarn>$(NoWarn);CS0169;CS0414;IDE0051</NoWarn>
+    <FixtureAttributeNamespace Condition="'$(FixtureAttributeNamespace)' == ''">HarmonyLib</FixtureAttributeNamespace>
+    <DefineConstants>$(DefineConstants);FIXTURE</DefineConstants>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(FixtureAttributeNamespace)' != 'HarmonyLib'">
+    <AssemblyName>ReachCensusFixtureBlank</AssemblyName>
+    <OutputPath>bin/blank</OutputPath>
+    <DefineConstants>$(DefineConstants);BLANK</DefineConstants>
+  </PropertyGroup>
+
+</Project>

@@ -19,6 +19,13 @@ public static class ControlReturnTargets {
 public static class ControlReturnInjectionMethods {
     public static int FinallyRan;
 
+    public static int ContinueObservedRuns;
+
+    public static Control ContinueObserved() {
+        ContinueObservedRuns++;
+        return Control.Continue;
+    }
+
     public static Control CancelAlways() {
         return Control.Cancel;
     }
@@ -102,15 +109,17 @@ public sealed class ControlReturnTests {
     public void Compose_StackedHeads_ContinueDoesNotUncancel() {
         MethodBase target = typeof(ControlReturnTargets).GetMethod(nameof(ControlReturnTargets.VoidWork))!;
         MethodBase cancel = typeof(ControlReturnInjectionMethods).GetMethod(nameof(ControlReturnInjectionMethods.CancelAlways))!;
-        MethodBase cont = typeof(ControlReturnInjectionMethods).GetMethod(nameof(ControlReturnInjectionMethods.ContinueAlways))!;
-        Injection first = new Injection(cancel, new InjectAt.Head(), "test", 0);
-        Injection second = new Injection(cont, new InjectAt.Head(), "test", 1);
+        MethodBase cont = typeof(ControlReturnInjectionMethods).GetMethod(nameof(ControlReturnInjectionMethods.ContinueObserved))!;
+        Injection runsFirst = new Injection(cancel, new InjectAt.Head(), "test", 0);
+        Injection runsSecond = new Injection(cont, new InjectAt.Head(), "test", 1);
 
         ControlReturnTargets.SpineRuns = 0;
-        ComposeResult result = WrapperComposer.Compose(target, [first, second]);
+        ControlReturnInjectionMethods.ContinueObservedRuns = 0;
+        ComposeResult result = WrapperComposer.Compose(target, [runsSecond, runsFirst]);
         result.Wrapper.Invoke(null, []);
 
         Assert.Equal(0, ControlReturnTargets.SpineRuns);
+        Assert.Equal(1, ControlReturnInjectionMethods.ContinueObservedRuns);
     }
 
     [Fact]

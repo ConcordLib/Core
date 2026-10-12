@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Concord.Host.Adapter.Tests</RootNamespace>
+    <AssemblyName>Concord.Host.Adapter.Tests</AssemblyName>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Using Include="System.Reflection.Metadata"/>
+    <Using Include="System.Reflection.Metadata.Ecma335"/>
+    <Using Include="Concord.Emit"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="Integration/**"/>
+    <None Remove="Integration/**"/>
+    <EmbeddedResource Remove="Integration/**"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="dnlib" Version="4.5.0"/>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.7.0"/>
+    <PackageReference Include="xunit" Version="2.9.3"/>
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Concord.Host.Adapter/Concord.Host.Adapter.csproj"/>
+    <!-- Order-only: build the merged runtime first, but do not let MSBuild pick its reference,
+         which resolves to the metadata-only Concord.Ref output instead of the ILRepack result. -->
+    <ProjectReference Include="../../src/Concord/Concord.csproj" ReferenceOutputAssembly="false"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Concord">
+      <HintPath>../../Assemblies/$(TargetFramework)/Concord.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+</Project>

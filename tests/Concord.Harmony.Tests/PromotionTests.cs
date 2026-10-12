@@ -19,7 +19,7 @@ public class PromotionTests
     public void ForeignPatchAfterConcordDetour_PromotesToBridge_AndBothRun()
     {
         PromotionLog.Entries.Clear();
-        MethodBase target = typeof(PromotionTarget).GetMethod(nameof(PromotionTarget.Compute));
+        MethodBase target = Method(typeof(PromotionTarget), nameof(PromotionTarget.Compute));
         HarmonyLib.Harmony foreign = new HarmonyLib.Harmony("test.foreign.promotion");
 
         RoutingDetourBackend router = new RoutingDetourBackend(new MonoModDetourBackend(), Noop);
@@ -43,7 +43,7 @@ public class PromotionTests
             // Harmony finishes building its wrapper.
             foreign.Patch(
                 target,
-                prefix: new HarmonyMethod(typeof(PromotionMods).GetMethod(nameof(PromotionMods.ForeignPrefix))));
+                prefix: new HarmonyMethod(Method(typeof(PromotionMods), nameof(PromotionMods.ForeignPrefix))));
 
             Assert.Equal(RouteState.Bridge, router.GetRoute(target));
 
@@ -62,7 +62,7 @@ public class PromotionTests
     public void ForeignUnpatch_LeavesPromotedMethodOnTheBridge()
     {
         PromotionLog.Entries.Clear();
-        MethodBase target = typeof(UnpatchTarget).GetMethod(nameof(UnpatchTarget.Compute));
+        MethodBase target = Method(typeof(UnpatchTarget), nameof(UnpatchTarget.Compute));
         HarmonyLib.Harmony foreign = new HarmonyLib.Harmony("test.foreign.unpatch");
 
         RoutingDetourBackend router = new RoutingDetourBackend(new MonoModDetourBackend(), Noop);
@@ -77,7 +77,7 @@ public class PromotionTests
 
             foreign.Patch(
                 target,
-                prefix: new HarmonyMethod(typeof(PromotionMods).GetMethod(nameof(PromotionMods.UnpatchForeignPrefix))));
+                prefix: new HarmonyMethod(Method(typeof(PromotionMods), nameof(PromotionMods.UnpatchForeignPrefix))));
             Assert.Equal(RouteState.Bridge, router.GetRoute(target));
 
             TestUnpatch.Own(foreign, "test.foreign.unpatch");
@@ -105,8 +105,8 @@ public class PromotionTests
         }
 
         PromotionLog.Entries.Clear();
-        MethodBase patched = typeof(SharedRouteTarget<string>).GetMethod(nameof(SharedRouteTarget<string>.Compute));
-        MethodBase sibling = typeof(SharedRouteTarget<Version>).GetMethod(nameof(SharedRouteTarget<Version>.Compute));
+        MethodBase patched = Method(typeof(SharedRouteTarget<string>), nameof(SharedRouteTarget<string>.Compute));
+        MethodBase sibling = Method(typeof(SharedRouteTarget<Version>), nameof(SharedRouteTarget<Version>.Compute));
         HarmonyLib.Harmony foreign = new HarmonyLib.Harmony("test.foreign.sharedroute");
 
         RoutingDetourBackend router = new RoutingDetourBackend(new MonoModDetourBackend(), Noop);
@@ -118,7 +118,7 @@ public class PromotionTests
 
             foreign.Patch(
                 patched,
-                postfix: new HarmonyMethod(typeof(PromotionMods).GetMethod(nameof(PromotionMods.SharedRouteForeignPostfix))));
+                postfix: new HarmonyMethod(Method(typeof(PromotionMods), nameof(PromotionMods.SharedRouteForeignPostfix))));
 
             // The sibling instantiation is a different MethodBase but the same native body, so Harmony
             // already owns this entry point and Concord must bridge rather than detour over it.
@@ -143,7 +143,7 @@ public class PromotionTests
     [Fact]
     public void ConcordOwnRebuilds_DoNotRecurseThroughTheNotifier()
     {
-        MethodBase target = typeof(RecursionTarget).GetMethod(nameof(RecursionTarget.Compute));
+        MethodBase target = Method(typeof(RecursionTarget), nameof(RecursionTarget.Compute));
         HarmonyLib.Harmony foreign = new HarmonyLib.Harmony("test.foreign.recursion");
 
         CountingObserver observer = new CountingObserver();
@@ -171,9 +171,14 @@ public class PromotionTests
     {
     }
 
+    private static MethodInfo Method(Type type, string name)
+    {
+        return type.GetMethod(name) ?? throw new InvalidOperationException(type.Name + "." + name + " not found");
+    }
+
     private static Injection HeadOf(string name)
     {
-        return new Injection(typeof(PromotionMods).GetMethod(name), new InjectAt.Head(), "test.concord.promotion", 0);
+        return new Injection(Method(typeof(PromotionMods), name), new InjectAt.Head(), "test.concord.promotion", 0);
     }
 
     private sealed class CountingObserver : IForeignPatchObserver

@@ -285,7 +285,7 @@ namespace Concord.Harmony.Tests
             {
                 if (nested.Name.Contains("Iterate"))
                 {
-                    MethodInfo moveNext = nested.GetMethod("MoveNext", BindingFlags.NonPublic | BindingFlags.Instance);
+                    MethodInfo? moveNext = nested.GetMethod("MoveNext", BindingFlags.NonPublic | BindingFlags.Instance);
                     if (moveNext != null)
                     {
                         return moveNext;
@@ -312,6 +312,11 @@ namespace Concord.Harmony.Tests
     [Collection("HarmonySerial")]
     public sealed class ExceptionRegionCoexistenceTests
     {
+        private static MethodInfo Method(Type type, string name)
+        {
+            return type.GetMethod(name) ?? throw new InvalidOperationException(type.Name + "." + name + " not found");
+        }
+
         private static Injection MakeHeadInjection(MethodInfo method, string owner)
         {
             return new Injection(method, new InjectAt.Head(), owner, 0);
@@ -320,11 +325,11 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void TryCatch_ConcordHeadInjection_ThrowingAndNonThrowingPathsBothPreserved()
         {
-            MethodInfo target = typeof(TryCatchTarget).GetMethod(nameof(TryCatchTarget.Run));
-            MethodInfo headMethod = typeof(TryCatchMods).GetMethod(nameof(TryCatchMods.ConcordHead));
+            MethodInfo target = Method(typeof(TryCatchTarget), nameof(TryCatchTarget.Run));
+            MethodInfo headMethod = Method(typeof(TryCatchMods), nameof(TryCatchMods.ConcordHead));
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
             try
             {
                 result = bridge.TryRoute(target, new[] { MakeHeadInjection(headMethod, "test.trycatch") }, true);
@@ -349,11 +354,11 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void TryFinally_ConcordHeadInjection_FinallyRunsOnBothNormalReturnAndPropagatedException()
         {
-            MethodInfo target = typeof(TryFinallyTarget).GetMethod(nameof(TryFinallyTarget.Run));
-            MethodInfo headMethod = typeof(TryFinallyMods).GetMethod(nameof(TryFinallyMods.ConcordHead));
+            MethodInfo target = Method(typeof(TryFinallyTarget), nameof(TryFinallyTarget.Run));
+            MethodInfo headMethod = Method(typeof(TryFinallyMods), nameof(TryFinallyMods.ConcordHead));
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
             try
             {
                 result = bridge.TryRoute(target, new[] { MakeHeadInjection(headMethod, "test.tryfinally") }, true);
@@ -378,11 +383,11 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void TryCatchFinally_ConcordHeadInjection_CaughtUncaughtAndNonThrowingPathsAllRunFinally()
         {
-            MethodInfo target = typeof(TryCatchFinallyTarget).GetMethod(nameof(TryCatchFinallyTarget.Run));
-            MethodInfo headMethod = typeof(TryCatchFinallyMods).GetMethod(nameof(TryCatchFinallyMods.ConcordHead));
+            MethodInfo target = Method(typeof(TryCatchFinallyTarget), nameof(TryCatchFinallyTarget.Run));
+            MethodInfo headMethod = Method(typeof(TryCatchFinallyMods), nameof(TryCatchFinallyMods.ConcordHead));
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
             try
             {
                 result = bridge.TryRoute(target, new[] { MakeHeadInjection(headMethod, "test.trycatchfinally") }, true);
@@ -411,11 +416,11 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void MultiCatch_ConcordHeadInjection_EachCatchClauseAndNonThrowingPathAllPreserved()
         {
-            MethodInfo target = typeof(MultiCatchTarget).GetMethod(nameof(MultiCatchTarget.Run));
-            MethodInfo headMethod = typeof(MultiCatchMods).GetMethod(nameof(MultiCatchMods.ConcordHead));
+            MethodInfo target = Method(typeof(MultiCatchTarget), nameof(MultiCatchTarget.Run));
+            MethodInfo headMethod = Method(typeof(MultiCatchMods), nameof(MultiCatchMods.ConcordHead));
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
             try
             {
                 result = bridge.TryRoute(target, new[] { MakeHeadInjection(headMethod, "test.multicatch") }, true);
@@ -445,11 +450,11 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void NestedTryInsideCatch_ConcordHeadInjection_OuterAndInnerThrowingAndNonThrowingPathsAllPreserved()
         {
-            MethodInfo target = typeof(NestedTryInCatchTarget).GetMethod(nameof(NestedTryInCatchTarget.Run));
-            MethodInfo headMethod = typeof(NestedTryInCatchMods).GetMethod(nameof(NestedTryInCatchMods.ConcordHead));
+            MethodInfo target = Method(typeof(NestedTryInCatchTarget), nameof(NestedTryInCatchTarget.Run));
+            MethodInfo headMethod = Method(typeof(NestedTryInCatchMods), nameof(NestedTryInCatchMods.ConcordHead));
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
             try
             {
                 result = bridge.TryRoute(target, new[] { MakeHeadInjection(headMethod, "test.nestedtry") }, true);
@@ -479,11 +484,11 @@ namespace Concord.Harmony.Tests
         [Fact(Skip = "Confirmed a Harmony 2.4.2 bug, not a Concord bridge limitation: HarmonyLib.MethodBodyReader.ParseExceptions never emits a BeginCatchBlock marker at a filter clause's own HandlerOffset (only BeginExceptFilterBlock at FilterOffset), so no transpiler - including a completely pass-through one - can round-trip a 'when' filter through Harmony's own CodeInstruction model. Reproduced standalone: Harmony.Patch(target, transpiler: <identity transpiler returning instructions unchanged>) on a method with a when-clause throws the identical 'Incorrect code generation for exception block' from RuntimeILGenerator.EndExceptionBlock, with zero Concord code involved. Concord's own model (CecilCodeConverter) correctly requires and represents the missing HandlerStart marker when reading a filter clause from a real Cecil body; the gap is entirely upstream, in what Harmony hands transpilers. Revisit only if a future Harmony version fixes ParseExceptions's Filter case, or if the bridge independently re-parses original.GetMethodBody().ExceptionHandlingClauses to recover HandlerOffset (out of scope here).")]
         public void ExceptionFilter_ConcordHeadInjection_FilterMatchNonMatchAndNonThrowingPathsAllPreserved()
         {
-            MethodInfo target = typeof(ExceptionFilterTarget).GetMethod(nameof(ExceptionFilterTarget.Run));
-            MethodInfo headMethod = typeof(ExceptionFilterMods).GetMethod(nameof(ExceptionFilterMods.ConcordHead));
+            MethodInfo target = Method(typeof(ExceptionFilterTarget), nameof(ExceptionFilterTarget.Run));
+            MethodInfo headMethod = Method(typeof(ExceptionFilterMods), nameof(ExceptionFilterMods.ConcordHead));
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
             try
             {
                 result = bridge.TryRoute(target, new[] { MakeHeadInjection(headMethod, "test.filter") }, true);
@@ -518,10 +523,10 @@ namespace Concord.Harmony.Tests
             }
 
             MethodInfo target = IteratorFaultTarget.ResolveMoveNext();
-            MethodInfo headMethod = typeof(IteratorFaultMods).GetMethod(nameof(IteratorFaultMods.ConcordHead));
+            MethodInfo headMethod = Method(typeof(IteratorFaultMods), nameof(IteratorFaultMods.ConcordHead));
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
             try
             {
                 result = bridge.TryRoute(target, new[] { MakeHeadInjection(headMethod, "test.fault") }, true);

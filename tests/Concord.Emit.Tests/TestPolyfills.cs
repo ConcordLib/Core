@@ -21,6 +21,14 @@ internal sealed class SkipOnMonoFactAttribute : FactAttribute {
     }
 }
 
+internal sealed class MonoOnlyTheoryAttribute : TheoryAttribute {
+    public MonoOnlyTheoryAttribute() {
+        if (Type.GetType("Mono.Runtime") is null) {
+            Skip = "the function-pointer fence only arms on mono, the runtime where reflecting over one overflows the process stack.";
+        }
+    }
+}
+
 internal static class TestPolyfills {
     public static long GetAllocatedBytes() {
 #if NET

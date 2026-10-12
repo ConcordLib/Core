@@ -11,6 +11,7 @@
     <Project Path="src/Concord.Harmony/Concord.Harmony.csproj"/>
     <Project Path="src/Concord.HarmonyX/Concord.HarmonyX.csproj"/>
     <Project Path="src/Concord.Ref/Concord.Ref.csproj"/>
+    <Project Path="src/Concord.Host.Adapter/Concord.Host.Adapter.csproj"/>
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Concord.Analyzers.Tests/Concord.Analyzers.Tests.csproj"/>
@@ -26,6 +27,7 @@
     <Project Path="tests/Concord.Orchestration.Tests.RollbackAssembly/Concord.Orchestration.Tests.RollbackAssembly.csproj"/>
     <Project Path="tests/Concord.Orchestration.Tests.RegistryAssembly/Concord.Orchestration.Tests.RegistryAssembly.csproj"/>
     <Project Path="tests/Concord.Generators.Tests.Consumer/Concord.Generators.Tests.Consumer.csproj"/>
+    <Project Path="tests/Concord.Host.Adapter.Tests/Concord.Host.Adapter.Tests.csproj"/>
   </Folder>
   <Folder Name="/bench/">
     <Project Path="bench/Concord.Benchmarks/Concord.Benchmarks.csproj"/>

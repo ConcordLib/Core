@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Reflection.Emit;
@@ -12,7 +13,7 @@ namespace Concord.Harmony.Tests
 {
     public static class BridgeGetExecTarget
     {
-        public static Assembly Observed;
+        public static Assembly? Observed;
 
         public static List<string> Entries = new List<string>();
 
@@ -40,17 +41,22 @@ namespace Concord.Harmony.Tests
     [Collection("HarmonySerial")]
     public sealed class GetExecutingAssemblyBridgeTests
     {
+        private static MethodInfo Method(Type type, string name)
+        {
+            return type.GetMethod(name) ?? throw new InvalidOperationException(type.Name + "." + name + " not found");
+        }
+
         [Fact]
         public void RoutedInjection_CallingGetExecutingAssembly_ObservesInjectionAssembly()
         {
-            MethodInfo target = typeof(BridgeGetExecTarget).GetMethod(nameof(BridgeGetExecTarget.Contested));
-            MethodInfo headMethod = typeof(BridgeGetExecMods).GetMethod(nameof(BridgeGetExecMods.ConcordHead));
-            MethodInfo postfix = typeof(BridgeGetExecMods).GetMethod(nameof(BridgeGetExecMods.Postfix));
+            MethodInfo target = Method(typeof(BridgeGetExecTarget), nameof(BridgeGetExecTarget.Contested));
+            MethodInfo headMethod = Method(typeof(BridgeGetExecMods), nameof(BridgeGetExecMods.ConcordHead));
+            MethodInfo postfix = Method(typeof(BridgeGetExecMods), nameof(BridgeGetExecMods.Postfix));
 
             HarmonyLib.Harmony harmony = new HarmonyLib.Harmony("test.getexec");
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
             try
             {
                 harmony.Patch(target, postfix: new HarmonyMethod(postfix));
@@ -90,6 +96,11 @@ namespace Concord.Harmony.Tests
     [Collection("HarmonySerial")]
     public sealed class GetExecutingAssemblyTranspilerGuardBridgeTests
     {
+        private static MethodInfo Method(Type type, string name)
+        {
+            return type.GetMethod(name) ?? throw new InvalidOperationException(type.Name + "." + name + " not found");
+        }
+
         [Fact]
         public void StreamTranspilerEmittingGetExecutingAssembly_RejectsStreamWithConc143()
         {
@@ -97,8 +108,8 @@ namespace Concord.Harmony.Tests
             TranspilerParticipant.Log = msg => logs.Add(msg);
             TranspilerParticipant.LastStreamFailure = null;
 
-            MethodBase target = typeof(BridgeGetExecTarget).GetMethod(nameof(BridgeGetExecTarget.Contested));
-            MethodBase transpiler = typeof(BridgeGetExecTranspilers).GetMethod(nameof(BridgeGetExecTranspilers.EmitGetExecutingAssembly));
+            MethodBase target = Method(typeof(BridgeGetExecTarget), nameof(BridgeGetExecTarget.Contested));
+            MethodBase transpiler = Method(typeof(BridgeGetExecTranspilers), nameof(BridgeGetExecTranspilers.EmitGetExecutingAssembly));
             TranspilerParticipant.Registry.Add(target, new Injection[]
             {
                 new Injection(transpiler, new InjectAt.Transpiler(), "test.concord", 0)

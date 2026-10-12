@@ -52,6 +52,7 @@ internal sealed class SpineCopy {
         Dictionary<Instruction, Instruction> instructionMap = new Dictionary<Instruction, Instruction>(template.Instructions.Count);
         foreach (Instruction source in template.Instructions) {
             Instruction copy = CloneInstruction(source, variableMap);
+            InstructionOrigins.CarryOver(source, copy);
             instructionMap[source] = copy;
             scratchBody.Instructions.Add(copy);
         }

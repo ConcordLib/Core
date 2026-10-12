@@ -8,11 +8,29 @@ namespace Concord.Emit;
 ///     composition - which re-runs on every patch and unpatch of a target - never falls back to
 ///     <see cref="MethodBase.Invoke(object, object[])" /> per call.
 /// </summary>
-internal static class TranspilerInvoker {
+public static class TranspilerInvoker {
     private static readonly object CacheLock = new object();
 
     private static readonly Dictionary<MethodBase, Func<IEnumerable<CodeInstruction>, ITranspilerContext, IEnumerable<CodeInstruction>>> Cache =
         new Dictionary<MethodBase, Func<IEnumerable<CodeInstruction>, ITranspilerContext, IEnumerable<CodeInstruction>>>();
+
+    private static readonly List<Func<MethodInfo, Func<IEnumerable<CodeInstruction>, ITranspilerContext, IEnumerable<CodeInstruction>>?>> ForeignShapes =
+        new List<Func<MethodInfo, Func<IEnumerable<CodeInstruction>, ITranspilerContext, IEnumerable<CodeInstruction>>?>>();
+
+    /// <summary>
+    ///     Registers a compiler for a transpiler signature Concord does not recognise itself, such as a
+    ///     foreign patch library's. It returns <see langword="null" /> for a method it does not own.
+    /// </summary>
+    /// <param name="compiler">Maps a static method to a Concord-shaped delegate, or returns <see langword="null" /> to pass.</param>
+    public static void AddShape(Func<MethodInfo, Func<IEnumerable<CodeInstruction>, ITranspilerContext, IEnumerable<CodeInstruction>>?> compiler) {
+        if (compiler is null) {
+            throw new ArgumentNullException(nameof(compiler));
+        }
+
+        lock (CacheLock) {
+            ForeignShapes.Add(compiler);
+        }
+    }
 
     /// <summary>
     ///     Runs <paramref name="transpiler" /> against <paramref name="input" />, fully materializing its
@@ -68,10 +86,30 @@ internal static class TranspilerInvoker {
                 $"Transpiler method '{transpiler.DeclaringType?.Name}.{transpiler.Name}' must be static. A [Patch] declaration is abstract, so an instance transpiler can never be invoked.");
         }
 
-        if (transpiler is not MethodInfo method || method.ReturnType != typeof(IEnumerable<CodeInstruction>)) {
-            throw new ConcordEmitException(
-                "CONC116",
-                $"Transpiler method '{transpiler.DeclaringType?.Name}.{transpiler.Name}' must return IEnumerable<CodeInstruction>.");
+        if (transpiler is MethodInfo method) {
+            Func<IEnumerable<CodeInstruction>, ITranspilerContext, IEnumerable<CodeInstruction>>? native = CompileNative(method);
+            if (native is not null) {
+                return native;
+            }
+
+            foreach (Func<MethodInfo, Func<IEnumerable<CodeInstruction>, ITranspilerContext, IEnumerable<CodeInstruction>>?> shape in ForeignShapes) {
+                Func<IEnumerable<CodeInstruction>, ITranspilerContext, IEnumerable<CodeInstruction>>? foreign = shape(method);
+                if (foreign is not null) {
+                    return foreign;
+                }
+            }
+        }
+
+        throw new ConcordEmitException(
+            "CONC116",
+            $"Transpiler method '{transpiler.DeclaringType?.Name}.{transpiler.Name}' has signature {Describe(transpiler)}. " +
+            "It must return IEnumerable<CodeInstruction> and accept (IEnumerable<CodeInstruction> instructions) or " +
+            "(IEnumerable<CodeInstruction> instructions, ITranspilerContext context), or match a shape a foreign patch host registered.");
+    }
+
+    private static Func<IEnumerable<CodeInstruction>, ITranspilerContext, IEnumerable<CodeInstruction>>? CompileNative(MethodInfo method) {
+        if (method.ReturnType != typeof(IEnumerable<CodeInstruction>)) {
+            return null;
         }
 
         ParameterInfo[] parameters = method.GetParameters();
@@ -92,9 +130,33 @@ internal static class TranspilerInvoker {
             return (instructions, _) => single(instructions);
         }
 
-        throw new ConcordEmitException(
-            "CONC116",
-            $"Transpiler method '{transpiler.DeclaringType?.Name}.{transpiler.Name}' must accept " +
-            "(IEnumerable<CodeInstruction> instructions) or (IEnumerable<CodeInstruction> instructions, ITranspilerContext context).");
+        return null;
+    }
+
+    private static string Describe(MethodBase method) {
+        ParameterInfo[] parameters = method.GetParameters();
+        string[] names = new string[parameters.Length];
+        for (int i = 0; i < parameters.Length; i++) {
+            names[i] = TypeName(parameters[i].ParameterType);
+        }
+
+        string returnType = method is MethodInfo info ? TypeName(info.ReturnType) : "void";
+        return returnType + " (" + string.Join(", ", names) + ")";
+    }
+
+    private static string TypeName(Type type) {
+        if (!type.IsGenericType) {
+            return type.Name;
+        }
+
+        Type[] arguments = type.GetGenericArguments();
+        string[] names = new string[arguments.Length];
+        for (int i = 0; i < arguments.Length; i++) {
+            names[i] = TypeName(arguments[i]);
+        }
+
+        string bare = type.Name;
+        int tick = bare.IndexOf('`');
+        return (tick < 0 ? bare : bare.Substring(0, tick)) + "<" + string.Join(", ", names) + ">";
     }
 }

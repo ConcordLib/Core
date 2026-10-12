@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -37,7 +38,7 @@ public class PatchOwnersBridgeTests
     [Fact]
     public void OwnersOf_StillNamesTheOwner_AfterTheTargetMovesOntoTheBridge()
     {
-        MethodBase target = typeof(OwnersBridgeTarget).GetMethod(nameof(OwnersBridgeTarget.Compute));
+        MethodBase target = Method(typeof(OwnersBridgeTarget), nameof(OwnersBridgeTarget.Compute));
         HarmonyLib.Harmony foreign = new HarmonyLib.Harmony("test.foreign.owners");
 
         RoutingDetourBackend router = new RoutingDetourBackend(new MonoModDetourBackend(), Noop);
@@ -53,7 +54,7 @@ public class PatchOwnersBridgeTests
 
             foreign.Patch(
                 target,
-                prefix: new HarmonyMethod(typeof(OwnersBridgeMods).GetMethod(nameof(OwnersBridgeMods.ForeignPrefix))));
+                prefix: new HarmonyMethod(Method(typeof(OwnersBridgeMods), nameof(OwnersBridgeMods.ForeignPrefix))));
 
             // The injections now live in Harmony's wrapper, so only the bridge can still name the owner.
             Assert.Equal(RouteState.Bridge, router.GetRoute(target));
@@ -70,10 +71,15 @@ public class PatchOwnersBridgeTests
     {
     }
 
+    private static MethodInfo Method(Type type, string name)
+    {
+        return type.GetMethod(name) ?? throw new InvalidOperationException(type.Name + "." + name + " not found");
+    }
+
     private static Injection Head()
     {
         return new Injection(
-            typeof(OwnersBridgeMods).GetMethod(nameof(OwnersBridgeMods.ConcordHead)),
+            Method(typeof(OwnersBridgeMods), nameof(OwnersBridgeMods.ConcordHead)),
             new InjectAt.Head(),
             "test.concord.owners",
             0);

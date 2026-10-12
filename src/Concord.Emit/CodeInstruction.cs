@@ -25,6 +25,7 @@ public sealed class CodeInstruction {
         operand = other.operand;
         labels = new List<Label>(other.labels);
         blocks = new List<ExceptionBlock>(other.blocks);
+        Emit.InstructionOrigins.CarryOver(other, this);
     }
 
     /// <summary>The opcode.</summary>

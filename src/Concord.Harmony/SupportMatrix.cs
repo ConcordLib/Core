@@ -1,5 +1,3 @@
-#nullable disable
-
 using System;
 using System.Collections.Generic;
 using System.Reflection;
@@ -13,18 +11,25 @@ namespace Concord.Harmony
     {
         private static readonly Dictionary<short, OpCode> OpCodesByValue = BuildOpCodeTable();
 
-        private static readonly ConstructorInfo PatchesCtor = WidestPatchesCtor();
+        private static readonly ConstructorInfo? PatchesCtor = WidestPatchesCtor();
 
-        private static readonly FieldInfo[] IncomingFields = MatchIncomingFields(PatchesCtor);
+        private static readonly FieldInfo?[] IncomingFields = MatchIncomingFields(PatchesCtor);
 
-        internal static Patches Incoming(PatchInfo patchInfo)
+        private static readonly Version[] MeasuredReleases = { new Version(2, 4, 2), new Version(3, 0, 0) };
+
+        private static readonly Dictionary<Version, string> RefusedReleases = new Dictionary<Version, string>
+        {
+            [new Version(2, 4, 1)] = "MonoMod.Core.DetourFactory carries no SetCurrentFactory and its lazyCurrent field is typed as the concrete PlatformTripleDetourFactory",
+        };
+
+        internal static Patches? Incoming(PatchInfo? patchInfo)
         {
             if (patchInfo == null || PatchesCtor == null)
             {
                 return null;
             }
 
-            object[] args = new object[IncomingFields.Length];
+            object?[] args = new object?[IncomingFields.Length];
             for (int i = 0; i < args.Length; i++)
             {
                 args[i] = IncomingFields[i]?.GetValue(patchInfo);
@@ -33,9 +38,40 @@ namespace Concord.Harmony
             return (Patches)PatchesCtor.Invoke(args);
         }
 
-        internal static string Validate(MethodBase target, IReadOnlyList<Injection> added, Patches patchInfo)
+        internal static string? BackstopRefusal()
         {
-            string hostReason = ValidateHost(target, added, patchInfo);
+            return BackstopRefusal(UpdateWrapperHook.HarmonyVersionText(), typeof(HarmonyLib.Harmony).Assembly);
+        }
+
+        internal static string? BackstopRefusal(string? harmonyVersionText)
+        {
+            return BackstopRefusal(harmonyVersionText, null);
+        }
+
+        internal static string? BackstopRefusal(string? harmonyVersionText, Assembly? copy)
+        {
+            if (!Version.TryParse(harmonyVersionText, out Version? version) || version.Build < 0)
+            {
+                return "Harmony version '" + (harmonyVersionText ?? "null") + "' does not parse as a three-part version, so the detour backstop stays asleep";
+            }
+
+            Version release = new Version(version.Major, version.Minor, version.Build);
+            if (RefusedReleases.TryGetValue(release, out string? lacking))
+            {
+                return "Harmony " + version + " is refused: this build measured it and " + lacking + ", so the detour backstop stays asleep";
+            }
+
+            if (Array.IndexOf(MeasuredReleases, release) < 0)
+            {
+                return "Harmony " + version + " is unchecked: this build measured only " + string.Join<Version>(" and ", MeasuredReleases) + ", so the detour backstop stays asleep";
+            }
+
+            return ShapeRefusal(version, copy);
+        }
+
+        internal static string? Validate(MethodBase target, IReadOnlyList<Injection> added, Patches? patchInfo)
+        {
+            string? hostReason = ValidateHost(target, added, patchInfo);
             if (hostReason != null)
             {
                 return hostReason;
@@ -55,7 +91,7 @@ namespace Concord.Harmony
 
         internal static bool BodyCalls(MethodBase method, Func<MethodBase, bool> predicate)
         {
-            MethodBody body = method.GetMethodBody();
+            MethodBody? body = method.GetMethodBody();
             if (body == null)
             {
                 return false;
@@ -63,7 +99,12 @@ namespace Concord.Harmony
 
             try
             {
-                byte[] il = body.GetILAsByteArray();
+                byte[]? il = body.GetILAsByteArray();
+                if (il == null)
+                {
+                    return true;
+                }
+
                 int position = 0;
                 while (position < il.Length)
                 {
@@ -82,7 +123,7 @@ namespace Concord.Harmony
 
                     if (opcode.OperandType == OperandType.InlineMethod)
                     {
-                        MethodBase called = ResolveCalled(method, BitConverter.ToInt32(il, position));
+                        MethodBase? called = ResolveCalled(method, BitConverter.ToInt32(il, position));
                         if (called != null && predicate(called))
                         {
                             return true;
@@ -100,9 +141,26 @@ namespace Concord.Harmony
             }
         }
 
-        private static partial string ValidateHost(MethodBase target, IReadOnlyList<Injection> added, Patches patchInfo);
+        private static partial string? ValidateHost(MethodBase target, IReadOnlyList<Injection> added, Patches? patchInfo);
 
-        private static MethodBase ResolveCalled(MethodBase method, int token)
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S3011", Justification = "The merged MonoMod.Core.DetourFactory is internal in a repacked 0Harmony, so its presence can only be probed non-publicly.")]
+        private static string? ShapeRefusal(Version version, Assembly? copy)
+        {
+            if (copy == null)
+            {
+                return null;
+            }
+
+            Type? factory = copy.GetType("MonoMod.Core.DetourFactory");
+            if (factory?.GetMethod("SetCurrentFactory", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static) == null)
+            {
+                return "Harmony " + version + " carries no MonoMod.Core.DetourFactory.SetCurrentFactory, so this 0Harmony is not the build its version names, and the detour backstop stays asleep";
+            }
+
+            return null;
+        }
+
+        private static MethodBase? ResolveCalled(MethodBase method, int token)
         {
             try
             {
@@ -114,9 +172,9 @@ namespace Concord.Harmony
             }
         }
 
-        private static ConstructorInfo WidestPatchesCtor()
+        private static ConstructorInfo? WidestPatchesCtor()
         {
-            ConstructorInfo widest = null;
+            ConstructorInfo? widest = null;
             foreach (ConstructorInfo candidate in typeof(Patches).GetConstructors())
             {
                 ParameterInfo[] parameters = candidate.GetParameters();
@@ -140,18 +198,18 @@ namespace Concord.Harmony
         }
 
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S3011", Justification = "Some of the PatchInfo fields this mirrors are non-public in the Harmony versions the bridge supports.")]
-        private static FieldInfo[] MatchIncomingFields(ConstructorInfo ctor)
+        private static FieldInfo?[] MatchIncomingFields(ConstructorInfo? ctor)
         {
             if (ctor == null)
             {
-                return Array.Empty<FieldInfo>();
+                return Array.Empty<FieldInfo?>();
             }
 
             ParameterInfo[] parameters = ctor.GetParameters();
-            FieldInfo[] fields = new FieldInfo[parameters.Length];
+            FieldInfo?[] fields = new FieldInfo?[parameters.Length];
             for (int i = 0; i < parameters.Length; i++)
             {
-                fields[i] = typeof(PatchInfo).GetField(parameters[i].Name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                fields[i] = typeof(PatchInfo).GetField(parameters[i].Name!, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
             }
 
             return fields;

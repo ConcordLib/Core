@@ -1,5 +1,3 @@
-#nullable disable
-
 using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -51,7 +49,7 @@ namespace Concord.Harmony.Tests
             Patch entry = new Patch(manipulator, 0, "other.mod", Priority.Normal, new string[0], new string[0], false);
             Patches patchInfo = new Patches(new Patch[0], new Patch[0], new Patch[0], new Patch[0], new[] { entry });
 
-            string reason = SupportMatrix.Validate(Target, HeadInjection(), patchInfo);
+            string? reason = SupportMatrix.Validate(Target, HeadInjection(), patchInfo);
 
             Assert.NotNull(reason);
             Assert.Contains("IL manipulators", reason);
@@ -64,7 +62,7 @@ namespace Concord.Harmony.Tests
             Patch entry = new Patch(prefix, 0, "other.mod", Priority.Normal, new string[0], new string[0], false);
             Patches patchInfo = new Patches(new[] { entry }, new Patch[0], new Patch[0], new Patch[0], new Patch[0]);
 
-            string reason = SupportMatrix.Validate(Target, HeadInjection(), patchInfo);
+            string? reason = SupportMatrix.Validate(Target, HeadInjection(), patchInfo);
 
             Assert.Null(reason);
         }

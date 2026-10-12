@@ -1,5 +1,3 @@
-#nullable disable
-
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
@@ -10,13 +8,13 @@ namespace Concord.Harmony
 {
     internal static partial class SupportMatrix
     {
-        private static readonly PropertyInfo InnerFinalizersProperty = typeof(Patches).GetProperty("InnerFinalizers");
+        private static readonly PropertyInfo? InnerFinalizersProperty = typeof(Patches).GetProperty("InnerFinalizers");
 
-        private static readonly FieldInfo InnerFinalizersField = typeof(Patches).GetField("InnerFinalizers");
+        private static readonly FieldInfo? InnerFinalizersField = typeof(Patches).GetField("InnerFinalizers");
 
-        private static readonly FieldInfo InnerTargetField = typeof(Patch).GetField("innerTarget");
+        private static readonly FieldInfo? InnerTargetField = typeof(Patch).GetField("innerTarget");
 
-        internal static bool HasInnerPatches(Patches patchInfo)
+        internal static bool HasInnerPatches(Patches? patchInfo)
         {
             if (patchInfo == null)
             {
@@ -26,16 +24,16 @@ namespace Concord.Harmony
             return patchInfo.InnerPrefixes.Count > 0 || patchInfo.InnerPostfixes.Count > 0 || InnerFinalizers(patchInfo).Count > 0;
         }
 
-        private static partial string ValidateHost(MethodBase target, IReadOnlyList<Injection> added, Patches patchInfo)
+        private static partial string? ValidateHost(MethodBase target, IReadOnlyList<Injection> added, Patches? patchInfo)
         {
-            if (!HasInnerPatches(patchInfo))
+            if (patchInfo == null || !HasInnerPatches(patchInfo))
             {
                 return null;
             }
 
             foreach (Patch patch in InnerPatches(patchInfo))
             {
-                string reason = ValidateInnerPatch(target, added, patch);
+                string? reason = ValidateInnerPatch(target, added, patch);
                 if (reason != null)
                 {
                     return reason;
@@ -45,15 +43,15 @@ namespace Concord.Harmony
             return null;
         }
 
-        private static string ValidateInnerPatch(MethodBase target, IReadOnlyList<Injection> added, Patch patch)
+        private static string? ValidateInnerPatch(MethodBase target, IReadOnlyList<Injection> added, Patch patch)
         {
-            object innerTarget = InnerTargetField?.GetValue(patch);
+            object? innerTarget = InnerTargetField?.GetValue(patch);
             if (innerTarget != null)
             {
                 return $"Target {target.Name} has a Harmony inner patch on a non-method operation ({innerTarget}). Concord cannot prove its composed body leaves that operation's count unchanged";
             }
 
-            MethodInfo inner;
+            MethodInfo? inner;
             try
             {
                 inner = patch.innerMethod?.Method;
@@ -95,7 +93,7 @@ namespace Concord.Harmony
 
         private static List<Patch> InnerFinalizers(Patches patchInfo)
         {
-            object value = InnerFinalizersProperty != null
+            object? value = InnerFinalizersProperty != null
                 ? InnerFinalizersProperty.GetValue(patchInfo, null)
                 : InnerFinalizersField?.GetValue(patchInfo);
 

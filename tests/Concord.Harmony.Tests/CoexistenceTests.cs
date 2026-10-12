@@ -566,9 +566,40 @@ namespace Concord.Harmony.Tests
         }
     }
 
+    public static class CancelSkipRouteTargets
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static int PlainCase(int x)
+        {
+            CancelSkipLog.Entries.Add("body");
+            return x * 2;
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static int SkipCase(int x)
+        {
+            CancelSkipLog.Entries.Add("body");
+            return x * 2;
+        }
+    }
+
+    public static class CancelSkipRouteMods
+    {
+        public static bool AllowPrefix()
+        {
+            CancelSkipLog.Entries.Add("prefix");
+            return true;
+        }
+    }
+
     [Collection("HarmonySerial")]
     public sealed class CoexistenceTests
     {
+        private static MethodInfo Method(Type type, string name)
+        {
+            return type.GetMethod(name) ?? throw new InvalidOperationException(type.Name + "." + name + " not found");
+        }
+
         private static Injection MakeHeadInjection(MethodInfo method, string owner)
         {
             return new Injection(method, new InjectAt.Head(), owner, 0);
@@ -577,16 +608,16 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void DiscordSequence_ConcordSurvivesForeignPatchAndUnpatchCycles()
         {
-            MethodInfo target = typeof(DiscordSequenceTarget).GetMethod(nameof(DiscordSequenceTarget.Foo));
-            MethodInfo headMethod = typeof(DiscordSequenceMods).GetMethod(nameof(DiscordSequenceMods.ConcordHead));
-            MethodInfo postfixA = typeof(DiscordSequenceMods).GetMethod(nameof(DiscordSequenceMods.PostfixA));
-            MethodInfo postfixB = typeof(DiscordSequenceMods).GetMethod(nameof(DiscordSequenceMods.PostfixB));
+            MethodInfo target = Method(typeof(DiscordSequenceTarget), nameof(DiscordSequenceTarget.Foo));
+            MethodInfo headMethod = Method(typeof(DiscordSequenceMods), nameof(DiscordSequenceMods.ConcordHead));
+            MethodInfo postfixA = Method(typeof(DiscordSequenceMods), nameof(DiscordSequenceMods.PostfixA));
+            MethodInfo postfixB = Method(typeof(DiscordSequenceMods), nameof(DiscordSequenceMods.PostfixB));
 
             HarmonyLib.Harmony harmonyA = new HarmonyLib.Harmony("test.modA");
             HarmonyLib.Harmony harmonyB = new HarmonyLib.Harmony("test.modB");
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
             try
             {
                 harmonyA.Patch(target, postfix: new HarmonyMethod(postfixA));
@@ -625,8 +656,8 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void TryRoute_NoForeignPatches_NotContested_NoConcordTranspilerInstalled()
         {
-            MethodInfo target = typeof(UncontestedTarget).GetMethod(nameof(UncontestedTarget.Bare));
-            MethodInfo headMethod = typeof(UncontestedMods).GetMethod(nameof(UncontestedMods.ConcordHead));
+            MethodInfo target = Method(typeof(UncontestedTarget), nameof(UncontestedTarget.Bare));
+            MethodInfo headMethod = Method(typeof(UncontestedMods), nameof(UncontestedMods.ConcordHead));
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
             try
@@ -645,11 +676,11 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void TryRoute_ForceRoute_NoForeignPatches_Routes_HeadFires()
         {
-            MethodInfo target = typeof(ForceRouteTarget).GetMethod(nameof(ForceRouteTarget.Bare));
-            MethodInfo headMethod = typeof(ForceRouteMods).GetMethod(nameof(ForceRouteMods.ConcordHead));
+            MethodInfo target = Method(typeof(ForceRouteTarget), nameof(ForceRouteTarget.Bare));
+            MethodInfo headMethod = Method(typeof(ForceRouteMods), nameof(ForceRouteMods.ConcordHead));
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
             try
             {
                 result = bridge.TryRoute(target, new[] { MakeHeadInjection(headMethod, "test.concord") }, true);
@@ -669,14 +700,14 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void ForeignTranspilerBeforeConcord_CompositionSeesRewrittenStream()
         {
-            MethodInfo target = typeof(ForeignOrderTargets).GetMethod(nameof(ForeignOrderTargets.BeforeCase));
-            MethodInfo foreignTranspiler = typeof(ForeignOrderTranspilers).GetMethod(nameof(ForeignOrderTranspilers.SwapSevenTo42));
-            MethodInfo returnMethod = typeof(ForeignOrderInjectionMethods).GetMethod(nameof(ForeignOrderInjectionMethods.ObserveReturn));
+            MethodInfo target = Method(typeof(ForeignOrderTargets), nameof(ForeignOrderTargets.BeforeCase));
+            MethodInfo foreignTranspiler = Method(typeof(ForeignOrderTranspilers), nameof(ForeignOrderTranspilers.SwapSevenTo42));
+            MethodInfo returnMethod = Method(typeof(ForeignOrderInjectionMethods), nameof(ForeignOrderInjectionMethods.ObserveReturn));
 
             HarmonyLib.Harmony harmonyForeign = new HarmonyLib.Harmony("test.foreign.before");
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
             try
             {
                 harmonyForeign.Patch(target, transpiler: new HarmonyMethod(foreignTranspiler) { priority = Priority.High });
@@ -701,14 +732,14 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void ForeignTranspilerAfterConcord_BenignRewriteOverComposedStreamStaysCorrect()
         {
-            MethodInfo target = typeof(ForeignOrderTargets).GetMethod(nameof(ForeignOrderTargets.AfterCase));
-            MethodInfo foreignTranspiler = typeof(ForeignOrderTranspilers).GetMethod(nameof(ForeignOrderTranspilers.SwapSevenTo42));
-            MethodInfo headMethod = typeof(ForeignOrderInjectionMethods).GetMethod(nameof(ForeignOrderInjectionMethods.Head));
+            MethodInfo target = Method(typeof(ForeignOrderTargets), nameof(ForeignOrderTargets.AfterCase));
+            MethodInfo foreignTranspiler = Method(typeof(ForeignOrderTranspilers), nameof(ForeignOrderTranspilers.SwapSevenTo42));
+            MethodInfo headMethod = Method(typeof(ForeignOrderInjectionMethods), nameof(ForeignOrderInjectionMethods.Head));
 
             HarmonyLib.Harmony harmonyForeign = new HarmonyLib.Harmony("test.foreign.after");
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
             try
             {
                 result = bridge.TryRoute(target, new[] { MakeHeadInjection(headMethod, "test.concord.after") }, true);
@@ -730,16 +761,16 @@ namespace Concord.Harmony.Tests
         }
 
         [Fact]
-        public void ForeignPrefixReturningFalse_SkipsBodyAndConcordInjections()
+        public void ForeignPrefixReturningFalse_WhileHarmonyOwnsTheEntryPoint_SkipsConcordsWholeBody()
         {
-            MethodInfo target = typeof(PrefixSkipTarget).GetMethod(nameof(PrefixSkipTarget.Skippy));
-            MethodInfo prefix = typeof(PrefixSkipMods).GetMethod(nameof(PrefixSkipMods.SkipPrefix));
-            MethodInfo headMethod = typeof(PrefixSkipMods).GetMethod(nameof(PrefixSkipMods.ConcordHead));
+            MethodInfo target = Method(typeof(PrefixSkipTarget), nameof(PrefixSkipTarget.Skippy));
+            MethodInfo prefix = Method(typeof(PrefixSkipMods), nameof(PrefixSkipMods.SkipPrefix));
+            MethodInfo headMethod = Method(typeof(PrefixSkipMods), nameof(PrefixSkipMods.ConcordHead));
 
             HarmonyLib.Harmony harmonyForeign = new HarmonyLib.Harmony("test.prefix.foreign");
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
             try
             {
                 result = bridge.TryRoute(target, new[] { MakeHeadInjection(headMethod, "test.prefix.concord") }, true);
@@ -763,16 +794,98 @@ namespace Concord.Harmony.Tests
         }
 
         [Fact]
+        public void RoutedPlainCancel_LaterConcordHeadStillRuns_WithAndWithoutForeignPrefix()
+        {
+            MethodInfo target = Method(typeof(CancelSkipRouteTargets), nameof(CancelSkipRouteTargets.PlainCase));
+            MethodInfo prefix = Method(typeof(CancelSkipRouteMods), nameof(CancelSkipRouteMods.AllowPrefix));
+            Injection first = new Injection(
+                Method(typeof(CancelSkipConcordMethods), nameof(CancelSkipConcordMethods.CancelPlain)), new InjectAt.Head(), "test.cancelskip.plain.a", 200);
+            Injection second = new Injection(
+                Method(typeof(CancelSkipConcordMethods), nameof(CancelSkipConcordMethods.Second)), new InjectAt.Head(), "test.cancelskip.plain.b", 600);
+
+            HarmonyLib.Harmony harmonyForeign = new HarmonyLib.Harmony("test.cancelskip.plain.foreign");
+            HarmonyBridge bridge = new HarmonyBridge(_ => { });
+
+            ForeignRouteResult? result = null;
+            try
+            {
+                result = bridge.TryRoute(target, new[] { first, second }, true);
+                Assert.Equal(ForeignRouteKind.Routed, result.Kind);
+
+                CancelSkipLog.Entries.Clear();
+                Assert.Equal(5, CancelSkipRouteTargets.PlainCase(4));
+                Assert.Contains("concordA", CancelSkipLog.Entries);
+                Assert.Contains("concordB", CancelSkipLog.Entries);
+                Assert.DoesNotContain("body", CancelSkipLog.Entries);
+
+                harmonyForeign.Patch(target, prefix: new HarmonyMethod(prefix));
+
+                CancelSkipLog.Entries.Clear();
+                Assert.Equal(5, CancelSkipRouteTargets.PlainCase(4));
+                Assert.Contains("prefix", CancelSkipLog.Entries);
+                Assert.Contains("concordA", CancelSkipLog.Entries);
+                Assert.Contains("concordB", CancelSkipLog.Entries);
+                Assert.DoesNotContain("body", CancelSkipLog.Entries);
+            }
+            finally
+            {
+                result?.Handle?.Dispose();
+                TestUnpatch.Own(harmonyForeign, "test.cancelskip.plain.foreign");
+            }
+        }
+
+        [Fact]
+        public void RoutedCancelSkippingHeads_LaterConcordHeadIsSkipped_WithAndWithoutForeignPrefix()
+        {
+            MethodInfo target = Method(typeof(CancelSkipRouteTargets), nameof(CancelSkipRouteTargets.SkipCase));
+            MethodInfo prefix = Method(typeof(CancelSkipRouteMods), nameof(CancelSkipRouteMods.AllowPrefix));
+            Injection first = new Injection(
+                Method(typeof(CancelSkipConcordMethods), nameof(CancelSkipConcordMethods.CancelSkipping)), new InjectAt.Head(), "test.cancelskip.skip.a", 200);
+            Injection second = new Injection(
+                Method(typeof(CancelSkipConcordMethods), nameof(CancelSkipConcordMethods.Second)), new InjectAt.Head(), "test.cancelskip.skip.b", 600);
+
+            HarmonyLib.Harmony harmonyForeign = new HarmonyLib.Harmony("test.cancelskip.skip.foreign");
+            HarmonyBridge bridge = new HarmonyBridge(_ => { });
+
+            ForeignRouteResult? result = null;
+            try
+            {
+                result = bridge.TryRoute(target, new[] { first, second }, true);
+                Assert.Equal(ForeignRouteKind.Routed, result.Kind);
+
+                CancelSkipLog.Entries.Clear();
+                Assert.Equal(5, CancelSkipRouteTargets.SkipCase(4));
+                Assert.Contains("concordA", CancelSkipLog.Entries);
+                Assert.DoesNotContain("concordB", CancelSkipLog.Entries);
+                Assert.DoesNotContain("body", CancelSkipLog.Entries);
+
+                harmonyForeign.Patch(target, prefix: new HarmonyMethod(prefix));
+
+                CancelSkipLog.Entries.Clear();
+                Assert.Equal(5, CancelSkipRouteTargets.SkipCase(4));
+                Assert.Contains("prefix", CancelSkipLog.Entries);
+                Assert.Contains("concordA", CancelSkipLog.Entries);
+                Assert.DoesNotContain("concordB", CancelSkipLog.Entries);
+                Assert.DoesNotContain("body", CancelSkipLog.Entries);
+            }
+            finally
+            {
+                result?.Handle?.Dispose();
+                TestUnpatch.Own(harmonyForeign, "test.cancelskip.skip.foreign");
+            }
+        }
+
+        [Fact]
         public void WholeMethodAround_PreAndPostFireAndForeignPostfixStillRunsOncePerOuterInvocation()
         {
-            MethodInfo target = typeof(AroundGapTarget).GetMethod(nameof(AroundGapTarget.Triple));
-            MethodInfo wrapMethod = typeof(AroundGapMods).GetMethod(nameof(AroundGapMods.WrapTriple));
-            MethodInfo foreignPostfix = typeof(AroundGapMods).GetMethod(nameof(AroundGapMods.ForeignPostfix));
+            MethodInfo target = Method(typeof(AroundGapTarget), nameof(AroundGapTarget.Triple));
+            MethodInfo wrapMethod = Method(typeof(AroundGapMods), nameof(AroundGapMods.WrapTriple));
+            MethodInfo foreignPostfix = Method(typeof(AroundGapMods), nameof(AroundGapMods.ForeignPostfix));
 
             HarmonyLib.Harmony harmonyForeign = new HarmonyLib.Harmony("test.around.foreign");
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
             try
             {
                 harmonyForeign.Patch(target, postfix: new HarmonyMethod(foreignPostfix));
@@ -797,12 +910,12 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void InvokeCallSiteInjection_FiresUnderHarmonyRouting()
         {
-            MethodInfo target = typeof(InvokeGapTarget).GetMethod(nameof(InvokeGapTarget.Run));
-            MethodInfo stepMethod = typeof(InvokeGapHelper).GetMethod(nameof(InvokeGapHelper.Step));
-            MethodInfo beforeStep = typeof(InvokeGapMods).GetMethod(nameof(InvokeGapMods.BeforeStep));
+            MethodInfo target = Method(typeof(InvokeGapTarget), nameof(InvokeGapTarget.Run));
+            MethodInfo stepMethod = Method(typeof(InvokeGapHelper), nameof(InvokeGapHelper.Step));
+            MethodInfo beforeStep = Method(typeof(InvokeGapMods), nameof(InvokeGapMods.BeforeStep));
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
             try
             {
                 Injection invoke = new Injection(
@@ -827,14 +940,14 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void ConstantInjection_ReplacesInlinedInt32Constant_UnderGenuinelyContestedTarget()
         {
-            MethodInfo target = typeof(ConstantGapTarget).GetMethod(nameof(ConstantGapTarget.AddBonus));
-            MethodInfo replaceBonus = typeof(ConstantGapMods).GetMethod(nameof(ConstantGapMods.ReplaceBonus));
-            MethodInfo foreignPostfix = typeof(ConstantGapMods).GetMethod(nameof(ConstantGapMods.ForeignPostfix));
+            MethodInfo target = Method(typeof(ConstantGapTarget), nameof(ConstantGapTarget.AddBonus));
+            MethodInfo replaceBonus = Method(typeof(ConstantGapMods), nameof(ConstantGapMods.ReplaceBonus));
+            MethodInfo foreignPostfix = Method(typeof(ConstantGapMods), nameof(ConstantGapMods.ForeignPostfix));
 
             HarmonyLib.Harmony harmonyForeign = new HarmonyLib.Harmony("test.constant.foreign");
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
             try
             {
                 harmonyForeign.Patch(target, postfix: new HarmonyMethod(foreignPostfix));
@@ -845,7 +958,7 @@ namespace Concord.Harmony.Tests
                 Assert.Equal(ForeignRouteKind.Routed, result.Kind);
 
                 ConstantGapTarget.Entries.Clear();
-                int value = (int)target.Invoke(null, new object[] { 5 });
+                int value = Assert.IsType<int>(target.Invoke(null, new object[] { 5 }));
 
                 Assert.Equal(205, value);
                 Assert.Equal(new List<string> { "foreignPostfix" }, ConstantGapTarget.Entries);
@@ -860,11 +973,11 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void TryRoute_TargetPatchedOnlyByConcord_IsTreatedAsUncontested()
         {
-            MethodInfo target = typeof(SelfOwnedTarget).GetMethod(nameof(SelfOwnedTarget.Bare));
-            MethodInfo headMethod = typeof(SelfOwnedMods).GetMethod(nameof(SelfOwnedMods.ConcordHead));
+            MethodInfo target = Method(typeof(SelfOwnedTarget), nameof(SelfOwnedTarget.Bare));
+            MethodInfo headMethod = Method(typeof(SelfOwnedMods), nameof(SelfOwnedMods.ConcordHead));
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
-            ForeignRouteResult firstResult = null;
+            ForeignRouteResult? firstResult = null;
             try
             {
                 firstResult = bridge.TryRoute(target, new[] { MakeHeadInjection(headMethod, "test.selfowned") }, true);
@@ -883,14 +996,14 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void ForeignOwners_ReturnsForeignOwnerId_ExcludesConcordsOwnOwner()
         {
-            MethodInfo target = typeof(ForeignOwnersTarget).GetMethod(nameof(ForeignOwnersTarget.Bare));
-            MethodInfo headMethod = typeof(ForeignOwnersMods).GetMethod(nameof(ForeignOwnersMods.ConcordHead));
-            MethodInfo foreignPostfix = typeof(ForeignOwnersMods).GetMethod(nameof(ForeignOwnersMods.ForeignPostfix));
+            MethodInfo target = Method(typeof(ForeignOwnersTarget), nameof(ForeignOwnersTarget.Bare));
+            MethodInfo headMethod = Method(typeof(ForeignOwnersMods), nameof(ForeignOwnersMods.ConcordHead));
+            MethodInfo foreignPostfix = Method(typeof(ForeignOwnersMods), nameof(ForeignOwnersMods.ForeignPostfix));
 
             HarmonyLib.Harmony harmonyForeign = new HarmonyLib.Harmony("test.foreignowners.foreign");
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
             try
             {
                 harmonyForeign.Patch(target, postfix: new HarmonyMethod(foreignPostfix));
@@ -932,11 +1045,11 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void InstanceMethodTarget_ThisFlowsThroughArgumentSlotZero()
         {
-            MethodInfo target = typeof(InstanceGapTarget).GetMethod(nameof(InstanceGapTarget.AddOne));
-            MethodInfo headMethod = typeof(InstanceGapMods).GetMethod(nameof(InstanceGapMods.ConcordHead));
+            MethodInfo target = Method(typeof(InstanceGapTarget), nameof(InstanceGapTarget.AddOne));
+            MethodInfo headMethod = Method(typeof(InstanceGapMods), nameof(InstanceGapMods.ConcordHead));
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
             try
             {
                 result = bridge.TryRoute(target, new[] { MakeHeadInjection(headMethod, "test.concord.instance") }, true);
@@ -958,15 +1071,15 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void DisposalGranularity_DisposeFirstThenLast_ForeignPostfixIntactThroughout()
         {
-            MethodInfo target = typeof(DisposalGranularityTarget).GetMethod(nameof(DisposalGranularityTarget.Bare));
-            MethodInfo first = typeof(DisposalGranularityMods).GetMethod(nameof(DisposalGranularityMods.First));
-            MethodInfo second = typeof(DisposalGranularityMods).GetMethod(nameof(DisposalGranularityMods.Second));
-            MethodInfo foreignPostfix = typeof(DisposalGranularityMods).GetMethod(nameof(DisposalGranularityMods.ForeignPostfix));
+            MethodInfo target = Method(typeof(DisposalGranularityTarget), nameof(DisposalGranularityTarget.Bare));
+            MethodInfo first = Method(typeof(DisposalGranularityMods), nameof(DisposalGranularityMods.First));
+            MethodInfo second = Method(typeof(DisposalGranularityMods), nameof(DisposalGranularityMods.Second));
+            MethodInfo foreignPostfix = Method(typeof(DisposalGranularityMods), nameof(DisposalGranularityMods.ForeignPostfix));
 
             HarmonyLib.Harmony harmonyForeign = new HarmonyLib.Harmony("test.disposal.foreign");
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
             try
             {
                 harmonyForeign.Patch(target, postfix: new HarmonyMethod(foreignPostfix));
@@ -975,6 +1088,7 @@ namespace Concord.Harmony.Tests
                 Injection secondInjection = MakeHeadInjection(second, "test.disposal.second");
                 result = bridge.TryRoute(target, new[] { firstInjection }, true);
                 Assert.Equal(ForeignRouteKind.Routed, result.Kind);
+                Assert.NotNull(result.Handle);
 
                 IDetourHandle secondHandle = bridge.ApplyToRouted(target, new[] { secondInjection });
 
@@ -1013,13 +1127,13 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void ApplyToRouted_SecondInjectionLandsAfterTryRoute_BothFireInOrdererOrder()
         {
-            MethodInfo target = typeof(ApplyToRoutedTarget).GetMethod(nameof(ApplyToRoutedTarget.Bare));
-            MethodInfo first = typeof(ApplyToRoutedMods).GetMethod(nameof(ApplyToRoutedMods.First));
-            MethodInfo second = typeof(ApplyToRoutedMods).GetMethod(nameof(ApplyToRoutedMods.Second));
+            MethodInfo target = Method(typeof(ApplyToRoutedTarget), nameof(ApplyToRoutedTarget.Bare));
+            MethodInfo first = Method(typeof(ApplyToRoutedMods), nameof(ApplyToRoutedMods.First));
+            MethodInfo second = Method(typeof(ApplyToRoutedMods), nameof(ApplyToRoutedMods.Second));
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
-            ForeignRouteResult result = null;
-            IDetourHandle secondHandle = null;
+            ForeignRouteResult? result = null;
+            IDetourHandle? secondHandle = null;
             try
             {
                 result = bridge.TryRoute(target, new[] { MakeHeadInjection(first, "test.apply.first") }, true);
@@ -1042,8 +1156,8 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void TryRoute_AbstractTarget_InstallFailure_PropagatesAndCompensationRemovesRegistryEntry()
         {
-            MethodInfo target = typeof(AbstractRollbackTarget).GetMethod(nameof(AbstractRollbackTarget.DoIt));
-            MethodInfo headMethod = typeof(AbstractRollbackMods).GetMethod(nameof(AbstractRollbackMods.ConcordHead));
+            MethodInfo target = Method(typeof(AbstractRollbackTarget), nameof(AbstractRollbackTarget.DoIt));
+            MethodInfo headMethod = Method(typeof(AbstractRollbackMods), nameof(AbstractRollbackMods.ConcordHead));
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
             Assert.ThrowsAny<Exception>(() => bridge.TryRoute(target, new[] { MakeHeadInjection(headMethod, "test.abstract") }, true));
@@ -1054,12 +1168,12 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void ApplyToRouted_RebuildFailsOnFirstInstallCallOnly_Recovered_FirstInjectionSurvivesAndComposesAlone()
         {
-            MethodInfo target = typeof(RebuildFailureRecoveredTarget).GetMethod(nameof(RebuildFailureRecoveredTarget.Bare));
-            MethodInfo first = typeof(RebuildFailureRecoveredMods).GetMethod(nameof(RebuildFailureRecoveredMods.First));
-            MethodInfo second = typeof(RebuildFailureRecoveredMods).GetMethod(nameof(RebuildFailureRecoveredMods.Second));
+            MethodInfo target = Method(typeof(RebuildFailureRecoveredTarget), nameof(RebuildFailureRecoveredTarget.Bare));
+            MethodInfo first = Method(typeof(RebuildFailureRecoveredMods), nameof(RebuildFailureRecoveredMods.First));
+            MethodInfo second = Method(typeof(RebuildFailureRecoveredMods), nameof(RebuildFailureRecoveredMods.Second));
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
             try
             {
                 result = bridge.TryRoute(target, new[] { MakeHeadInjection(first, "test.recovered.first") }, true);
@@ -1109,13 +1223,13 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void ApplyToRouted_RebuildAlwaysFails_ParticipantLost_RegistryClearedAndLogged()
         {
-            MethodInfo target = typeof(RebuildFailureLostTarget).GetMethod(nameof(RebuildFailureLostTarget.Bare));
-            MethodInfo first = typeof(RebuildFailureLostMods).GetMethod(nameof(RebuildFailureLostMods.First));
-            MethodInfo second = typeof(RebuildFailureLostMods).GetMethod(nameof(RebuildFailureLostMods.Second));
+            MethodInfo target = Method(typeof(RebuildFailureLostTarget), nameof(RebuildFailureLostTarget.Bare));
+            MethodInfo first = Method(typeof(RebuildFailureLostMods), nameof(RebuildFailureLostMods.First));
+            MethodInfo second = Method(typeof(RebuildFailureLostMods), nameof(RebuildFailureLostMods.Second));
             List<string> logs = new List<string>();
             HarmonyBridge bridge = new HarmonyBridge(logs.Add);
 
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
             try
             {
                 result = bridge.TryRoute(target, new[] { MakeHeadInjection(first, "test.lost.first") }, true);
@@ -1149,12 +1263,13 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void Dispose_RemoveFailsOnFirstCallOnly_Recovered_HandleStillAppliedAndInjectionStillFiresOnce()
         {
-            MethodInfo target = typeof(DisposalFailureTarget).GetMethod(nameof(DisposalFailureTarget.Bare));
-            MethodInfo first = typeof(DisposalFailureMods).GetMethod(nameof(DisposalFailureMods.First));
+            MethodInfo target = Method(typeof(DisposalFailureTarget), nameof(DisposalFailureTarget.Bare));
+            MethodInfo first = Method(typeof(DisposalFailureMods), nameof(DisposalFailureMods.First));
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
             ForeignRouteResult result = bridge.TryRoute(target, new[] { MakeHeadInjection(first, "test.disposefail.first") }, true);
             Assert.Equal(ForeignRouteKind.Routed, result.Kind);
+            Assert.NotNull(result.Handle);
 
             Action<MethodBase> realRemove = bridge.RemoveParticipant;
             int callCount = 0;
@@ -1215,11 +1330,11 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void TryRoute_PassesSupportMatrixButFailsComposition_RejectsWithCleanCompensation()
         {
-            MethodInfo target = typeof(ComposeFailureTarget).GetMethod(nameof(ComposeFailureTarget.Run));
-            MethodInfo wrapMethod = typeof(ComposeFailureMods).GetMethod(nameof(ComposeFailureMods.WrapRun));
-            MethodInfo beforeStep = typeof(ComposeFailureMods).GetMethod(nameof(ComposeFailureMods.BeforeStep));
-            MethodInfo stepMethod = typeof(ComposeFailureHelper).GetMethod(nameof(ComposeFailureHelper.Step));
-            MethodInfo foreignPostfix = typeof(ComposeFailureMods).GetMethod(nameof(ComposeFailureMods.ForeignPostfix));
+            MethodInfo target = Method(typeof(ComposeFailureTarget), nameof(ComposeFailureTarget.Run));
+            MethodInfo wrapMethod = Method(typeof(ComposeFailureMods), nameof(ComposeFailureMods.WrapRun));
+            MethodInfo beforeStep = Method(typeof(ComposeFailureMods), nameof(ComposeFailureMods.BeforeStep));
+            MethodInfo stepMethod = Method(typeof(ComposeFailureHelper), nameof(ComposeFailureHelper.Step));
+            MethodInfo foreignPostfix = Method(typeof(ComposeFailureMods), nameof(ComposeFailureMods.ForeignPostfix));
 
             HarmonyLib.Harmony harmonyForeign = new HarmonyLib.Harmony("test.composefailure.foreign");
             List<string> logs = new List<string>();
@@ -1236,7 +1351,7 @@ namespace Concord.Harmony.Tests
                     "test.composefailure.invoke",
                     0);
 
-                string preValidateReason = SupportMatrix.Validate(MethodIdentity.Normalize(target), new Injection[] { around, invoke }, PatchProcessor.GetPatchInfo(target));
+                string? preValidateReason = SupportMatrix.Validate(MethodIdentity.Normalize(target), new Injection[] { around, invoke }, PatchProcessor.GetPatchInfo(target));
                 Assert.Null(preValidateReason);
 
                 ForeignRouteResult result = bridge.TryRoute(target, new[] { around, invoke }, forceRoute: false);
@@ -1286,12 +1401,12 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void TryRoute_IteratorTarget_DeclaredBody_ComposesAgainstTheStub()
         {
-            MethodInfo target = typeof(IteratorReturnTarget).GetMethod(nameof(IteratorReturnTarget.Numbers));
-            MethodInfo passThrough = typeof(IteratorReturnMods).GetMethod(nameof(IteratorReturnMods.PassThrough));
+            MethodInfo target = Method(typeof(IteratorReturnTarget), nameof(IteratorReturnTarget.Numbers));
+            MethodInfo passThrough = Method(typeof(IteratorReturnMods), nameof(IteratorReturnMods.PassThrough));
 
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
             try
             {
                 Injection returnInjection = new Injection(passThrough, new InjectAt.Return(), "test.concord.iterator", 0);
@@ -1316,12 +1431,12 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void TryRoute_InjectionBodyWithExceptionRegion_ComposesValidStream()
         {
-            MethodInfo target = typeof(ForceRouteTarget).GetMethod(nameof(ForceRouteTarget.Bare));
-            MethodInfo tryFinallyHead = typeof(ExceptionRegionInjectionMods).GetMethod(nameof(ExceptionRegionInjectionMods.TryFinallyHead));
+            MethodInfo target = Method(typeof(ForceRouteTarget), nameof(ForceRouteTarget.Bare));
+            MethodInfo tryFinallyHead = Method(typeof(ExceptionRegionInjectionMods), nameof(ExceptionRegionInjectionMods.TryFinallyHead));
 
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
             try
             {
                 result = bridge.TryRoute(target, new[] { MakeHeadInjection(tryFinallyHead, "test.concord.tryfinally") }, forceRoute: true);
@@ -1344,14 +1459,14 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void WholeMethodAround_CompactOnlyStructLocalKeepsItsType()
         {
-            MethodInfo target = typeof(CompactStructTarget).GetMethod(nameof(CompactStructTarget.Run));
-            MethodInfo wrapMethod = typeof(CompactStructMods).GetMethod(nameof(CompactStructMods.WrapRun));
-            MethodInfo foreignPostfix = typeof(AroundGapMods).GetMethod(nameof(AroundGapMods.ForeignPostfix));
+            MethodInfo target = Method(typeof(CompactStructTarget), nameof(CompactStructTarget.Run));
+            MethodInfo wrapMethod = Method(typeof(CompactStructMods), nameof(CompactStructMods.WrapRun));
+            MethodInfo foreignPostfix = Method(typeof(AroundGapMods), nameof(AroundGapMods.ForeignPostfix));
 
             HarmonyLib.Harmony harmonyForeign = new HarmonyLib.Harmony("test.around.structlocal");
             HarmonyBridge bridge = new HarmonyBridge(_ => { });
 
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
             try
             {
                 harmonyForeign.Patch(target, postfix: new HarmonyMethod(foreignPostfix));

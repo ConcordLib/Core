@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -47,6 +48,11 @@ namespace Concord.Harmony.Tests
         private volatile bool competitorStarted;
         private volatile bool competitorDone;
 
+        private static MethodInfo Method(Type type, string name)
+        {
+            return type.GetMethod(name) ?? throw new InvalidOperationException(type.Name + "." + name + " not found");
+        }
+
         [Fact]
         public void Available_TrueAgainstVendoredHarmony()
         {
@@ -56,15 +62,15 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void HoldingScope_PatchAndGetPatchInfoSucceed_CompetingThreadOnAnotherTargetBlocksUntilRelease()
         {
-            MethodInfo first = typeof(LockScopeTargets).GetMethod(nameof(LockScopeTargets.First));
-            MethodInfo second = typeof(LockScopeTargets).GetMethod(nameof(LockScopeTargets.Second));
-            MethodInfo postfixFirst = typeof(LockScopeMods).GetMethod(nameof(LockScopeMods.PostfixFirst));
-            MethodInfo postfixSecond = typeof(LockScopeMods).GetMethod(nameof(LockScopeMods.PostfixSecond));
+            MethodInfo first = Method(typeof(LockScopeTargets), nameof(LockScopeTargets.First));
+            MethodInfo second = Method(typeof(LockScopeTargets), nameof(LockScopeTargets.Second));
+            MethodInfo postfixFirst = Method(typeof(LockScopeMods), nameof(LockScopeMods.PostfixFirst));
+            MethodInfo postfixSecond = Method(typeof(LockScopeMods), nameof(LockScopeMods.PostfixSecond));
 
             HarmonyLib.Harmony harmonyMain = new HarmonyLib.Harmony("test.lockscope.main");
             HarmonyLib.Harmony harmonyCompetitor = new HarmonyLib.Harmony("test.lockscope.competitor");
 
-            Thread competitor = null;
+            Thread? competitor = null;
 
             try
             {

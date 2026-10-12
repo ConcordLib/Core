@@ -1,5 +1,3 @@
-#nullable disable
-
 using System.Reflection;
 using Concord.Detour;
 

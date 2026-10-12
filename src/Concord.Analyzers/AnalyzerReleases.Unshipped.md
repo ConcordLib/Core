@@ -48,3 +48,5 @@ CONCORD047 | Concord.Patches | Error | The local-targeting [Inject] constructor 
 CONCORD048 | Concord.Patches | Error | A LocalHandle<T> parameter requires a position where the write can still be read back.
 CONCORD049 | Concord.Patches | Error | A [Local] parameter is read-only; use LocalHandle<T> to write the slot.
 CONCORD050 | Concord.Patches | Error | One parameter must not carry both [Capture] and [Local].
+CONCORD051 | Concord.Patches | Error | An At.Catch injection must read the thrown exception through one System.Exception parameter.
+CONCORD052 | Concord.Patches | Error | ControlHandle.Cancel(bool) only skips later head injections at At.Head.

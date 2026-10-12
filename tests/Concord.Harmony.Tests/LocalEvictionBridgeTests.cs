@@ -57,14 +57,14 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void ABrokenLocal_EvictsOnlyItself_AndTheBridgeLogsWhy()
         {
-            MethodInfo target = typeof(BridgeLocalTarget).GetMethod(nameof(BridgeLocalTarget.OneInt));
-            MethodInfo broken = typeof(BridgeLocalMods).GetMethod(nameof(BridgeLocalMods.ReadInt));
-            MethodInfo healthy = typeof(BridgeLocalMods).GetMethod(nameof(BridgeLocalMods.Healthy));
-            MethodInfo transpiler = typeof(BridgeLocalMods).GetMethod(nameof(BridgeLocalMods.AddScratchInt));
+            MethodInfo target = Method(typeof(BridgeLocalTarget), nameof(BridgeLocalTarget.OneInt));
+            MethodInfo broken = Method(typeof(BridgeLocalMods), nameof(BridgeLocalMods.ReadInt));
+            MethodInfo healthy = Method(typeof(BridgeLocalMods), nameof(BridgeLocalMods.Healthy));
+            MethodInfo transpiler = Method(typeof(BridgeLocalMods), nameof(BridgeLocalMods.AddScratchInt));
 
             List<string> log = new List<string>();
             HarmonyBridge bridge = new HarmonyBridge(log.Add);
-            ForeignRouteResult result = null;
+            ForeignRouteResult? result = null;
             try
             {
                 result = bridge.TryRoute(
@@ -93,6 +93,11 @@ namespace Concord.Harmony.Tests
             {
                 result?.Handle?.Dispose();
             }
+        }
+
+        private static MethodInfo Method(Type type, string name)
+        {
+            return type.GetMethod(name) ?? throw new InvalidOperationException(type.Name + "." + name + " not found");
         }
     }
 }

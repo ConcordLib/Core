@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <RootNamespace>Concord.Waylith.ReachCensus</RootNamespace>
+    <AssemblyName>ReachCensus</AssemblyName>
+    <OutputPath>bin/census</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <DebugType>embedded</DebugType>
+    <NoWarn>$(NoWarn);CS1701;CS1702</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="dnlib" Version="4.5.0"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../../../../src/Concord.Host.Adapter/Concord.Host.Adapter.csproj"/>
+  </ItemGroup>
+
+</Project>

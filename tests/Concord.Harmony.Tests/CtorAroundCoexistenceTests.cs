@@ -103,7 +103,7 @@ namespace Concord.Harmony.Tests
                 BindingFlags.Instance | BindingFlags.NonPublic,
                 null,
                 new[] { typeof(int) },
-                null);
+                null)!;
 
             for (int i = 0; i < list.Count; i++)
             {
@@ -207,11 +207,14 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void SupportMatrix_NoLongerRejectsAroundOnConstructor()
         {
-            ConstructorInfo target = typeof(CtorAroundTarget).GetConstructor(new[] { typeof(int) });
-            MethodInfo wrapMethod = typeof(CtorAroundMods).GetMethod(nameof(CtorAroundMods.Wrap));
+            ConstructorInfo? target = typeof(CtorAroundTarget).GetConstructor(new[] { typeof(int) });
+            MethodInfo? wrapMethod = typeof(CtorAroundMods).GetMethod(nameof(CtorAroundMods.Wrap));
+            Assert.NotNull(target);
+            Assert.NotNull(wrapMethod);
+
             Injection around = new Injection(wrapMethod, new InjectAt.Around(), "test.concord.ctoraround", 0);
 
-            string reason = SupportMatrix.Validate(target, new[] { around }, null);
+            string? reason = SupportMatrix.Validate(target, new[] { around }, null);
 
             Assert.Null(reason);
         }
@@ -219,8 +222,10 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void Around_OnConstructorWithBaseCall_ComposesOnHarmonyStream_AndConstructsOnce()
         {
-            ConstructorInfo target = typeof(CtorAroundTarget).GetConstructor(new[] { typeof(int) });
-            MethodInfo wrapMethod = typeof(CtorAroundMods).GetMethod(nameof(CtorAroundMods.Wrap));
+            ConstructorInfo? target = typeof(CtorAroundTarget).GetConstructor(new[] { typeof(int) });
+            MethodInfo? wrapMethod = typeof(CtorAroundMods).GetMethod(nameof(CtorAroundMods.Wrap));
+            Assert.NotNull(target);
+            Assert.NotNull(wrapMethod);
 
             HarmonyLib.Harmony harmony = new HarmonyLib.Harmony("test.ctoraround.raw");
             TranspilerParticipant.LastStreamFailure = null;
@@ -248,8 +253,10 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void Around_OnPlainConstructor_ComposesOnHarmonyStream_MutatedArgumentReachesBody()
         {
-            ConstructorInfo target = typeof(CtorAroundPlainTarget).GetConstructor(new[] { typeof(int) });
-            MethodInfo wrapMethod = typeof(CtorAroundMods).GetMethod(nameof(CtorAroundMods.WrapMutating));
+            ConstructorInfo? target = typeof(CtorAroundPlainTarget).GetConstructor(new[] { typeof(int) });
+            MethodInfo? wrapMethod = typeof(CtorAroundMods).GetMethod(nameof(CtorAroundMods.WrapMutating));
+            Assert.NotNull(target);
+            Assert.NotNull(wrapMethod);
 
             HarmonyLib.Harmony harmony = new HarmonyLib.Harmony("test.ctoraround.plain");
             TranspilerParticipant.LastStreamFailure = null;
@@ -276,8 +283,10 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void Around_OnConstructor_WithForeignPrefixSkippingOriginal_LeavesObjectUninitialized()
         {
-            ConstructorInfo target = typeof(CtorAroundSkipTarget).GetConstructor(new[] { typeof(int) });
-            MethodInfo wrapMethod = typeof(CtorAroundMods).GetMethod(nameof(CtorAroundMods.Wrap));
+            ConstructorInfo? target = typeof(CtorAroundSkipTarget).GetConstructor(new[] { typeof(int) });
+            MethodInfo? wrapMethod = typeof(CtorAroundMods).GetMethod(nameof(CtorAroundMods.Wrap));
+            Assert.NotNull(target);
+            Assert.NotNull(wrapMethod);
 
             HarmonyLib.Harmony harmony = new HarmonyLib.Harmony("test.ctoraround.skip");
             TranspilerParticipant.LastStreamFailure = null;
@@ -305,8 +314,10 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void Around_OnConstructor_ZeroInvokeSites_StreamRejectsWithConc112()
         {
-            ConstructorInfo target = typeof(CtorAroundGuardedTarget).GetConstructor(new[] { typeof(int) });
-            MethodInfo wrapMethod = typeof(CtorAroundMods).GetMethod(nameof(CtorAroundMods.WrapZeroInvoke));
+            ConstructorInfo? target = typeof(CtorAroundGuardedTarget).GetConstructor(new[] { typeof(int) });
+            MethodInfo? wrapMethod = typeof(CtorAroundMods).GetMethod(nameof(CtorAroundMods.WrapZeroInvoke));
+            Assert.NotNull(target);
+            Assert.NotNull(wrapMethod);
 
             HarmonyLib.Harmony harmony = new HarmonyLib.Harmony("test.ctoraround.zero");
             TranspilerParticipant.LastStreamFailure = null;
@@ -328,8 +339,10 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void Around_OnConstructor_InvokeInLoop_StreamRejectsWithConc113()
         {
-            ConstructorInfo target = typeof(CtorAroundGuardedTarget).GetConstructor(new[] { typeof(int) });
-            MethodInfo wrapMethod = typeof(CtorAroundMods).GetMethod(nameof(CtorAroundMods.WrapLoopInvoke));
+            ConstructorInfo? target = typeof(CtorAroundGuardedTarget).GetConstructor(new[] { typeof(int) });
+            MethodInfo? wrapMethod = typeof(CtorAroundMods).GetMethod(nameof(CtorAroundMods.WrapLoopInvoke));
+            Assert.NotNull(target);
+            Assert.NotNull(wrapMethod);
 
             HarmonyLib.Harmony harmony = new HarmonyLib.Harmony("test.ctoraround.loop");
             TranspilerParticipant.LastStreamFailure = null;
@@ -351,8 +364,10 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void Around_OnStaticConstructor_StreamRejectsWithConc114()
         {
-            ConstructorInfo target = typeof(CtorAroundCctorTarget).TypeInitializer;
-            MethodInfo wrapMethod = typeof(CtorAroundMods).GetMethod(nameof(CtorAroundMods.WrapCctor));
+            ConstructorInfo? target = typeof(CtorAroundCctorTarget).TypeInitializer;
+            MethodInfo? wrapMethod = typeof(CtorAroundMods).GetMethod(nameof(CtorAroundMods.WrapCctor));
+            Assert.NotNull(target);
+            Assert.NotNull(wrapMethod);
 
             HarmonyLib.Harmony harmony = new HarmonyLib.Harmony("test.ctoraround.cctor");
             TranspilerParticipant.LastStreamFailure = null;
@@ -374,8 +389,10 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void Around_OnConstructor_RuntimeSkippedInvoke_ThrowsInsteadOfHalfBuiltObject()
         {
-            ConstructorInfo target = typeof(CtorAroundGuardedTarget).GetConstructor(new[] { typeof(int) });
-            MethodInfo wrapMethod = typeof(CtorAroundMods).GetMethod(nameof(CtorAroundMods.WrapGuardedInvoke));
+            ConstructorInfo? target = typeof(CtorAroundGuardedTarget).GetConstructor(new[] { typeof(int) });
+            MethodInfo? wrapMethod = typeof(CtorAroundMods).GetMethod(nameof(CtorAroundMods.WrapGuardedInvoke));
+            Assert.NotNull(target);
+            Assert.NotNull(wrapMethod);
 
             HarmonyLib.Harmony harmony = new HarmonyLib.Harmony("test.ctoraround.guarded");
             TranspilerParticipant.LastStreamFailure = null;
@@ -402,8 +419,10 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void Around_OnConstructor_InstanceInjectionReadsThis_SeesZeroedFieldsBeforeInvoke()
         {
-            ConstructorInfo target = typeof(CtorAroundPlainTarget).GetConstructor(new[] { typeof(int) });
-            MethodInfo wrapMethod = typeof(CtorAroundInstanceInjection).GetMethod(nameof(CtorAroundInstanceInjection.Wrap));
+            ConstructorInfo? target = typeof(CtorAroundPlainTarget).GetConstructor(new[] { typeof(int) });
+            MethodInfo? wrapMethod = typeof(CtorAroundInstanceInjection).GetMethod(nameof(CtorAroundInstanceInjection.Wrap));
+            Assert.NotNull(target);
+            Assert.NotNull(wrapMethod);
 
             HarmonyLib.Harmony harmony = new HarmonyLib.Harmony("test.ctoraround.instance");
             TranspilerParticipant.LastStreamFailure = null;
@@ -430,8 +449,10 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void Around_OnValueTypeGenericConstructor_ComposesOnHarmonyStream()
         {
-            ConstructorInfo target = typeof(CtorAroundGenericTarget<int>).GetConstructor(new[] { typeof(int) });
-            MethodInfo wrapMethod = typeof(CtorAroundMods).GetMethod(nameof(CtorAroundMods.Wrap));
+            ConstructorInfo? target = typeof(CtorAroundGenericTarget<int>).GetConstructor(new[] { typeof(int) });
+            MethodInfo? wrapMethod = typeof(CtorAroundMods).GetMethod(nameof(CtorAroundMods.Wrap));
+            Assert.NotNull(target);
+            Assert.NotNull(wrapMethod);
 
             HarmonyLib.Harmony harmony = new HarmonyLib.Harmony("test.ctoraround.generic");
             TranspilerParticipant.LastStreamFailure = null;
@@ -463,8 +484,10 @@ namespace Concord.Harmony.Tests
                 return;
             }
 
-            ConstructorInfo target = typeof(CtorAroundStructTarget).GetConstructor(new[] { typeof(int) });
-            MethodInfo wrapMethod = typeof(CtorAroundMods).GetMethod(nameof(CtorAroundMods.Wrap));
+            ConstructorInfo? target = typeof(CtorAroundStructTarget).GetConstructor(new[] { typeof(int) });
+            MethodInfo? wrapMethod = typeof(CtorAroundMods).GetMethod(nameof(CtorAroundMods.Wrap));
+            Assert.NotNull(target);
+            Assert.NotNull(wrapMethod);
 
             HarmonyLib.Harmony harmony = new HarmonyLib.Harmony("test.ctoraround.struct");
             TranspilerParticipant.LastStreamFailure = null;
@@ -491,9 +514,12 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void Around_OnConstructor_ForeignTranspilerRewritesBaseCtorArgument_AroundStillWrapsBody()
         {
-            ConstructorInfo target = typeof(CtorAroundTarget).GetConstructor(new[] { typeof(int) });
-            MethodInfo wrapMethod = typeof(CtorAroundMods).GetMethod(nameof(CtorAroundMods.Wrap));
-            MethodInfo foreignTranspiler = typeof(CtorAroundForeignTranspiler).GetMethod(nameof(CtorAroundForeignTranspiler.Rewrite));
+            ConstructorInfo? target = typeof(CtorAroundTarget).GetConstructor(new[] { typeof(int) });
+            MethodInfo? wrapMethod = typeof(CtorAroundMods).GetMethod(nameof(CtorAroundMods.Wrap));
+            MethodInfo? foreignTranspiler = typeof(CtorAroundForeignTranspiler).GetMethod(nameof(CtorAroundForeignTranspiler.Rewrite));
+            Assert.NotNull(target);
+            Assert.NotNull(wrapMethod);
+            Assert.NotNull(foreignTranspiler);
 
             HarmonyLib.Harmony harmony = new HarmonyLib.Harmony("test.ctoraround.foreigntranspiler");
             TranspilerParticipant.LastStreamFailure = null;

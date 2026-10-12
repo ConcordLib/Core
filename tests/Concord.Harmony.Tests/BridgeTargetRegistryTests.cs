@@ -22,14 +22,15 @@ public class BridgeTargetRegistryTests
     {
     }
 
-    private static MethodBase TargetMethod()
+    private static MethodInfo TargetMethod()
     {
         return typeof(BridgeTargetRegistryTests).GetMethod(
-            nameof(StaticTarget),
-            BindingFlags.NonPublic | BindingFlags.Static);
+                   nameof(StaticTarget),
+                   BindingFlags.NonPublic | BindingFlags.Static)
+               ?? throw new InvalidOperationException(typeof(BridgeTargetRegistryTests).Name + "." + nameof(StaticTarget) + " not found");
     }
 
-    private static Injection MakeInjection(string owner, int priority = 0, IReadOnlyList<string> beforeOwners = null)
+    private static Injection MakeInjection(string owner, int priority = 0, IReadOnlyList<string>? beforeOwners = null)
     {
         return new Injection(TargetMethod(), new InjectAt.Head(), owner, priority)
         {
@@ -129,7 +130,7 @@ public class BridgeTargetRegistryTests
     public void Normalization_DistinctReflectedMethodInfoInstancesLandInOneEntry()
     {
         BridgeTargetRegistry registry = new BridgeTargetRegistry();
-        MethodInfo canonical = TargetMethod() as MethodInfo;
+        MethodInfo canonical = TargetMethod();
         MethodBase distinctWrapper = new ProxyMethodInfo(canonical);
 
         Assert.NotSame(canonical, distinctWrapper);
@@ -188,11 +189,11 @@ public class BridgeTargetRegistryTests
 
         public override MethodAttributes Attributes => inner.Attributes;
 
-        public override Type DeclaringType => inner.DeclaringType;
+        public override Type? DeclaringType => inner.DeclaringType;
 
         public override string Name => inner.Name;
 
-        public override Type ReflectedType => inner.ReflectedType;
+        public override Type? ReflectedType => inner.ReflectedType;
 
         public override Type ReturnType => inner.ReturnType;
 
@@ -206,7 +207,7 @@ public class BridgeTargetRegistryTests
             return inner.GetParameters();
         }
 
-        public override object Invoke(object obj, BindingFlags invokeAttr, Binder binder, object[] parameters, CultureInfo culture)
+        public override object? Invoke(object? obj, BindingFlags invokeAttr, Binder? binder, object?[]? parameters, CultureInfo? culture)
         {
             return inner.Invoke(obj, invokeAttr, binder, parameters, culture);
         }

@@ -103,6 +103,19 @@ public sealed class TranspilerComposeTests {
     }
 
     [Fact]
+    public void ForeignTranspiler_RunsBeforeConcordTranspiler() {
+        MethodBase target = typeof(TranspilerTargets).GetMethod(nameof(TranspilerTargets.Priced))!;
+        MethodBase fiveToTen = typeof(PriceTranspilers).GetMethod(nameof(PriceTranspilers.FiveToTen))!;
+        Injection foreign = new Injection(fiveToTen, new InjectAt.Transpiler(false), "foreign", 0) { ForeignOrigin = true };
+        Injection concord = Transpiler(nameof(PriceTranspilers.TenToTwenty));
+
+        ComposeResult result = WrapperComposer.Compose(target, [concord, foreign]);
+        Func<int> run = result.Wrapper.CreateDelegate<Func<int>>();
+
+        Assert.Equal(20, run());
+    }
+
+    [Fact]
     public void Transpiler_ComposesWithDeclarativeReturnInjection() {
         MethodBase target = typeof(TranspilerTargets).GetMethod(nameof(TranspilerTargets.Priced))!;
         MethodBase bump = typeof(PricePlusOne).GetMethod(nameof(PricePlusOne.Bump))!;

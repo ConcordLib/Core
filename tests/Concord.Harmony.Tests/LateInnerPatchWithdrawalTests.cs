@@ -1,5 +1,4 @@
-#nullable disable
-
+using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -91,9 +90,14 @@ namespace Concord.Harmony.Tests
     [Collection("HarmonySerial")]
     public sealed class LateInnerPatchWithdrawalTests
     {
-        private static readonly MethodInfo Step = typeof(LateWithdrawalHelper).GetMethod(nameof(LateWithdrawalHelper.Step));
+        private static readonly MethodInfo Step = Method(typeof(LateWithdrawalHelper), nameof(LateWithdrawalHelper.Step));
 
-        private static readonly MethodInfo InnerPrefix = typeof(LateWithdrawalMods).GetMethod(nameof(LateWithdrawalMods.InnerPrefix));
+        private static readonly MethodInfo InnerPrefix = Method(typeof(LateWithdrawalMods), nameof(LateWithdrawalMods.InnerPrefix));
+
+        private static MethodInfo Method(Type type, string name)
+        {
+            return type.GetMethod(name) ?? throw new InvalidOperationException(type.Name + "." + name + " not found");
+        }
 
         [Fact]
         public void LateInfixOnRoutedTarget_WithdrawsConcord_AndTheInfixLandsOnTheBodysCall()
@@ -103,7 +107,7 @@ namespace Concord.Harmony.Tests
                 return;
             }
 
-            MethodInfo target = typeof(LateWithdrawalHazardTarget).GetMethod(nameof(LateWithdrawalHazardTarget.Run));
+            MethodInfo target = Method(typeof(LateWithdrawalHazardTarget), nameof(LateWithdrawalHazardTarget.Run));
             HarmonyLib.Harmony foreign = new HarmonyLib.Harmony("test.late.withdraw");
             List<string> messages = new List<string>();
             RoutingDetourBackend router = new RoutingDetourBackend(new MonoModDetourBackend(), messages.Add);
@@ -132,7 +136,7 @@ namespace Concord.Harmony.Tests
                 Assert.Contains(target, router.ContestedLostTargets());
                 Assert.False(handle.IsApplied);
 
-                string marker = messages.Find(m => m.StartsWith(CoexistenceLogMarkers.RouteWithdrawn));
+                string? marker = messages.Find(m => m.StartsWith(CoexistenceLogMarkers.RouteWithdrawn));
                 Assert.NotNull(marker);
                 Assert.Contains("counts by position", marker);
 
@@ -164,7 +168,7 @@ namespace Concord.Harmony.Tests
                 return;
             }
 
-            MethodInfo target = typeof(LateWithdrawalCompatibleTarget).GetMethod(nameof(LateWithdrawalCompatibleTarget.Run));
+            MethodInfo target = Method(typeof(LateWithdrawalCompatibleTarget), nameof(LateWithdrawalCompatibleTarget.Run));
             HarmonyLib.Harmony foreign = new HarmonyLib.Harmony("test.late.compatible");
             List<string> messages = new List<string>();
             RoutingDetourBackend router = new RoutingDetourBackend(new MonoModDetourBackend(), messages.Add);
@@ -208,13 +212,13 @@ namespace Concord.Harmony.Tests
                 return;
             }
 
-            MethodInfo target = typeof(LateWithdrawalDisposeTarget).GetMethod(nameof(LateWithdrawalDisposeTarget.Run));
+            MethodInfo target = Method(typeof(LateWithdrawalDisposeTarget), nameof(LateWithdrawalDisposeTarget.Run));
             HarmonyLib.Harmony foreign = new HarmonyLib.Harmony("test.late.dispose");
             List<string> messages = new List<string>();
             RoutingDetourBackend router = new RoutingDetourBackend(new MonoModDetourBackend(), messages.Add);
             HarmonyBridge bridge = new HarmonyBridge(messages.Add);
             router.RouteEverything = true;
-            IDetourHandle handle = null;
+            IDetourHandle? handle = null;
 
             try
             {
@@ -255,7 +259,7 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void LatePlainPostfixOnRoutedTarget_DoesNotWithdraw()
         {
-            MethodInfo target = typeof(LateWithdrawalPostfixTarget).GetMethod(nameof(LateWithdrawalPostfixTarget.Run));
+            MethodInfo target = Method(typeof(LateWithdrawalPostfixTarget), nameof(LateWithdrawalPostfixTarget.Run));
             HarmonyLib.Harmony foreign = new HarmonyLib.Harmony("test.late.postfix");
             List<string> messages = new List<string>();
             RoutingDetourBackend router = new RoutingDetourBackend(new MonoModDetourBackend(), messages.Add);
@@ -273,7 +277,7 @@ namespace Concord.Harmony.Tests
 
                 foreign.Patch(
                     target,
-                    postfix: new HarmonyMethod(typeof(LateWithdrawalMods).GetMethod(nameof(LateWithdrawalMods.ForeignPostfix))));
+                    postfix: new HarmonyMethod(Method(typeof(LateWithdrawalMods), nameof(LateWithdrawalMods.ForeignPostfix))));
 
                 Assert.Equal(RouteState.Bridge, router.GetRoute(target));
                 Assert.DoesNotContain(messages, m => m.StartsWith(CoexistenceLogMarkers.RouteWithdrawn));
@@ -293,7 +297,7 @@ namespace Concord.Harmony.Tests
 
         private static Injection HeadOf(string name)
         {
-            return new Injection(typeof(LateWithdrawalMods).GetMethod(name), new InjectAt.Head(), "test.concord.late", 0);
+            return new Injection(Method(typeof(LateWithdrawalMods), name), new InjectAt.Head(), "test.concord.late", 0);
         }
     }
 }

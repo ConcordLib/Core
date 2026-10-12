@@ -12,6 +12,6 @@ public enum Control {
     /// <summary>Run the original target body.</summary>
     Continue = 0,
 
-    /// <summary>Skip the original target body, like <see cref="ControlHandle.Cancel" />.</summary>
+    /// <summary>Skip the original target body, like <see cref="ControlHandle.Cancel()" />.</summary>
     Cancel = 1,
 }

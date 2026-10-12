@@ -8,6 +8,24 @@ namespace Concord.Orchestration.Tests;
 [Collection(SharedAssemblyApplyCollection.Name)]
 public sealed class PatchDeclarationScannerTests {
     [Fact]
+    public void ScanEntryPoints_KeepThreeArgumentOverloadsAndNoOptionalParameters() {
+        Assert.NotNull(typeof(PatchDeclarationScanner).GetMethod(
+            nameof(PatchDeclarationScanner.ScanAssembly),
+            [typeof(Assembly), typeof(IPatchApplier), typeof(IAttachedPropertyRegistry)]));
+        Assert.NotNull(typeof(PatchDeclarationScanner).GetMethod(
+            nameof(PatchDeclarationScanner.ScanDeclarations),
+            [typeof(IEnumerable<Type>), typeof(IPatchApplier), typeof(IAttachedPropertyRegistry)]));
+
+        foreach (MethodInfo method in typeof(PatchDeclarationScanner).GetMethods(BindingFlags.Public | BindingFlags.Static)) {
+            foreach (ParameterInfo parameter in method.GetParameters()) {
+                Assert.False(
+                    parameter.IsOptional,
+                    method.Name + " has an optional parameter, which erases the shorter signature consumers compiled against");
+            }
+        }
+    }
+
+    [Fact]
     public void ScanType_InjectMethod_CallsPatchApplierWithBaseMethod() {
         FakePatchApplier patches = new FakePatchApplier();
         FakeAttachedPropertyRegistry props = new FakeAttachedPropertyRegistry();

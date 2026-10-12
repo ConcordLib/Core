@@ -13,7 +13,8 @@ public readonly struct LocalRef : IEquatable<LocalRef> {
     /// <summary>The declared type of the local.</summary>
     public Type Type { get; }
 
-    internal int Index { get; }
+    /// <summary>The zero-based slot number this local occupies in the body's locals signature.</summary>
+    public int Index { get; }
 
     /// <summary>Compares two local references for equality.</summary>
     /// <param name="left">The first local reference.</param>

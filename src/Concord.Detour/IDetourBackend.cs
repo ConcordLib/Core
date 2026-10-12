@@ -25,3 +25,15 @@ public interface IDetourBackend {
     /// <returns>A handle that reports detour state and removes only the injections it owns when disposed.</returns>
     IDetourHandle ApplyComposed(MethodBase target, IReadOnlyList<Injection> added);
 }
+
+/// <summary>
+///     Lets a caller ask a backend whether it owns a target's body without assuming MonoMod.Core.
+/// </summary>
+public interface IOwnsBodyQuery {
+    /// <summary>
+    ///     Reports whether this backend's own publish mechanism currently owns <paramref name="target" />'s body.
+    /// </summary>
+    /// <param name="target">The method to check.</param>
+    /// <returns><see langword="true" /> if this backend published the body currently in effect for <paramref name="target" />.</returns>
+    bool OwnsBody(MethodBase target);
+}
