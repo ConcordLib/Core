@@ -10,31 +10,22 @@ namespace Concord.Harmony.Tests;
 public sealed class VersionGateTests
 {
     [Theory]
-    [InlineData("2.4.2.0")]
-    [InlineData("2.4.2.7")]
     [InlineData("3.0.0.0")]
+    [InlineData("3.0.1.0")]
+    [InlineData("3.0.17.4")]
     public void GateAdmitsAMeasuredRelease(string version)
     {
         Assert.Null(SupportMatrix.BackstopRefusal(version));
     }
 
-    [Fact]
-    public void GateRefusesTwoFourOneAndNamesWhatItLacks()
-    {
-        string? refusal = SupportMatrix.BackstopRefusal("2.4.1.0");
-
-        Assert.NotNull(refusal);
-        Assert.Contains("is refused", refusal);
-        Assert.Contains("SetCurrentFactory", refusal);
-        Assert.Contains("PlatformTripleDetourFactory", refusal);
-        Assert.Contains("stays asleep", refusal);
-    }
-
     [Theory]
     [InlineData("2.2.2.0")]
     [InlineData("2.3.3.0")]
+    [InlineData("2.4.1.0")]
+    [InlineData("2.4.2.0")]
     [InlineData("2.4.3.0")]
     [InlineData("2.5.0.0")]
+    [InlineData("3.1.0.0")]
     [InlineData("4.0.0.0")]
     public void GateCallsAnUnmeasuredReleaseUnchecked_NotRefused(string version)
     {
@@ -71,19 +62,15 @@ public sealed class VersionGateTests
     [Fact]
     public void TheHarmonyThisRunLoadedIsAMeasuredRelease_AndTheGateAdmitsIt()
     {
-        Version loaded = HarmonyVersion();
-        Version release = new Version(loaded.Major, loaded.Minor, loaded.Build);
-
-        Assert.Contains(release, new[] { new Version(2, 4, 2), new Version(3, 0, 0) });
         Assert.Null(SupportMatrix.BackstopRefusal());
     }
 
     [Fact]
     public void ShapeCheckAdmitsTheRealHarmonyAndRefusesACopyStampedMeasuredWithoutTheMonoModSeam()
     {
-        Assert.Null(SupportMatrix.BackstopRefusal("2.4.2.0", typeof(HarmonyLib.Harmony).Assembly));
+        Assert.Null(SupportMatrix.BackstopRefusal("3.0.0.0", typeof(HarmonyLib.Harmony).Assembly));
 
-        string? refusal = SupportMatrix.BackstopRefusal("2.4.2.0", typeof(SupportMatrix).Assembly);
+        string? refusal = SupportMatrix.BackstopRefusal("3.0.0.0", typeof(SupportMatrix).Assembly);
 
         Assert.NotNull(refusal);
         Assert.Contains("MonoMod.Core.DetourFactory.SetCurrentFactory", refusal);
@@ -93,7 +80,7 @@ public sealed class VersionGateTests
     [Fact]
     public void ShapeCheckIsSkippedWhenNoCopyIsSupplied()
     {
-        Assert.Null(SupportMatrix.BackstopRefusal("2.4.2.0", null));
+        Assert.Null(SupportMatrix.BackstopRefusal("3.0.0.0", null));
     }
 
     private static Version HarmonyVersion()

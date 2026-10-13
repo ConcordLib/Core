@@ -65,7 +65,7 @@ public sealed class HarmonyArrivalTests
     }
 
     [Fact]
-    public void ASecondHarmonyThisBuildRefuses_ArrivesButIsNeverHooked()
+    public void AHarmonyThisBuildNeverMeasured_ArrivesButIsNeverHooked()
     {
         List<string> log = new List<string>();
 
@@ -76,8 +76,8 @@ public sealed class HarmonyArrivalTests
 
             Assert.Contains("Version=2.4.1.0", old.FullName);
             Assert.True(HarmonyArrival.IsArmed(old));
-            Assert.False(Hooked(old), "a 0Harmony this build refuses got a notifier detour");
-            Assert.Contains(log, line => line.Contains("Harmony 2.4.1.0 is refused"));
+            Assert.False(Hooked(old), "a 0Harmony this build never measured got a notifier detour");
+            Assert.Contains(log, line => line.Contains("Harmony 2.4.1.0 is unchecked"));
 
             string stamp = " #" + old.GetHashCode() + " ";
             Assert.Contains(log, line => line.StartsWith(HarmonyArrival.ArmFailedMarker, StringComparison.Ordinal) && line.Contains(stamp));

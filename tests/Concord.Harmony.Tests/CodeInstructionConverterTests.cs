@@ -143,12 +143,6 @@ public class CodeInstructionConverterTests
         Assert.All(outgoing[0].blocks, block => Assert.Equal(ExceptionBlockType.BeginExceptionBlock, block.blockType));
     }
 
-    // Pure data-level check: the converter itself can carry a filter marker through
-    // ToConcord/FromConcord unchanged. This does NOT mean a `when` filter clause survives an
-    // actual Harmony transpile - that is a confirmed Harmony 2.4.2 bug (MethodBodyReader.ParseExceptions
-    // never hands a transpiler the filter handler's own HandlerStart marker), tracked by the
-    // correctly-skipped ExceptionRegionCoexistenceTests.ExceptionFilter_... test. Do not un-skip
-    // that test based on this one passing.
     [Fact]
     public void FilterBlock_MarkerRoundTripsThroughTheConverterDataModel()
     {
