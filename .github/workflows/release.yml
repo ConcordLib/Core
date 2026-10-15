@@ -224,6 +224,7 @@ jobs:
           dotnet pack src/Concord.Generators/Concord.Generators.csproj -c Release -o "$RUNNER_TEMP/pack-smoke"
           dotnet pack src/Concord.Harmony/Concord.Harmony.csproj -c Release -o "$RUNNER_TEMP/pack-smoke"
           dotnet pack src/Concord/Concord.csproj -c Release -o "$RUNNER_TEMP/pack-smoke"
+          dotnet pack src/Concord.Host.Adapter/Concord.Host.Adapter.csproj -c Release -o "$RUNNER_TEMP/pack-smoke"
 
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -262,6 +263,7 @@ jobs:
           dotnet pack src/Concord.Generators/Concord.Generators.csproj -c Release -o artifacts
           dotnet pack src/Concord.Harmony/Concord.Harmony.csproj -c Release -o artifacts
           dotnet pack src/Concord/Concord.csproj -c Release -o artifacts
+          dotnet pack src/Concord.Host.Adapter/Concord.Host.Adapter.csproj -c Release -o artifacts
 
       - name: NuGet login
         if: steps.tag.outputs.tag != ''

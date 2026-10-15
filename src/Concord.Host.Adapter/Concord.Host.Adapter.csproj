@@ -6,6 +6,17 @@
     <ConcordDir Condition="'$(ConcordDir)' == ''">$(MSBuildThisFileDirectory)../../Assemblies/$(TargetFramework)</ConcordDir>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Concord.Host.Adapter</PackageId>
+    <Description>Optional body-replacement backend for Concord, for hosts running the WaylithCLR fork of CoreCLR. A host side-loads it and keeps Concord's native detour backend when the fork is absent.</Description>
+    <!-- Concord.dll is supplied by the host runtime, exactly as it is for Concord.Harmony, so it
+         does not belong in this package's dependency group. Suppressing dependencies leaves a
+         lib/ folder with no matching group, which the SDK flags as NU5128. -->
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <WarningsNotAsErrors>NU5128</WarningsNotAsErrors>
+  </PropertyGroup>
+
   <ItemGroup>
     <Using Include="System.Reflection.Metadata"/>
     <Using Include="System.Reflection.Metadata.Ecma335"/>
