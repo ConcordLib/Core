@@ -60,7 +60,7 @@ public static class CoreLibEnumDetours {
             try {
                 handle.Dispose();
             } catch (Exception ex) {
-                PatchLog.Write("[Concord] CONC141: could not revert an Enum detour: " + ex.Message);
+                PatchLog.Write("[Concord] CONC141: could not revert an Enum detour: " + ExceptionReason.Of(ex));
             }
         }
 
@@ -79,7 +79,7 @@ public static class CoreLibEnumDetours {
             MethodInfo injection = typeof(CoreLibEnumInjections).GetMethod(injectionName, BindingFlags.Public | BindingFlags.Static)!;
             Handles.Add(Patcher.Patch(target, injection, at));
         } catch (Exception ex) {
-            Report(name, ex.GetType().Name + ": " + ex.Message);
+            Report(name, ExceptionReason.Of(ex));
         }
     }
 

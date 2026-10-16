@@ -53,10 +53,6 @@ internal static class UpdateWrapperHook
 
     private static IDetourBackend? composeBackend;
 
-    private static IOwnsBodyQuery? ownsBodyBackend;
-
-    internal static Func<MethodBase, bool>? OwnsBodyOverride { get; set; }
-
     /// <summary>
     ///     Installs the notifier. Safe to call more than once. Later calls only re-point the observer,
     ///     because the detour itself is never removed once it lands.
@@ -71,7 +67,12 @@ internal static class UpdateWrapperHook
         decider = target as IForeignPatchDecider;
         logger = log;
         composeBackend = rawBackend;
-        ownsBodyBackend = rawBackend as IOwnsBodyQuery;
+
+        if (rawBackend is ISuppressionProbes probes)
+        {
+            SuppressionGate.WireCapability(probes.BodyReplacementUnavailable);
+            SuppressionGate.WireProfiler(probes.ProfilerMayRewriteBodies);
+        }
 
         if (NotifyMethod == null || NotifyForeignCopyMethod == null)
         {
@@ -92,6 +93,18 @@ internal static class UpdateWrapperHook
         else
         {
             armed = InstallEveryLoadedCopy(rawBackend, log);
+        }
+
+        Assembly[] hooked;
+        lock (HookHandles)
+        {
+            hooked = new Assembly[HookHandles.Count];
+            HookHandles.Keys.CopyTo(hooked, 0);
+        }
+
+        foreach (Assembly copy in hooked)
+        {
+            SeedAlreadyPatched(copy, log);
         }
 
         if (armed == 0)
@@ -125,8 +138,6 @@ internal static class UpdateWrapperHook
         observer = null;
         decider = null;
         composeBackend = null;
-        ownsBodyBackend = null;
-        OwnsBodyOverride = null;
         DropComposedForeign();
 
         lock (SuppressionRefusalsLogged)
@@ -234,7 +245,7 @@ internal static class UpdateWrapperHook
         }
         catch (Exception ex)
         {
-            log(CoexistenceLogMarkers.HookUnavailable + " arming a late Harmony copy failed: " + ex.Message);
+            log(CoexistenceLogMarkers.HookUnavailable + " arming a late Harmony copy failed: " + ExceptionReason.Of(ex));
         }
     }
 
@@ -267,7 +278,7 @@ internal static class UpdateWrapperHook
         }
         catch (Exception ex)
         {
-            log(CoexistenceLogMarkers.HookUnavailable + " " + Describe(copy) + ": " + ex.Message);
+            log(CoexistenceLogMarkers.HookUnavailable + " " + Describe(copy) + ": " + ExceptionReason.Of(ex));
             return false;
         }
 
@@ -287,7 +298,7 @@ internal static class UpdateWrapperHook
         }
         catch (Exception ex)
         {
-            log(CoexistenceLogMarkers.HookUnavailable + " " + Describe(copy) + ": " + ex.Message);
+            log(CoexistenceLogMarkers.HookUnavailable + " " + Describe(copy) + ": " + ExceptionReason.Of(ex));
             return false;
         }
 
@@ -303,7 +314,71 @@ internal static class UpdateWrapperHook
         }
 
         log(CoexistenceLogMarkers.HookInstalled + " " + Describe(copy));
+        SeedAlreadyPatched(copy, log);
         return true;
+    }
+
+    private static void SeedAlreadyPatched(Assembly copy, Action<string> log)
+    {
+        try
+        {
+            Type? harmonyType = copy.GetType("HarmonyLib.Harmony");
+            MethodInfo? all = harmonyType?.GetMethod("GetAllPatchedMethods", BindingFlags.Public | BindingFlags.Static);
+            MethodInfo? info = harmonyType?.GetMethod("GetPatchInfo", BindingFlags.Public | BindingFlags.Static);
+            if (all == null || info == null)
+            {
+                return;
+            }
+
+            if (all.Invoke(null, null) is not System.Collections.IEnumerable patched)
+            {
+                return;
+            }
+
+            List<MethodBase> poisoned = new List<MethodBase>();
+            foreach (object? entry in patched)
+            {
+                if (entry is MethodBase method && !SuppressedRebuilds.Holds(method) && StillDetoured(info, method))
+                {
+                    poisoned.Add(MethodIdentity.Normalize(method));
+                }
+            }
+
+            int seeded = 0;
+            lock (HarmonyBuilt)
+            {
+                foreach (MethodBase method in poisoned)
+                {
+                    if (HarmonyBuilt.Add(method))
+                    {
+                        seeded++;
+                    }
+                }
+            }
+
+            if (seeded > 0)
+            {
+                log(CoexistenceLogMarkers.HookInstalled + " " + Describe(copy) + ": " + seeded +
+                    " target(s) it detoured before the hook landed stay Harmony's, because a body write under a live detour never runs");
+            }
+        }
+        catch (Exception ex)
+        {
+            log(CoexistenceLogMarkers.HookUnavailable + " " + Describe(copy) +
+                ": its already-patched targets could not be read, so one may be suppressed into a dead body write: " + ExceptionReason.Of(ex));
+        }
+    }
+
+    private static bool StillDetoured(MethodInfo getPatchInfo, MethodBase method)
+    {
+        object? patches = getPatchInfo.Invoke(null, new object?[] { method });
+        if (patches == null)
+        {
+            return false;
+        }
+
+        return patches.GetType().GetProperty("Owners")?.GetValue(patches) is System.Collections.ICollection owners &&
+               owners.Count > 0;
     }
 
     private static MethodInfo? ResolveUpdateWrapper(Assembly copy)
@@ -350,6 +425,7 @@ internal static class UpdateWrapperHook
         IForeignPatchDecider? current = decider;
         if (current == null)
         {
+            LogSuppressionRefusal(original, "no suppression decider is wired, so Harmony keeps every body it builds");
             return null;
         }
 
@@ -358,17 +434,7 @@ internal static class UpdateWrapperHook
                          ?? HarmonyBuiltRefusal(original);
         if (refused != null)
         {
-            bool firstForThisReason;
-            lock (SuppressionRefusalsLogged)
-            {
-                firstForThisReason = SuppressionRefusalsLogged.Add(refused);
-            }
-
-            if (firstForThisReason)
-            {
-                logger?.Invoke(SuppressBlockedMarker + " " + Describe(original) + ": " + refused);
-            }
-
+            LogSuppressionRefusal(original, refused);
             return MarkHarmonyBuiltAndFail(original);
         }
 
@@ -377,8 +443,11 @@ internal static class UpdateWrapperHook
             MethodInfo stub = OriginalStubs.For(original);
             if (!current.TrySuppressForeignRebuild(original, patchInfo))
             {
+                LogSuppressionRefusal(original, "the router declined to hold this target, so Harmony owns the body");
                 return MarkHarmonyBuiltAndFail(original);
             }
+
+            SuppressedRebuilds.Mark(original);
 
             bool replicate = SharedStateWriteHere() == SharedStateWrite.InsideUpdateWrapper;
             if (replicate)
@@ -400,14 +469,29 @@ internal static class UpdateWrapperHook
         }
         catch (Exception ex)
         {
-            logger?.Invoke(SuppressFailedMarker + " " + Describe(original) + ": " + ex.Message);
+            logger?.Invoke(SuppressFailedMarker + " " + Describe(original) + ": " + ExceptionReason.Of(ex));
             return MarkHarmonyBuiltAndFail(original);
+        }
+    }
+
+    private static void LogSuppressionRefusal(MethodBase original, string reason)
+    {
+        bool firstForThisReason;
+        lock (SuppressionRefusalsLogged)
+        {
+            firstForThisReason = SuppressionRefusalsLogged.Add(reason);
+        }
+
+        if (firstForThisReason)
+        {
+            logger?.Invoke(SuppressBlockedMarker + " " + Describe(original) + ": " + reason);
         }
     }
 
     private static MethodInfo? MarkHarmonyBuiltAndFail(MethodBase original)
     {
         MethodBase key = MethodIdentity.Normalize(original);
+        SuppressedRebuilds.Forget(original);
 
         lock (HarmonyBuilt)
         {
@@ -441,7 +525,7 @@ internal static class UpdateWrapperHook
         catch (Exception ex)
         {
             logger?.Invoke(SuppressFailedMarker + " " + Describe(key) +
-                ": dropping the previous composed patch set after a refused rebuild failed: " + ex.Message);
+                ": dropping the previous composed patch set after a refused rebuild failed: " + ExceptionReason.Of(ex));
         }
     }
 
@@ -477,10 +561,10 @@ internal static class UpdateWrapperHook
     private static bool ComposeForeignPatches(MethodBase original, PatchInfo patchInfo)
     {
         IDetourBackend? backend = composeBackend;
-        if (backend == null || !OwnsBody(original))
+        if (backend == null)
         {
             logger?.Invoke(ComposeUnownedMarker + " " + Describe(original) +
-                ": the decider claimed this target but Concord holds no body for it, so Harmony's patches were not folded into one");
+                ": the decider claimed this target but no backend is wired, so Harmony's patches were not folded into a body");
             return false;
         }
 
@@ -515,17 +599,6 @@ internal static class UpdateWrapperHook
         return true;
     }
 
-    private static bool OwnsBody(MethodBase target)
-    {
-        Func<MethodBase, bool>? supplied = OwnsBodyOverride;
-        if (supplied != null)
-        {
-            return supplied(target);
-        }
-
-        return ownsBodyBackend != null && ownsBodyBackend.OwnsBody(target);
-    }
-
     private static void DropComposedForeign()
     {
         List<IDetourHandle> held;
@@ -543,7 +616,7 @@ internal static class UpdateWrapperHook
             }
             catch (Exception ex)
             {
-                logger?.Invoke(SuppressFailedMarker + " releasing a composed Harmony patch set failed: " + ex.Message);
+                logger?.Invoke(SuppressFailedMarker + " releasing a composed Harmony patch set failed: " + ExceptionReason.Of(ex));
             }
         }
     }

@@ -127,7 +127,7 @@ public static class Patcher {
                     try {
                         handle.Dispose();
                     } catch (Exception ex) {
-                        PatchLog.Write("[Concord] rollback dispose failed: " + ex.Message);
+                        PatchLog.Write("[Concord] rollback dispose failed: " + ExceptionReason.Of(ex));
                     }
                 }
 
@@ -363,7 +363,7 @@ public static class Patcher {
                     try {
                         handle.Dispose();
                     } catch (Exception ex) {
-                        PatchLog.Write("[Concord] rollback dispose failed: " + ex.Message);
+                        PatchLog.Write("[Concord] rollback dispose failed: " + ExceptionReason.Of(ex));
                     }
                 }
 
@@ -473,7 +473,7 @@ public static class Patcher {
                     } catch (Exception ex) {
                         PatchLog.Write(
                             "[Concord] attached property registry " + registry.GetType().FullName +
-                            " threw for " + declarationType.FullName + "." + name + ": " + ex.Message);
+                            " threw for " + declarationType.FullName + "." + name + ": " + ExceptionReason.Of(ex));
                     }
                 }
             }

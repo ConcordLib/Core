@@ -30,7 +30,7 @@ internal static class ShadowResolver {
         attached = new Dictionary<string, AttachedFieldSlot>();
 
         foreach (FieldInfo declarationField in declarationFields) {
-            if (declarationField.GetCustomAttribute<InjectFieldAttribute>() is not null) {
+            if (declarationField.IsLiteral || declarationField.GetCustomAttribute<InjectFieldAttribute>() is not null) {
                 continue;
             }
 

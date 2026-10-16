@@ -67,6 +67,39 @@ public sealed class CecilCodeConverterRoundTripTests {
     }
 
     [Fact]
+    public void WriteBack_FloatOperandOnNonRealOpcode_NamesTheOpcode() {
+        MethodBase target = typeof(TranspilerTargets).GetMethod(nameof(TranspilerTargets.Simple))!;
+        using DynamicMethodDefinition actual = new DynamicMethodDefinition(target);
+
+        TranspilerContext context = new TranspilerContext(target);
+        List<CodeInstruction> instructions = CecilCodeConverter.ToInstructions(actual.Definition, context);
+        instructions.Insert(0, new CodeInstruction(System.Reflection.Emit.OpCodes.Pop));
+        instructions.Insert(0, new CodeInstruction(System.Reflection.Emit.OpCodes.Ldc_I4, 1.5f));
+
+        ConcordEmitException error = Assert.Throws<ConcordEmitException>(
+            () => CecilCodeConverter.WriteBack(actual.Definition, instructions, context));
+
+        Assert.Contains("ldc.i4", error.Message);
+    }
+
+    [Fact]
+    public void WriteBack_LdcR8WithFloatOperand_WidensToDouble() {
+        MethodBase target = typeof(TranspilerTargets).GetMethod(nameof(TranspilerTargets.Simple))!;
+        using DynamicMethodDefinition actual = new DynamicMethodDefinition(target);
+
+        TranspilerContext context = new TranspilerContext(target);
+        List<CodeInstruction> instructions = CecilCodeConverter.ToInstructions(actual.Definition, context);
+        instructions.Insert(0, new CodeInstruction(System.Reflection.Emit.OpCodes.Pop));
+        instructions.Insert(0, new CodeInstruction(System.Reflection.Emit.OpCodes.Ldc_R8, 1.5f));
+
+        CecilCodeConverter.WriteBack(actual.Definition, instructions, context);
+
+        Instruction written = actual.Definition.Body.Instructions[0];
+        Assert.Equal(Mono.Cecil.Cil.OpCodes.Ldc_R8, written.OpCode);
+        Assert.Equal(1.5d, Assert.IsType<double>(written.Operand));
+    }
+
+    [Fact]
     public void ToInstructions_PreservesShortFormEncoding() {
         MethodBase target = typeof(TranspilerTargets).GetMethod(nameof(TranspilerTargets.Simple))!;
         using DynamicMethodDefinition source = new DynamicMethodDefinition(target);

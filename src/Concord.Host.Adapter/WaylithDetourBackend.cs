@@ -362,12 +362,14 @@ public sealed class ComposedBodyPublisher : ITargetBodyOwner {
 ///     The <see cref="IDetourBackend" /> a caller selects to get body replacement instead of native
 ///     detours. <see cref="Apply" /> and <see cref="ApplyComposed" /> are the two ways in.
 /// </summary>
-public sealed class WaylithDetourBackend : IDetourBackend {
+public sealed class WaylithDetourBackend : IDetourBackend, IOwnsBodyQuery, ISuppressionProbes {
     /// <summary>Log prefix for a target published without an offset map, so its line numbers are unreliable.</summary>
     public const string NoOffsetMapMarker = "[Concord.Waylith] no-offset-map";
 
     /// <summary>The highest original offset the runtime is known to carry; past it no pairing is safe.</summary>
     public const int SentinelCeiling = 100_000_000;
+
+    private const string ProfilingSwitch = "CORECLR_ENABLE_PROFILING";
 
     private static readonly ConcurrentDictionary<MethodBase, byte> Forwarded = new ConcurrentDictionary<MethodBase, byte>();
 
@@ -406,6 +408,7 @@ public sealed class WaylithDetourBackend : IDetourBackend {
         this.writer = writer;
         WrapperComposer.CaptureComposedBody = true;
         stack = new WaylithTargetStack(publisher, Log);
+        ReversePatchFactory.OwnsBody = OwnsBody;
     }
 
     /// <summary>
@@ -648,6 +651,30 @@ public sealed class WaylithDetourBackend : IDetourBackend {
         }
 
         return null;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    ///     True for a target this backend published a body over, and for one the fallback owns, because a
+    ///     refused target is detoured through that fallback and is Concord-owned just the same.
+    /// </remarks>
+    public bool OwnsBody(MethodBase target) {
+        ArgumentNullException.ThrowIfNull(target);
+        return Writers.HoldsClaim(target) || (fallback as IOwnsBodyQuery)?.OwnsBody(target) == true;
+    }
+
+    /// <inheritdoc />
+    public string? BodyReplacementUnavailable() {
+        return RuntimeCapability.IsAvailable ? null : RuntimeCapability.Explain();
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    ///     Reads the variable a CoreCLR profiler is attached through at startup. A profiler attached later
+    ///     is not visible here, and there is no runtime api that reports one.
+    /// </remarks>
+    public bool ProfilerMayRewriteBodies() {
+        return Environment.GetEnvironmentVariable(ProfilingSwitch) == "1";
     }
 
     /// <inheritdoc />

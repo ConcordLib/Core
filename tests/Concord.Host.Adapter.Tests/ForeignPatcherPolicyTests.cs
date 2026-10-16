@@ -38,6 +38,9 @@ public sealed class ForeignPatcherPolicyTests : IDisposable {
 
     public void Dispose() {
         ForeignPatcherPolicy.ResetForTests();
+        SuppressedRebuilds.Forget(Alpha);
+        SuppressedRebuilds.Forget(Beta);
+        SuppressedRebuilds.Forget(Gamma);
     }
 
     [Fact]
@@ -158,6 +161,53 @@ public sealed class ForeignPatcherPolicyTests : IDisposable {
         Assert.Single(found);
         Assert.DoesNotContain("has withdrawn that body", found[0], StringComparison.Ordinal);
         Assert.Contains("still installed", found[0], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void KeepsATargetWhoseForeignRebuildConcordSuppressed() {
+        ForeignPatcherPolicy.Owners = static _ => new[] { "com.example.suppressed" };
+        SuppressedRebuilds.Mark(Alpha);
+
+        Assert.Equal(ForeignHandling.Allow, ForeignPatcherPolicy.Judge(Alpha).Handling);
+        Assert.False(ForeignPatcherPolicy.IsDisowned(Alpha));
+    }
+
+    [Fact]
+    public void TakesBackATargetWithdrawnInTheWindowBeforeTheSuppressionWasMarked() {
+        ForeignPatcherPolicy.Owners = static _ => new[] { "com.example.suppressed" };
+        Assert.Equal(ForeignHandling.Disown, ForeignPatcherPolicy.Judge(Alpha).Handling);
+
+        SuppressedRebuilds.Mark(Alpha);
+
+        Assert.Equal(ForeignHandling.Allow, ForeignPatcherPolicy.Judge(Alpha).Handling);
+        Assert.False(ForeignPatcherPolicy.IsDisowned(Alpha));
+    }
+
+    [Fact]
+    public void ContentionsSaysNothingAboutATargetConcordSuppressed() {
+        Dictionary<MethodBase, string[]> held = [];
+        ForeignPatcherPolicy.Owners = target => held.TryGetValue(target, out string[]? owners) ? owners : null;
+        ForeignPatcherPolicy.Judge(Alpha);
+        held[Alpha] = ["com.example.suppressed"];
+        SuppressedRebuilds.Mark(Alpha);
+
+        Assert.Empty(ForeignPatcherPolicy.Contentions());
+        Assert.False(ForeignPatcherPolicy.IsDisowned(Alpha));
+    }
+
+    [Fact]
+    public void DisownsATargetOnceTheSuppressionIsGivenBack() {
+        Dictionary<MethodBase, string[]> held = [];
+        ForeignPatcherPolicy.Owners = target => held.TryGetValue(target, out string[]? owners) ? owners : null;
+        ForeignPatcherPolicy.Judge(Alpha);
+        held[Alpha] = ["com.example.suppressed"];
+        SuppressedRebuilds.Mark(Alpha);
+        Assert.Empty(ForeignPatcherPolicy.Contentions());
+
+        SuppressedRebuilds.Forget(Alpha);
+
+        Assert.Single(ForeignPatcherPolicy.Contentions());
+        Assert.True(ForeignPatcherPolicy.IsDisowned(Alpha));
     }
 
     [Fact]

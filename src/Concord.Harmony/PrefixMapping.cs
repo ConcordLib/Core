@@ -14,6 +14,67 @@ internal delegate bool PrefixInstanceResult<in TInstance, T>(TInstance instance,
 
 internal delegate bool PrefixInstanceVoid<in TInstance>(TInstance instance);
 
+internal readonly struct CopyBinding {
+    internal CopyBinding(
+        int resultArg,
+        int instanceArg,
+        IReadOnlyDictionary<int, FieldInfo>? fields,
+        IReadOnlyCollection<int>? scratch,
+        IReadOnlyCollection<int>? address,
+        int stateArg,
+        Type? stateType,
+        bool passThrough,
+        int originalMethodArg,
+        int runOriginalArg,
+        int argsArg) {
+        ResultArg = resultArg;
+        InstanceArg = instanceArg;
+        Fields = fields;
+        Scratch = scratch;
+        Address = address;
+        StateArg = stateArg;
+        StateType = stateType;
+        PassThrough = passThrough;
+        OriginalMethodArg = originalMethodArg;
+        RunOriginalArg = runOriginalArg;
+        ArgsArg = argsArg;
+    }
+
+    internal int ResultArg { get; }
+
+    internal int InstanceArg { get; }
+
+    internal IReadOnlyDictionary<int, FieldInfo>? Fields { get; }
+
+    internal IReadOnlyCollection<int>? Scratch { get; }
+
+    internal IReadOnlyCollection<int>? Address { get; }
+
+    internal int StateArg { get; }
+
+    internal Type? StateType { get; }
+
+    internal int? State => StateArg >= 0 ? StateArg : null;
+
+    internal bool PassThrough { get; }
+
+    internal int? Result => ResultArg >= 0 ? ResultArg : null;
+
+    internal int? Instance => InstanceArg >= 0 ? InstanceArg : null;
+
+    internal int OriginalMethodArg { get; }
+
+    internal int? OriginalMethod => OriginalMethodArg >= 0 ? OriginalMethodArg : null;
+
+    internal int RunOriginalArg { get; }
+
+    internal int? RunOriginal => RunOriginalArg >= 0 ? RunOriginalArg : null;
+
+    internal int ArgsArg { get; }
+
+    internal int? Args => ArgsArg >= 0 ? ArgsArg : null;
+}
+
 internal static class BoundParameters {
     internal const string ResultName = "__result";
 
@@ -48,7 +109,11 @@ internal static class BoundParameters {
 
     internal static Expression Argument(ParameterInfo parameter, Type returnType, ParameterExpression? result, ParameterExpression? instance) {
         if (parameter.Name == InstanceName) {
-            return parameter.ParameterType == instance!.Type ? instance : Expression.Convert(instance, parameter.ParameterType);
+            if (instance == null) {
+                return Expression.Constant(null, parameter.ParameterType);
+            }
+
+            return parameter.ParameterType == instance.Type ? instance : Expression.Convert(instance, parameter.ParameterType);
         }
 
         Type declared = parameter.ParameterType;
@@ -73,8 +138,17 @@ internal static class BoundParameters {
     }
 
     internal static string? ValidateInstance(string role, string name, ParameterInfo parameter, MethodBase target) {
+        if (parameter.ParameterType.IsByRef) {
+            return role + " '" + name + "' takes __instance by reference. Concord binds the instance by value, so a write through it would not reach the caller; this patch is left to Harmony.";
+        }
+
         if (target.IsStatic) {
-            return role + " '" + name + "' takes __instance but '" + target.Name + "' is static, so there is no instance to bind.";
+            if (parameter.ParameterType.IsValueType) {
+                return role + " '" + name + "' takes __instance as '" + parameter.ParameterType.Name + "' but '" + target.Name +
+                       "' is static, so Harmony binds null there and a value type cannot hold it.";
+            }
+
+            return null;
         }
 
         Type? declaringType = target.DeclaringType;
@@ -82,34 +156,235 @@ internal static class BoundParameters {
             return role + " '" + name + "' takes __instance but '" + target.Name + "' has no declaring type to bind.";
         }
 
-        if (declaringType.IsValueType) {
-            return role + " '" + name + "' takes __instance and '" + declaringType.Name + "' is a struct. Concord binds the instance by value, so a prefix writing through 'ref __instance' would not reach the caller's copy; this patch is left to Harmony.";
+        if (declaringType.IsValueType && parameter.ParameterType != declaringType) {
+            return role + " '" + name + "' declares __instance as '" + parameter.ParameterType.Name + "' and '" + declaringType.Name +
+                   "' is a struct, which only binds to its own exact type; this patch is left to Harmony.";
         }
 
         if (declaringType.ContainsGenericParameters) {
             return role + " '" + name + "' takes __instance and '" + declaringType.Name + "' is an open generic type, which Concord cannot close to bind the instance; this patch is left to Harmony.";
         }
 
-        if (parameter.ParameterType.IsByRef) {
-            return role + " '" + name + "' takes __instance by reference. Concord binds the instance by value, so a write through it would not reach the caller; this patch is left to Harmony.";
-        }
-
-        if (!parameter.ParameterType.IsAssignableFrom(declaringType)) {
-            return role + " '" + name + "' declares __instance as '" + parameter.ParameterType.Name + "', which cannot hold an instance of '" + declaringType.Name + "'.";
+        if (!parameter.ParameterType.IsAssignableFrom(declaringType) && !declaringType.IsAssignableFrom(parameter.ParameterType)) {
+            return role + " '" + name + "' declares __instance as '" + parameter.ParameterType.Name + "', which is unrelated to '" + declaringType.Name + "'.";
         }
 
         return null;
     }
 
-    internal static bool ShimCarries(MethodInfo patch) {
+    internal static int ResultIndex(MethodInfo patch) {
+        return IndexOf(patch, HarmonyParameterKind.Result);
+    }
+
+    internal static int InstanceIndex(MethodInfo patch) {
+        return IndexOf(patch, HarmonyParameterKind.Instance);
+    }
+
+    internal static int OriginalMethodIndex(MethodInfo patch) {
+        return IndexOf(patch, HarmonyParameterKind.OriginalMethod);
+    }
+
+    internal static int RunOriginalIndex(MethodInfo patch) {
+        return IndexOf(patch, HarmonyParameterKind.RunOriginal);
+    }
+
+    internal static int ArgsIndex(MethodInfo patch) {
+        return IndexOf(patch, HarmonyParameterKind.ArgsArray);
+    }
+
+    internal static string? ValidateArgs(string role, string name, ParameterInfo parameter, MethodBase target, MethodInfo patch, int argsArg) {
+        if (parameter.ParameterType != typeof(object[])) {
+            return role + " '" + name + "' declares __args as '" + parameter.ParameterType.Name +
+                   "'. It carries every target argument boxed into an array, so it must be object[] passed by value.";
+        }
+
+        foreach (ParameterInfo candidate in target.GetParameters()) {
+            if (candidate.IsOut || candidate.IsRetval) {
+                return role + " '" + name + "' takes __args, but '" + target.Name + "' declares the out parameter '" + candidate.Name +
+                       "'. Harmony zeroes an out parameter when it builds the array, which a copied body cannot do without changing what the target already wrote.";
+            }
+        }
+
+        return HarmonyArgumentBinder.ArgsArrayIsReadOnly(role, name, patch, argsArg);
+    }
+
+    internal static string? ValidateRunOriginal(string role, string name, ParameterInfo parameter) {
+        if (parameter.ParameterType.IsByRef) {
+            return role + " '" + name + "' takes __runOriginal by reference. Concord reads it from the wrapper's own cancel flag, so a write through it would reach nothing.";
+        }
+
+        if (parameter.ParameterType != typeof(bool)) {
+            return role + " '" + name + "' declares __runOriginal as '" + parameter.ParameterType.Name + "'. It carries whether the original body still runs, so it must be bool.";
+        }
+
+        return null;
+    }
+
+    internal static string? ValidateOriginalMethod(string role, string name, ParameterInfo parameter, MethodBase target) {
+        if (parameter.ParameterType.IsByRef) {
+            return role + " '" + name + "' takes __originalMethod by reference. Concord binds it to a copy of the patched method handle, so a write through it would reach nothing.";
+        }
+
+        if (!parameter.ParameterType.IsInstanceOfType(target)) {
+            return role + " '" + name + "' declares __originalMethod as '" + parameter.ParameterType.Name + "', which cannot hold '" + target.GetType().Name + "'.";
+        }
+
+        return null;
+    }
+
+    internal static string? PlanCopy(
+        string role,
+        string name,
+        MethodBase target,
+        MethodInfo patch,
+        Type returnType,
+        HarmonyPatchRole kind,
+        bool bindResult,
+        out CopyBinding binding,
+        bool passThrough = false) {
+        binding = default;
+        ParameterInfo[] parameters = patch.GetParameters();
+        int resultArg = passThrough ? 0 : bindResult ? ResultIndex(patch) : -1;
+        int instanceArg = InstanceIndex(patch);
+        int originalMethodArg = OriginalMethodIndex(patch);
+        int runOriginalArg = RunOriginalIndex(patch);
+        int argsArg = ArgsIndex(patch);
+
+        if (argsArg >= 0) {
+            string? argsReason = ValidateArgs(role, name, parameters[argsArg], target, patch, argsArg);
+            if (argsReason != null) {
+                return argsReason;
+            }
+        }
+
+        if (runOriginalArg >= 0) {
+            string? runOriginalReason = ValidateRunOriginal(role, name, parameters[runOriginalArg]);
+            if (runOriginalReason != null) {
+                return runOriginalReason;
+            }
+        }
+
+        if (originalMethodArg >= 0) {
+            string? originalMethodReason = ValidateOriginalMethod(role, name, parameters[originalMethodArg], target);
+            if (originalMethodReason != null) {
+                return originalMethodReason;
+            }
+        }
+
+        if (resultArg >= 0) {
+            string? resultReason = ValidateResult(role, name, parameters[resultArg], target, returnType);
+            if (resultReason != null) {
+                return resultReason;
+            }
+        }
+
+        if (instanceArg >= 0) {
+            string? instanceReason = ValidateInstance(role, name, parameters[instanceArg], target);
+            if (instanceReason != null) {
+                return instanceReason;
+            }
+        }
+
+        string? fieldReason = PlanFields(role, name, target, parameters, out Dictionary<int, FieldInfo>? fields);
+        if (fieldReason != null) {
+            return fieldReason;
+        }
+
+        HarmonyArgumentBinder.CanCopyBody(
+            target, patch, kind, out string? refusal, out List<int>? scratch, out List<int>? address, out int stateArg,
+            resultArg >= 0, instanceArg >= 0, fields != null, passThrough, originalMethodArg >= 0);
+        if (refusal != null) {
+            return refusal;
+        }
+
+        if (originalMethodArg >= 0) {
+            scratch?.Remove(originalMethodArg);
+        }
+
+        if (runOriginalArg >= 0) {
+            scratch?.Remove(runOriginalArg);
+        }
+
+        if (argsArg >= 0) {
+            scratch?.Remove(argsArg);
+        }
+
+        if (scratch?.Count == 0) {
+            scratch = null;
+        }
+
+        Type? stateType = stateArg >= 0 ? Unwrap(parameters[stateArg].ParameterType) : null;
+        binding = new CopyBinding(resultArg, instanceArg, fields, scratch, address, stateArg, stateType, passThrough, originalMethodArg, runOriginalArg, argsArg);
+        return null;
+    }
+
+    internal static bool ShimCarries(MethodBase target, MethodInfo patch) {
+        bool structTarget = !target.IsStatic && target.DeclaringType?.IsValueType == true;
         foreach (ParameterInfo parameter in patch.GetParameters()) {
             HarmonyParameterKind kind = HarmonyArgumentBinder.KindOf(parameter);
-            if (kind != HarmonyParameterKind.Result && kind != HarmonyParameterKind.Instance) {
+            if (kind == HarmonyParameterKind.Instance) {
+                if (structTarget) {
+                    return false;
+                }
+
+                continue;
+            }
+
+            if (kind != HarmonyParameterKind.Result) {
                 return false;
             }
         }
 
         return true;
+    }
+
+    private static string? PlanFields(
+        string role, string name, MethodBase target, ParameterInfo[] parameters, out Dictionary<int, FieldInfo>? fields) {
+        fields = null;
+        Type? declaringType = target.DeclaringType;
+        for (int i = 0; i < parameters.Length; i++) {
+            if (HarmonyArgumentBinder.KindOf(parameters[i]) != HarmonyParameterKind.Field) {
+                continue;
+            }
+
+            string fieldName = parameters[i].Name!.Substring(3);
+            FieldInfo? field = declaringType == null ? null : HarmonyLib.AccessTools.Field(declaringType, fieldName);
+            if (field == null) {
+                return role + " '" + name + "' takes '" + parameters[i].Name + "' but '" + (declaringType?.Name ?? "<global>") +
+                       "' declares no field '" + fieldName + "'.";
+            }
+
+            if (!field.IsStatic && target.IsStatic) {
+                return role + " '" + name + "' binds the instance field '" + fieldName + "' but '" + target.Name +
+                       "' is static, so there is no instance to read it from.";
+            }
+
+            Type declared = parameters[i].ParameterType.IsByRef ? parameters[i].ParameterType.GetElementType()! : parameters[i].ParameterType;
+            if (declared != field.FieldType) {
+                return role + " '" + name + "' declares '" + parameters[i].Name + "' as '" + declared.Name + "' but field '" + fieldName +
+                       "' is '" + field.FieldType.Name + "'. Concord binds a field by its exact type.";
+            }
+
+            fields ??= new Dictionary<int, FieldInfo>();
+            fields[i] = field;
+        }
+
+        return null;
+    }
+
+    private static Type Unwrap(Type type) {
+        return type.IsByRef ? type.GetElementType()! : type;
+    }
+
+    private static int IndexOf(MethodInfo patch, HarmonyParameterKind wanted) {
+        ParameterInfo[] parameters = patch.GetParameters();
+        for (int i = 0; i < parameters.Length; i++) {
+            if (HarmonyArgumentBinder.KindOf(parameters[i]) == wanted) {
+                return i;
+            }
+        }
+
+        return -1;
     }
 }
 
@@ -144,9 +419,8 @@ internal static class PrefixMapping {
             return "Prefix '" + name + "' patches '" + target.Name + "', which returns by-ref. Harmony routes a by-ref return through __resultRef, which this mapping does not cover.";
         }
 
-        if (!BoundParameters.ShimCarries(prefix)) {
-            HarmonyArgumentBinder.CanCopyBody(target, prefix, HarmonyPatchRole.Prefix, out string? copyRefusal);
-            return copyRefusal;
+        if (!BoundParameters.ShimCarries(target, prefix)) {
+            return BoundParameters.PlanCopy("Prefix", name, target, prefix, returnType, HarmonyPatchRole.Prefix, true, out _);
         }
 
         foreach (ParameterInfo parameter in prefix.GetParameters()) {
@@ -167,9 +441,30 @@ internal static class PrefixMapping {
             throw new InvalidOperationException(reason);
         }
 
-        if (!BoundParameters.ShimCarries(prefix)) {
+        if (!BoundParameters.ShimCarries(target, prefix)) {
+            BoundParameters.PlanCopy(
+                "Prefix",
+                PostfixMapping.NameOf(prefix),
+                target,
+                prefix,
+                HarmonyFinalizerShape.ReturnTypeOf(target),
+                HarmonyPatchRole.Prefix,
+                true,
+                out CopyBinding binding);
             return new Injection(prefix, new InjectAt.Head(), owner, 0) {
                 ForeignOrigin = true,
+                ResultArgIndex = binding.Result,
+                InstanceArgIndex = binding.Instance,
+                FieldArgs = binding.Fields,
+                ScratchArgs = binding.Scratch,
+                AddressArgs = binding.Address,
+                StateArgIndex = binding.State,
+                OriginalMethodArgIndex = binding.OriginalMethod,
+                RunOriginalArgIndex = binding.RunOriginal,
+                ArgsArgIndex = binding.Args,
+                StateType = binding.StateType,
+                CancelsOnFalse = prefix.ReturnType == typeof(bool),
+                AffectsOriginal = AffectsOriginal(prefix),
                 BeforeOwners = before ?? Array.Empty<string>(),
                 AfterOwners = after ?? Array.Empty<string>(),
             };
@@ -180,7 +475,8 @@ internal static class PrefixMapping {
         int slot = Register(prefix, returnType, instanceType);
         return new Injection(Shim(returnType, instanceType), new InjectAt.Head(), owner, 0) {
             ForeignOrigin = true,
-            BoundArguments = new Dictionary<string, object?> { ["slot"] = slot, ["guarded"] = AffectsOriginal(prefix) },
+            BoundArguments = new Dictionary<string, object?> { ["slot"] = slot },
+            AffectsOriginal = AffectsOriginal(prefix),
             BeforeOwners = before ?? Array.Empty<string>(),
             AfterOwners = after ?? Array.Empty<string>(),
         };
@@ -196,6 +492,11 @@ internal static class PrefixMapping {
                 continue;
             }
 
+            HarmonyParameterKind kind = HarmonyArgumentBinder.KindOf(parameter);
+            if (kind == HarmonyParameterKind.State || kind == HarmonyParameterKind.OriginalMethod) {
+                continue;
+            }
+
             if (parameter.IsOut || parameter.IsRetval || parameter.ParameterType.IsByRef || !parameter.ParameterType.IsValueType) {
                 return true;
             }
@@ -204,12 +505,7 @@ internal static class PrefixMapping {
         return false;
     }
 
-    internal static void Run<T>(ControlHandle<T> control, [Bound] int slot, [Bound] bool guarded) {
-        Pass pass = control.GetState<Pass>();
-        if (guarded && pass.Skipped) {
-            return;
-        }
-
+    internal static void Run<T>(ControlHandle<T> control, [Bound] int slot) {
         T result = control.ReturnValue;
         bool runOriginal = ((PrefixResult<T>)adapters[slot])(ref result);
         control.ReturnValue = result;
@@ -217,23 +513,14 @@ internal static class PrefixMapping {
             return;
         }
 
-        pass.Skipped = true;
-        control.SetState(pass);
         control.Cancel(true);
     }
 
-    internal static void RunVoid(ControlHandle control, [Bound] int slot, [Bound] bool guarded) {
-        Pass pass = control.GetState<Pass>();
-        if (guarded && pass.Skipped) {
-            return;
-        }
-
+    internal static void RunVoid(ControlHandle control, [Bound] int slot) {
         if (((PrefixVoid)adapters[slot])()) {
             return;
         }
 
-        pass.Skipped = true;
-        control.SetState(pass);
         control.Cancel(true);
     }
 
@@ -300,21 +587,12 @@ internal static class PrefixMapping {
         return typeof(PrefixMapping).GetMethod(nameof(Run), flags)!.MakeGenericMethod(returnType);
     }
 
-    internal struct Pass {
-        internal bool Skipped;
-    }
-
     internal abstract class InstanceShim<TInstance>
         where TInstance : class {
         [InjectInstance]
         internal TInstance Self => null!;
 
-        internal void Run<T>(ControlHandle<T> control, [Bound] int slot, [Bound] bool guarded) {
-            Pass pass = control.GetState<Pass>();
-            if (guarded && pass.Skipped) {
-                return;
-            }
-
+        internal void Run<T>(ControlHandle<T> control, [Bound] int slot) {
             T result = control.ReturnValue;
             bool runOriginal = ((PrefixInstanceResult<TInstance, T>)adapters[slot])(Self, ref result);
             control.ReturnValue = result;
@@ -322,23 +600,14 @@ internal static class PrefixMapping {
                 return;
             }
 
-            pass.Skipped = true;
-            control.SetState(pass);
             control.Cancel(true);
         }
 
-        internal void RunVoid(ControlHandle control, [Bound] int slot, [Bound] bool guarded) {
-            Pass pass = control.GetState<Pass>();
-            if (guarded && pass.Skipped) {
-                return;
-            }
-
+        internal void RunVoid(ControlHandle control, [Bound] int slot) {
             if (((PrefixInstanceVoid<TInstance>)adapters[slot])(Self)) {
                 return;
             }
 
-            pass.Skipped = true;
-            control.SetState(pass);
             control.Cancel(true);
         }
     }

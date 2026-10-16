@@ -31,6 +31,7 @@
 
   <ItemGroup>
     <Compile Include="../Shared/Polyfills.cs" Link="Polyfills.cs"/>
+    <Compile Include="../Shared/ExceptionReason.cs" Link="ExceptionReason.cs"/>
   </ItemGroup>
 
   <!-- Harmony is supplied by the host game at runtime, exactly like Concord itself.

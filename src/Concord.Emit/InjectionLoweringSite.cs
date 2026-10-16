@@ -40,4 +40,20 @@ internal readonly record struct InjectionLoweringSite(
     public InjectAt? At { get; init; }
 
     public bool ForeignOrigin { get; init; }
+
+    public int? ResultArgIndex { get; init; }
+
+    public IReadOnlyDictionary<int, FieldInfo>? FieldArgs { get; init; }
+
+    public IReadOnlyDictionary<int, VariableDefinition>? ScratchArgs { get; init; }
+
+    public bool ReturnsIntoResult { get; init; }
+
+    public bool CancelsOnFalse { get; init; }
+
+    public IReadOnlyDictionary<int, int>? AddressArgs { get; init; }
+
+    public int? StateArg { get; init; }
+
+    public VariableDefinition? ResultCopy { get; init; }
 }

@@ -130,6 +130,774 @@ public sealed class SuppressedComposeTests
     }
 
     [Fact]
+    public void PostfixTakingResultAndATargetArgument_IsComposed_NotRefused()
+    {
+        Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
+
+        MethodInfo target = Fresh(typeof(ResultArgTarget), nameof(ResultArgTarget.Compute));
+        HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);
+        MonoModDetourBackend backend = new MonoModDetourBackend();
+        Decider decider = new Decider();
+        decider.Own(target);
+
+        IDetourHandle? concord = null;
+        try
+        {
+            WireGate();
+            concord = backend.ApplyComposed(target, new[] { HeadOf(nameof(ComposeMods.LayeredHead)) });
+            Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+
+            MethodInfo handedBack = harmony.Patch(target, postfix: MethodOf(nameof(ComposeMods.ResultArgPostfix)));
+
+            ComposeLog.Entries.Clear();
+            Assert.Equal(15, ResultArgTarget.Compute(5));
+            Assert.Equal(new[] { "concord", "body", "harmony" }, ComposeLog.Entries);
+            Assert.Same(OriginalStubs.For(target), handedBack);
+            Assert.True(backend.OwnsBody(target));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.ComposeRefusedMarker, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Disarm(harmony, ModId, concord);
+        }
+    }
+
+    [Fact]
+    public void PostfixWritingResultAfterAnEarlyReturn_KeepsTheValueItWroteBeforeReturning()
+    {
+        Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
+
+        MethodInfo target = Fresh(typeof(EarlyReturnTarget), nameof(EarlyReturnTarget.Compute));
+        HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);
+        MonoModDetourBackend backend = new MonoModDetourBackend();
+        Decider decider = new Decider();
+        decider.Own(target);
+
+        IDetourHandle? concord = null;
+        try
+        {
+            WireGate();
+            concord = backend.ApplyComposed(target, new[] { HeadOf(nameof(ComposeMods.SilentHead)) });
+            Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+
+            harmony.Patch(target, postfix: MethodOf(nameof(ComposeMods.EarlyReturnPostfix)));
+
+            Assert.Equal(0, EarlyReturnTarget.Compute(0));
+            Assert.Equal(-1, EarlyReturnTarget.Compute(3));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.ComposeRefusedMarker, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Disarm(harmony, ModId, concord);
+        }
+    }
+
+    [Fact]
+    public void PostfixTakingPrivateFields_IsComposed_AndAByRefFieldWriteSticks()
+    {
+        Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
+
+        MethodInfo target = Fresh(typeof(FieldArgTarget), nameof(FieldArgTarget.Compute));
+        HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);
+        MonoModDetourBackend backend = new MonoModDetourBackend();
+        Decider decider = new Decider();
+        decider.Own(target);
+
+        IDetourHandle? concord = null;
+        try
+        {
+            WireGate();
+            concord = backend.ApplyComposed(target, new[] { HeadOf(nameof(ComposeMods.LayeredHead)) });
+            Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+
+            harmony.Patch(target, postfix: MethodOf(nameof(ComposeMods.FieldArgPostfix)));
+
+            FieldArgTarget instance = new FieldArgTarget();
+            ComposeLog.Entries.Clear();
+            Assert.Equal(20, instance.Compute(5));
+            Assert.Equal(new[] { "concord", "body", "harmony:2" }, ComposeLog.Entries);
+            Assert.Equal(30, instance.Compute(5));
+            Assert.True(backend.OwnsBody(target));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.ComposeRefusedMarker, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Disarm(harmony, ModId, concord);
+        }
+    }
+
+    [Fact]
+    public void PatchesTakingInstanceAndATargetArgument_AreComposed_NotRefused()
+    {
+        Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
+
+        MethodInfo target = Fresh(typeof(InstanceArgTarget), nameof(InstanceArgTarget.Compute));
+        HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);
+        MonoModDetourBackend backend = new MonoModDetourBackend();
+        Decider decider = new Decider();
+        decider.Own(target);
+
+        IDetourHandle? concord = null;
+        try
+        {
+            WireGate();
+            concord = backend.ApplyComposed(target, new[] { HeadOf(nameof(ComposeMods.LayeredHead)) });
+            Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+
+            harmony.Patch(
+                target,
+                prefix: MethodOf(nameof(ComposeMods.InstanceArgPrefix)),
+                postfix: MethodOf(nameof(ComposeMods.InstanceArgPostfix)));
+
+            ComposeLog.Entries.Clear();
+            Assert.Equal(24, new InstanceArgTarget().Compute(5));
+            Assert.Equal(new[] { "pre:12", "concord", "body", "harmony" }, ComposeLog.Entries);
+            Assert.True(backend.OwnsBody(target));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.ComposeRefusedMarker, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Disarm(harmony, ModId, concord);
+        }
+    }
+
+    [Fact]
+    public void PassThroughPostfixReturningTheTargetsType_IsComposed_NotRefused()
+    {
+        Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
+
+        MethodInfo target = Fresh(typeof(PassThroughTarget), nameof(PassThroughTarget.Values));
+        HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);
+        MonoModDetourBackend backend = new MonoModDetourBackend();
+        Decider decider = new Decider();
+        decider.Own(target);
+
+        IDetourHandle? concord = null;
+        try
+        {
+            WireGate();
+            concord = backend.ApplyComposed(target, new[] { HeadOf(nameof(ComposeMods.LayeredHead)) });
+            Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+
+            harmony.Patch(target, postfix: MethodOf(nameof(ComposeMods.PassThroughPostfix)));
+
+            ComposeLog.Entries.Clear();
+            List<string> seen = new List<string>(new PassThroughTarget().Values());
+            Assert.Equal(new[] { "a", "b", "extra" }, seen);
+            Assert.Equal(new[] { "concord", "body", "harmony" }, ComposeLog.Entries);
+            Assert.True(backend.OwnsBody(target));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.ComposeRefusedMarker, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Disarm(harmony, ModId, concord);
+        }
+    }
+
+    [Fact]
+    public void PostfixWritingAByValueTargetArgument_IsComposed_AndTheWriteStaysInTheCopy()
+    {
+        Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
+
+        MethodInfo target = Fresh(typeof(ScratchArgTarget), nameof(ScratchArgTarget.Compute));
+        HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);
+        MonoModDetourBackend backend = new MonoModDetourBackend();
+        Decider decider = new Decider();
+        decider.Own(target);
+
+        IDetourHandle? concord = null;
+        try
+        {
+            WireGate();
+            concord = backend.ApplyComposed(target, new[] { HeadOf(nameof(ComposeMods.LayeredHead)) });
+            Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+
+            harmony.Patch(target, postfix: MethodOf(nameof(ComposeMods.ScratchArgPostfix)));
+            harmony.Patch(target, postfix: MethodOf(nameof(ComposeMods.ScratchArgReader)));
+
+            ComposeLog.Entries.Clear();
+            Assert.Equal(55, new ScratchArgTarget().Compute(5));
+            Assert.Equal(new[] { "concord", "body:5", "harmony:50", "reader:5" }, ComposeLog.Entries);
+            Assert.True(backend.OwnsBody(target));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.ComposeRefusedMarker, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Disarm(harmony, ModId, concord);
+        }
+    }
+
+    [Fact]
+    public void PrefixTakingResultAlongsideATargetArgument_CancelsWithTheResultItWrote()
+    {
+        Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
+
+        MethodInfo target = Fresh(typeof(PrefixResultTarget), nameof(PrefixResultTarget.Compute));
+        HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);
+        MonoModDetourBackend backend = new MonoModDetourBackend();
+        Decider decider = new Decider();
+        decider.Own(target);
+
+        IDetourHandle? concord = null;
+        try
+        {
+            WireGate();
+            concord = backend.ApplyComposed(target, new[] { HeadOf(nameof(ComposeMods.LayeredHead)) });
+            Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+
+            harmony.Patch(target, prefix: MethodOf(nameof(ComposeMods.ReadResultPrefix)));
+            harmony.Patch(target, prefix: MethodOf(nameof(ComposeMods.CancelWithResultPrefix)));
+
+            ComposeLog.Entries.Clear();
+            Assert.Equal(105, new PrefixResultTarget().Compute(5));
+            Assert.Equal(new[] { "readresult:5:0", "cancelresult:5", "concord" }, ComposeLog.Entries);
+            Assert.True(backend.OwnsBody(target));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.ComposeRefusedMarker, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Disarm(harmony, ModId, concord);
+        }
+    }
+
+    [Fact]
+    public void PrefixWritingAByValueResult_WritesOnlyItsOwnCopy_AndIsNotRefused()
+    {
+        Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
+
+        MethodInfo target = Fresh(typeof(ByValueResultTarget), nameof(ByValueResultTarget.Compute));
+        HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);
+        MonoModDetourBackend backend = new MonoModDetourBackend();
+        Decider decider = new Decider();
+        decider.Own(target);
+
+        IDetourHandle? concord = null;
+        try
+        {
+            WireGate();
+            concord = backend.ApplyComposed(target, new[] { HeadOf(nameof(ComposeMods.LayeredHead)) });
+            Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+
+            harmony.Patch(target, prefix: MethodOf(nameof(ComposeMods.WritesByValueResultPrefix)));
+
+            ComposeLog.Entries.Clear();
+            Assert.Equal(0, new ByValueResultTarget().Compute(5));
+            Assert.Equal(new[] { "byvalueresult:12", "concord" }, ComposeLog.Entries);
+            Assert.True(backend.OwnsBody(target));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.ComposeRefusedMarker, StringComparison.Ordinal));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.SuppressFailedMarker, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Disarm(harmony, ModId, concord);
+        }
+    }
+
+    [Fact]
+    public void BoolPrefixOnTheCopyRoute_ReturningFalse_CancelsTheBody_AndSkipsOnlyTheAffectingShimPrefix()
+    {
+        Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
+
+        MethodInfo target = Fresh(typeof(BoolPrefixTarget), nameof(BoolPrefixTarget.Compute));
+        HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);
+        MonoModDetourBackend backend = new MonoModDetourBackend();
+        Decider decider = new Decider();
+        decider.Own(target);
+
+        IDetourHandle? concord = null;
+        try
+        {
+            WireGate();
+            concord = backend.ApplyComposed(target, new[] { HeadOf(nameof(ComposeMods.LayeredHead)) });
+            Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+
+            harmony.Patch(target, prefix: MethodOf(nameof(ComposeMods.CancelCopyPrefix)));
+            harmony.Patch(target, prefix: MethodOf(nameof(ComposeMods.AffectingShimPrefix)));
+            harmony.Patch(target, prefix: MethodOf(nameof(ComposeMods.PlainShimPrefix)));
+
+            ComposeLog.Entries.Clear();
+            Assert.Equal(0, new BoolPrefixTarget().Compute(5));
+            Assert.Equal(new[] { "cancelcopy:5", "plainshim", "concord" }, ComposeLog.Entries);
+            Assert.True(backend.OwnsBody(target));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.ComposeRefusedMarker, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Disarm(harmony, ModId, concord);
+        }
+    }
+
+    [Fact]
+    public void ShimPrefixReturningFalse_SkipsTheLaterAffectingCopyRoutePrefix()
+    {
+        Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
+
+        MethodInfo target = Fresh(typeof(CrossRouteTarget), nameof(CrossRouteTarget.Compute));
+        HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);
+        MonoModDetourBackend backend = new MonoModDetourBackend();
+        Decider decider = new Decider();
+        decider.Own(target);
+
+        IDetourHandle? concord = null;
+        try
+        {
+            WireGate();
+            concord = backend.ApplyComposed(target, new[] { HeadOf(nameof(ComposeMods.LayeredHead)) });
+            Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+
+            harmony.Patch(target, prefix: MethodOf(nameof(ComposeMods.CancelShimPrefix)));
+            harmony.Patch(target, prefix: MethodOf(nameof(ComposeMods.AffectingCopyPrefix)));
+
+            ComposeLog.Entries.Clear();
+            Assert.Equal(0, new CrossRouteTarget().Compute("hi"));
+            Assert.Equal(new[] { "cancelshim", "concord" }, ComposeLog.Entries);
+            Assert.True(backend.OwnsBody(target));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.ComposeRefusedMarker, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Disarm(harmony, ModId, concord);
+        }
+    }
+
+    [Fact]
+    public void AffectingCopyRoutePrefix_WithNothingCancelling_RunsAndLetsTheBodyRun()
+    {
+        Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
+
+        MethodInfo target = Fresh(typeof(GuardedCopyTarget), nameof(GuardedCopyTarget.Compute));
+        HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);
+        MonoModDetourBackend backend = new MonoModDetourBackend();
+        Decider decider = new Decider();
+        decider.Own(target);
+
+        IDetourHandle? concord = null;
+        try
+        {
+            WireGate();
+            concord = backend.ApplyComposed(target, new[] { HeadOf(nameof(ComposeMods.LayeredHead)) });
+            Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+
+            harmony.Patch(target, prefix: MethodOf(nameof(ComposeMods.AffectingCopyPrefix)));
+
+            ComposeLog.Entries.Clear();
+            Assert.Equal(2, new GuardedCopyTarget().Compute("hi"));
+            Assert.Equal(new[] { "affectingcopy:hi", "concord", "body:hi" }, ComposeLog.Entries);
+            Assert.True(backend.OwnsBody(target));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.ComposeRefusedMarker, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Disarm(harmony, ModId, concord);
+        }
+    }
+
+    [Fact]
+    public void RefAdaptedPrefix_WritingAByValueTargetArgument_IsSeenByTheBody()
+    {
+        Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
+
+        MethodInfo target = Fresh(typeof(RefAdaptedTarget), nameof(RefAdaptedTarget.Compute));
+        HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);
+        MonoModDetourBackend backend = new MonoModDetourBackend();
+        Decider decider = new Decider();
+        decider.Own(target);
+
+        IDetourHandle? concord = null;
+        try
+        {
+            WireGate();
+            concord = backend.ApplyComposed(target, new[] { HeadOf(nameof(ComposeMods.LayeredHead)) });
+            Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+
+            harmony.Patch(target, prefix: MethodOf(nameof(ComposeMods.RefAdaptedPrefix)));
+
+            ComposeLog.Entries.Clear();
+            Assert.Equal(9, new RefAdaptedTarget().Compute("hi"));
+            Assert.Equal(new[] { "refadapt:hi", "concord", "body:rewritten" }, ComposeLog.Entries);
+            Assert.True(backend.OwnsBody(target));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.ComposeRefusedMarker, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Disarm(harmony, ModId, concord);
+        }
+    }
+
+    [Fact]
+    public void RefAdaptedPrefix_WritingAByValueStructArgument_IsSeenByTheBody()
+    {
+        Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
+
+        MethodInfo target = Fresh(typeof(RefAdaptedStructTarget), nameof(RefAdaptedStructTarget.Compute));
+        HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);
+        MonoModDetourBackend backend = new MonoModDetourBackend();
+        Decider decider = new Decider();
+        decider.Own(target);
+
+        IDetourHandle? concord = null;
+        try
+        {
+            WireGate();
+            concord = backend.ApplyComposed(target, new[] { HeadOf(nameof(ComposeMods.LayeredHead)) });
+            Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+
+            harmony.Patch(target, prefix: MethodOf(nameof(ComposeMods.RefAdaptedStructPrefix)));
+
+            ComposeLog.Entries.Clear();
+            Assert.Equal(30, new RefAdaptedStructTarget().Compute(5));
+            Assert.Equal(new[] { "refadaptstruct:5", "concord", "body:15" }, ComposeLog.Entries);
+            Assert.True(backend.OwnsBody(target));
+        }
+        finally
+        {
+            Disarm(harmony, ModId, concord);
+        }
+    }
+
+    [Fact]
+    public void FinalizerTakingState_ReadsWhatThePrefixWrote()
+    {
+        Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
+
+        MethodInfo target = Fresh(typeof(FinalizerStateReturnTarget), nameof(FinalizerStateReturnTarget.Compute));
+        HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);
+        MonoModDetourBackend backend = new MonoModDetourBackend();
+        Decider decider = new Decider();
+        decider.Own(target);
+
+        IDetourHandle? concord = null;
+        try
+        {
+            WireGate();
+            concord = backend.ApplyComposed(target, new[] { HeadOf(nameof(ComposeMods.LayeredHead)) });
+            Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+
+            harmony.Patch(
+                target,
+                prefix: new HarmonyMethod(typeof(FinalizerStateMods).GetMethod(nameof(FinalizerStateMods.Prefix))!),
+                finalizer: new HarmonyMethod(typeof(FinalizerStateMods).GetMethod(nameof(FinalizerStateMods.Finalizer))!));
+
+            ComposeLog.Entries.Clear();
+            Assert.Equal(10, new FinalizerStateReturnTarget().Compute(5));
+            Assert.Equal(new[] { "concord", "body:5", "fin:scoped:5:clean" }, ComposeLog.Entries);
+            Assert.True(backend.OwnsBody(target));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.ComposeRefusedMarker, StringComparison.Ordinal));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.SuppressFailedMarker, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Disarm(harmony, ModId, concord);
+        }
+    }
+
+    [Fact]
+    public void FinalizerTakingState_ReadsItOnTheThrowPath()
+    {
+        Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
+
+        MethodInfo target = Fresh(typeof(FinalizerStateThrowTarget), nameof(FinalizerStateThrowTarget.Compute));
+        HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);
+        MonoModDetourBackend backend = new MonoModDetourBackend();
+        Decider decider = new Decider();
+        decider.Own(target);
+
+        IDetourHandle? concord = null;
+        try
+        {
+            WireGate();
+            concord = backend.ApplyComposed(target, new[] { HeadOf(nameof(ComposeMods.LayeredHead)) });
+            Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+
+            harmony.Patch(
+                target,
+                prefix: new HarmonyMethod(typeof(FinalizerStateMods).GetMethod(nameof(FinalizerStateMods.Prefix))!),
+                finalizer: new HarmonyMethod(typeof(FinalizerStateMods).GetMethod(nameof(FinalizerStateMods.Finalizer))!));
+
+            ComposeLog.Entries.Clear();
+            Assert.Throws<InvalidOperationException>(() => new FinalizerStateThrowTarget().Compute(-7));
+            Assert.Equal(new[] { "concord", "body:-7", "fin:scoped:-7:InvalidOperationException" }, ComposeLog.Entries);
+            Assert.True(backend.OwnsBody(target));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.SuppressFailedMarker, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Disarm(harmony, ModId, concord);
+        }
+    }
+
+    [Fact]
+    public void FinalizerTakingState_WithNoPrefixToWriteIt_ReadsTheDefault()
+    {
+        Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
+
+        MethodInfo target = Fresh(typeof(FinalizerStateOnlyTarget), nameof(FinalizerStateOnlyTarget.Compute));
+        HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);
+        MonoModDetourBackend backend = new MonoModDetourBackend();
+        Decider decider = new Decider();
+        decider.Own(target);
+
+        IDetourHandle? concord = null;
+        try
+        {
+            WireGate();
+            concord = backend.ApplyComposed(target, new[] { HeadOf(nameof(ComposeMods.LayeredHead)) });
+            Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+
+            harmony.Patch(
+                target,
+                finalizer: new HarmonyMethod(typeof(FinalizerStateOnlyMods).GetMethod(nameof(FinalizerStateOnlyMods.Finalizer))!));
+
+            ComposeLog.Entries.Clear();
+            Assert.Equal(12, new FinalizerStateOnlyTarget().Compute(6));
+            Assert.Equal(new[] { "concord", "body:6", "fin:<null>" }, ComposeLog.Entries);
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.ComposeRefusedMarker, StringComparison.Ordinal));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.SuppressFailedMarker, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Disarm(harmony, ModId, concord);
+        }
+    }
+
+    [Fact]
+    public void PostfixWideningAnArgument_AndReadingAnOutArgument_Composes()
+    {
+        Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
+
+        MethodInfo target = Fresh(typeof(WideningTarget), nameof(WideningTarget.Compute));
+        HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);
+        MonoModDetourBackend backend = new MonoModDetourBackend();
+        Decider decider = new Decider();
+        decider.Own(target);
+
+        IDetourHandle? concord = null;
+        try
+        {
+            WireGate();
+            concord = backend.ApplyComposed(target, new[] { HeadOf(nameof(ComposeMods.LayeredHead)) });
+            Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+
+            harmony.Patch(target, postfix: new HarmonyMethod(typeof(WideningMods).GetMethod(nameof(WideningMods.Postfix))!));
+
+            ComposeLog.Entries.Clear();
+            Assert.Equal(4, new WideningTarget().Compute("abcd", out int made));
+            Assert.Equal(4, made);
+            Assert.Equal(new[] { "concord", "body:abcd", "post:abcd:4" }, ComposeLog.Entries);
+            Assert.True(backend.OwnsBody(target));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.ComposeRefusedMarker, StringComparison.Ordinal));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.SuppressFailedMarker, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Disarm(harmony, ModId, concord);
+        }
+    }
+
+    [Fact]
+    public void PostfixTakingInstanceOnAStaticTarget_GetsNull()
+    {
+        Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
+
+        MethodInfo target = Fresh(typeof(StaticInstanceShimTarget), nameof(StaticInstanceShimTarget.Compute));
+        HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);
+        MonoModDetourBackend backend = new MonoModDetourBackend();
+        Decider decider = new Decider();
+        decider.Own(target);
+
+        IDetourHandle? concord = null;
+        try
+        {
+            WireGate();
+            concord = backend.ApplyComposed(target, new[] { HeadOf(nameof(ComposeMods.LayeredHead)) });
+            Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+
+            harmony.Patch(target, postfix: new HarmonyMethod(typeof(StaticInstanceMods).GetMethod(nameof(StaticInstanceMods.ShimPostfix))!));
+
+            ComposeLog.Entries.Clear();
+            Assert.Equal(10, StaticInstanceShimTarget.Compute(5));
+            Assert.Equal(new[] { "concord", "body:5", "post:<null>" }, ComposeLog.Entries);
+            Assert.True(backend.OwnsBody(target));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.ComposeRefusedMarker, StringComparison.Ordinal));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.SuppressFailedMarker, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Disarm(harmony, ModId, concord);
+        }
+    }
+
+    [Fact]
+    public void PostfixTakingInstanceAndAnArgumentOnAStaticTarget_GetsNull()
+    {
+        Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
+
+        MethodInfo target = Fresh(typeof(StaticInstanceCopyTarget), nameof(StaticInstanceCopyTarget.Compute));
+        HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);
+        MonoModDetourBackend backend = new MonoModDetourBackend();
+        Decider decider = new Decider();
+        decider.Own(target);
+
+        IDetourHandle? concord = null;
+        try
+        {
+            WireGate();
+            concord = backend.ApplyComposed(target, new[] { HeadOf(nameof(ComposeMods.LayeredHead)) });
+            Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+
+            harmony.Patch(target, postfix: new HarmonyMethod(typeof(StaticInstanceMods).GetMethod(nameof(StaticInstanceMods.CopyPostfix))!));
+
+            ComposeLog.Entries.Clear();
+            Assert.Equal(10, StaticInstanceCopyTarget.Compute(5));
+            Assert.Equal(new[] { "concord", "body:5", "post:<null>:5" }, ComposeLog.Entries);
+            Assert.True(backend.OwnsBody(target));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.ComposeRefusedMarker, StringComparison.Ordinal));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.SuppressFailedMarker, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Disarm(harmony, ModId, concord);
+        }
+    }
+
+    [Fact]
+    public void PrefixTakingAByRefTargetArgumentByName_BindsTheTargetArgument()
+    {
+        Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
+
+        MethodInfo target = Fresh(typeof(ByRefNamedArgTarget), nameof(ByRefNamedArgTarget.Compute));
+        HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);
+        MonoModDetourBackend backend = new MonoModDetourBackend();
+        Decider decider = new Decider();
+        decider.Own(target);
+
+        IDetourHandle? concord = null;
+        try
+        {
+            WireGate();
+            concord = backend.ApplyComposed(target, new[] { HeadOf(nameof(ComposeMods.LayeredHead)) });
+            Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+
+            harmony.Patch(target, prefix: new HarmonyMethod(typeof(ByRefNamedArgMods).GetMethod(nameof(ByRefNamedArgMods.Prefix))!));
+
+            ComposeLog.Entries.Clear();
+            ByRefNamedArgTarget instance = new ByRefNamedArgTarget();
+            bool alsoRemove = true;
+            Assert.False(instance.Compute(out alsoRemove));
+            Assert.False(alsoRemove);
+            Assert.Equal(new[] { "pre", "concord" }, ComposeLog.Entries);
+            Assert.True(backend.OwnsBody(target));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.ComposeRefusedMarker, StringComparison.Ordinal));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.SuppressFailedMarker, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Disarm(harmony, ModId, concord);
+        }
+    }
+
+    [Fact]
+    public void PostfixTakingAPositionalArgument_GetsTheTargetArgumentAtThatIndex()
+    {
+        Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
+
+        MethodInfo target = Fresh(typeof(PositionalTarget), nameof(PositionalTarget.Compute));
+        HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);
+        MonoModDetourBackend backend = new MonoModDetourBackend();
+        Decider decider = new Decider();
+        decider.Own(target);
+
+        IDetourHandle? concord = null;
+        try
+        {
+            WireGate();
+            concord = backend.ApplyComposed(target, new[] { HeadOf(nameof(ComposeMods.LayeredHead)) });
+            Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+
+            harmony.Patch(target, postfix: MethodOf(nameof(ComposeMods.PositionalPostfix)));
+
+            ComposeLog.Entries.Clear();
+            Assert.Equal(14, new PositionalTarget().Compute(7));
+            Assert.Equal(new[] { "concord", "body:7", "positional:7" }, ComposeLog.Entries);
+            Assert.True(backend.OwnsBody(target));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.ComposeRefusedMarker, StringComparison.Ordinal));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.SuppressFailedMarker, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Disarm(harmony, ModId, concord);
+        }
+    }
+
+    [Fact]
+    public void PostfixTakingTheOriginalMethod_GetsTheTargetItPatched()
+    {
+        Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
+
+        MethodInfo target = Fresh(typeof(OriginalMethodTarget), nameof(OriginalMethodTarget.Compute));
+        HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);
+        MonoModDetourBackend backend = new MonoModDetourBackend();
+        Decider decider = new Decider();
+        decider.Own(target);
+
+        IDetourHandle? concord = null;
+        try
+        {
+            WireGate();
+            concord = backend.ApplyComposed(target, new[] { HeadOf(nameof(ComposeMods.LayeredHead)) });
+            Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+
+            harmony.Patch(target, postfix: MethodOf(nameof(ComposeMods.OriginalMethodPostfix)));
+
+            ComposeLog.Entries.Clear();
+            Assert.Equal(10, new OriginalMethodTarget().Compute(5));
+            Assert.Equal(new[] { "concord", "body:5", "original:Compute:OriginalMethodTarget:5" }, ComposeLog.Entries);
+            Assert.True(backend.OwnsBody(target));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.ComposeRefusedMarker, StringComparison.Ordinal));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.SuppressFailedMarker, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Disarm(harmony, ModId, concord);
+        }
+    }
+
+    [Fact]
+    public void StatePrefix_HandsItsStateToTheStatePostfix_ThroughOneSharedSlot()
+    {
+        Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
+
+        MethodInfo target = Fresh(typeof(StateTarget), nameof(StateTarget.Compute));
+        HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);
+        MonoModDetourBackend backend = new MonoModDetourBackend();
+        Decider decider = new Decider();
+        decider.Own(target);
+
+        IDetourHandle? concord = null;
+        try
+        {
+            WireGate();
+            concord = backend.ApplyComposed(target, new[] { HeadOf(nameof(ComposeMods.LayeredHead)) });
+            Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+
+            harmony.Patch(
+                target,
+                prefix: MethodOf(nameof(ComposeMods.StatePrefix)),
+                postfix: MethodOf(nameof(ComposeMods.StatePostfix)));
+
+            ComposeLog.Entries.Clear();
+            Assert.Equal(16, new StateTarget().Compute(5));
+            Assert.Equal(new[] { "stateprefix:6", "concord", "body:5", "statepostfix:6" }, ComposeLog.Entries);
+            Assert.True(backend.OwnsBody(target));
+            Assert.DoesNotContain(decider.Lines, line => line.StartsWith(UpdateWrapperHook.ComposeRefusedMarker, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Disarm(harmony, ModId, concord);
+        }
+    }
+
+    [Fact]
     public void RefusedPatch_ThenOwnedPatch_NeverAsksTheDeciderOnceHarmonyHasBuiltAWrapper()
     {
         Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
@@ -161,13 +929,86 @@ public sealed class SuppressedComposeTests
     }
 
     [Fact]
-    public void UnownedBody_LeavesTheRebuildToHarmony_AndTheModsPatchStillRuns()
+    public void ReinstallingTheHook_LeavesASuppressedTargetWithConcord()
+    {
+        Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
+
+        MethodInfo target = Fresh(typeof(ReseedTarget), nameof(ReseedTarget.Compute));
+        HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);
+        MonoModDetourBackend backend = new MonoModDetourBackend();
+        Decider decider = new Decider();
+        decider.Own(target);
+
+        IDetourHandle? concord = null;
+        try
+        {
+            WireGate();
+            concord = backend.ApplyComposed(target, new[] { HeadOf(nameof(ComposeMods.SilentHead)) });
+            Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+
+            harmony.Patch(target, prefix: MethodOf(nameof(ComposeMods.FirstHarmonyBuiltPrefix)));
+            Assert.True(SuppressedRebuilds.Holds(target));
+
+            Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+
+            MethodInfo handedBack = harmony.Patch(target, prefix: MethodOf(nameof(ComposeMods.SecondHarmonyBuiltPrefix)));
+
+            Assert.Same(OriginalStubs.For(target), handedBack);
+            Assert.True(SuppressedRebuilds.Holds(target));
+            Assert.Equal(2, decider.Asked.Count);
+            Assert.DoesNotContain(decider.Lines, line => line.IndexOf("Harmony already built a wrapper for", StringComparison.Ordinal) >= 0);
+        }
+        finally
+        {
+            SuppressedRebuilds.Forget(target);
+            Disarm(harmony, ModId, concord);
+        }
+    }
+
+    [Fact]
+    public void TargetHarmonyDetouredBeforeTheHook_IsLeftToHarmony()
+    {
+        Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
+
+        MethodInfo target = Fresh(typeof(PreHookTarget), nameof(PreHookTarget.Compute));
+        HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);
+        MonoModDetourBackend backend = new MonoModDetourBackend();
+        AttemptCountingDecider decider = new AttemptCountingDecider();
+        decider.Own(target);
+
+        try
+        {
+            harmony.Patch(target, prefix: MethodOf(nameof(ComposeMods.FirstHarmonyBuiltPrefix)));
+
+            WireGate();
+            Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+
+            harmony.Patch(target, prefix: MethodOf(nameof(ComposeMods.SecondHarmonyBuiltPrefix)));
+
+            Assert.Empty(decider.Attempts);
+            Assert.False(SuppressedRebuilds.Holds(target));
+            Assert.False(backend.OwnsBody(target));
+            Assert.Contains(decider.Lines, line => line.IndexOf("Harmony already built a wrapper for", StringComparison.Ordinal) >= 0 &&
+                line.IndexOf("PreHookTarget.Compute", StringComparison.Ordinal) >= 0);
+
+            ComposeLog.Entries.Clear();
+            Assert.Equal(60, PreHookTarget.Compute());
+            Assert.Equal(new[] { "first", "second", "body" }, ComposeLog.Entries);
+        }
+        finally
+        {
+            Disarm(harmony, ModId, null);
+        }
+    }
+
+    [Fact]
+    public void NeverDetouredTarget_IsTakenOverByConcord_AndTheModsPatchStillRuns()
     {
         Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
 
         MethodInfo target = Fresh(typeof(UnownedTarget), nameof(UnownedTarget.Compute));
         HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);
-        UnownedBodyBackend backend = new UnownedBodyBackend();
+        MonoModDetourBackend backend = new MonoModDetourBackend();
         Decider decider = new Decider();
         decider.Own(target);
 
@@ -175,22 +1016,20 @@ public sealed class SuppressedComposeTests
         {
             WireGate();
             Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+            Assert.False(backend.OwnsBody(target));
 
-            MethodInfo handedBack = harmony.Patch(target, prefix: MethodOf(nameof(ComposeMods.UnownedPrefix)));
+            MethodInfo handedBack = harmony.Patch(target, prefix: MethodOf(nameof(ComposeMods.ReentryPrefix)));
 
             ComposeLog.Entries.Clear();
-            Assert.Equal(77, UnownedTarget.Compute(1));
-            Assert.Contains("harmony", ComposeLog.Entries);
-            Assert.NotSame(OriginalStubs.For(target), handedBack);
-
-            string unowned = Assert.Single(decider.Lines, line => line.StartsWith(UpdateWrapperHook.ComposeUnownedMarker, StringComparison.Ordinal));
-            Assert.Contains("UnownedTarget.Compute", unowned);
+            Assert.Equal(2, UnownedTarget.Compute(1));
+            Assert.Equal(new[] { "harmony", "body" }, ComposeLog.Entries);
+            Assert.Same(OriginalStubs.For(target), handedBack);
+            Assert.True(backend.OwnsBody(target));
+            Assert.Equal(new[] { (MethodBase)target }, decider.Asked);
         }
         finally
         {
-            UpdateWrapperHook.DetachObserver();
-            SuppressionGate.ClearProbes();
-            TestUnpatch.Own(harmony, ModId);
+            Disarm(harmony, ModId, null);
         }
     }
 
@@ -268,6 +1107,65 @@ public sealed class SuppressedComposeTests
         }
         finally
         {
+            Disarm(harmony, ModId, concord);
+        }
+    }
+
+    [Fact]
+    public void SuppressedTarget_IsHeldAgainstTheForeignRebuild()
+    {
+        Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
+
+        MethodInfo target = Fresh(typeof(MarkedTarget), nameof(MarkedTarget.Compute));
+        HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);
+        MonoModDetourBackend backend = new MonoModDetourBackend();
+        Decider decider = new Decider();
+        decider.Own(target);
+
+        IDetourHandle? concord = null;
+        try
+        {
+            WireGate();
+            concord = backend.ApplyComposed(target, new[] { HeadOf(nameof(ComposeMods.SilentHead)) });
+            Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+            Assert.False(SuppressedRebuilds.Holds(target));
+
+            harmony.Patch(target, prefix: MethodOf(nameof(ComposeMods.ReentryPrefix)));
+
+            Assert.True(SuppressedRebuilds.Holds(target));
+        }
+        finally
+        {
+            SuppressedRebuilds.Forget(target);
+            Disarm(harmony, ModId, concord);
+        }
+    }
+
+    [Fact]
+    public void RefusedPatch_LeavesTheTargetUnheld()
+    {
+        Assert.True(SuppressionIsSafeHere(), HarmonyApiHonesty.SuppressionReason(HarmonyApiHonesty.Classify()));
+
+        MethodInfo target = Fresh(typeof(UnmarkedTarget), nameof(UnmarkedTarget.Compute));
+        HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);
+        MonoModDetourBackend backend = new MonoModDetourBackend();
+        AttemptCountingDecider decider = new AttemptCountingDecider();
+
+        IDetourHandle? concord = null;
+        try
+        {
+            WireGate();
+            concord = backend.ApplyComposed(target, new[] { HeadOf(nameof(ComposeMods.SilentHead)) });
+            Assert.True(UpdateWrapperHook.TryInstall(decider, backend, decider.Record));
+
+            harmony.Patch(target, prefix: MethodOf(nameof(ComposeMods.ReentryPrefix)));
+
+            Assert.Single(decider.Attempts);
+            Assert.False(SuppressedRebuilds.Holds(target));
+        }
+        finally
+        {
+            SuppressedRebuilds.Forget(target);
             Disarm(harmony, ModId, concord);
         }
     }
@@ -409,24 +1307,6 @@ public sealed class SuppressedComposeTests
         }
     }
 
-    private sealed class UnownedBodyBackend : IDetourBackend, IOwnsBodyQuery
-    {
-        public bool OwnsBody(MethodBase target)
-        {
-            return false;
-        }
-
-        public IDetourHandle Apply(MethodBase original, MethodInfo replacement)
-        {
-            throw new NotSupportedException();
-        }
-
-        public IDetourHandle ApplyComposed(MethodBase target, IReadOnlyList<Injection> added)
-        {
-            throw new NotSupportedException();
-        }
-    }
-
     public static class ComposeLog
     {
         public static List<string> Entries { get; } = new List<string>();
@@ -439,6 +1319,26 @@ public sealed class SuppressedComposeTests
         {
             ComposeLog.Entries.Add("body");
             return 50;
+        }
+    }
+
+    public static class ReseedTarget
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static int Compute()
+        {
+            ComposeLog.Entries.Add("body");
+            return 70;
+        }
+    }
+
+    public static class PreHookTarget
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static int Compute()
+        {
+            ComposeLog.Entries.Add("body");
+            return 60;
         }
     }
 
@@ -512,6 +1412,321 @@ public sealed class SuppressedComposeTests
         }
     }
 
+    public static class MarkedTarget
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static int Compute()
+        {
+            ComposeLog.Entries.Add("body");
+            return 41;
+        }
+    }
+
+    public static class UnmarkedTarget
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static int Compute()
+        {
+            ComposeLog.Entries.Add("body");
+            return 42;
+        }
+    }
+
+    public sealed class PassThroughTarget
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public IEnumerable<string> Values()
+        {
+            ComposeLog.Entries.Add("body");
+            return new[] { "a", "b" };
+        }
+    }
+
+    public sealed class FinalizerStateReturnTarget
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public int Compute(int seed)
+        {
+            ComposeLog.Entries.Add("body:" + seed);
+            return seed * 2;
+        }
+    }
+
+    public sealed class FinalizerStateThrowTarget
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public int Compute(int seed)
+        {
+            ComposeLog.Entries.Add("body:" + seed);
+            if (seed < 0) {
+                throw new InvalidOperationException("boom");
+            }
+
+            return seed;
+        }
+    }
+
+    public sealed class FinalizerStateOnlyTarget
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public int Compute(int seed)
+        {
+            ComposeLog.Entries.Add("body:" + seed);
+            return seed * 2;
+        }
+    }
+
+    public static class FinalizerStateMods
+    {
+        public static void Prefix(int seed, ref string __state)
+        {
+            __state = "scoped:" + seed;
+        }
+
+        public static void Finalizer(string __state, Exception? __exception)
+        {
+            ComposeLog.Entries.Add("fin:" + (__state ?? "<null>") + ":" + (__exception == null ? "clean" : __exception.GetType().Name));
+        }
+    }
+
+    public static class FinalizerStateOnlyMods
+    {
+        public static void Finalizer(string __state)
+        {
+            ComposeLog.Entries.Add("fin:" + (__state ?? "<null>"));
+        }
+    }
+
+    public sealed class WideningTarget
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public int Compute(string label, out int made)
+        {
+            ComposeLog.Entries.Add("body:" + label);
+            made = label.Length;
+            return made;
+        }
+    }
+
+    public static class WideningMods
+    {
+        public static void Postfix(object label, int made)
+        {
+            ComposeLog.Entries.Add("post:" + label + ":" + made);
+        }
+    }
+
+    public sealed class ByRefNamedArgTarget
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public bool Compute(out bool alsoRemove)
+        {
+            alsoRemove = true;
+            ComposeLog.Entries.Add("body");
+            return true;
+        }
+    }
+
+    public static class ByRefNamedArgMods
+    {
+        public static bool Prefix(ByRefNamedArgTarget __instance, ref bool __result, ref bool alsoRemove)
+        {
+            __result = false;
+            alsoRemove = false;
+            ComposeLog.Entries.Add("pre");
+            return false;
+        }
+    }
+
+    public static class StaticInstanceShimTarget
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static int Compute(int seed)
+        {
+            ComposeLog.Entries.Add("body:" + seed);
+            return seed * 2;
+        }
+    }
+
+    public static class StaticInstanceCopyTarget
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static int Compute(int seed)
+        {
+            ComposeLog.Entries.Add("body:" + seed);
+            return seed * 2;
+        }
+    }
+
+    public static class StaticInstanceMods
+    {
+        public static void ShimPostfix(object __instance)
+        {
+            ComposeLog.Entries.Add("post:" + (__instance == null ? "<null>" : "<set>"));
+        }
+
+        public static void CopyPostfix(object __instance, int seed)
+        {
+            ComposeLog.Entries.Add("post:" + (__instance == null ? "<null>" : "<set>") + ":" + seed);
+        }
+    }
+
+    public sealed class PositionalTarget
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public int Compute(int seed)
+        {
+            ComposeLog.Entries.Add("body:" + seed);
+            return seed * 2;
+        }
+    }
+
+    public sealed class OriginalMethodTarget
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public int Compute(int seed)
+        {
+            ComposeLog.Entries.Add("body:" + seed);
+            return seed * 2;
+        }
+    }
+
+    public sealed class ByValueResultTarget
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public int Compute(int seed)
+        {
+            ComposeLog.Entries.Add("body:" + seed);
+            return seed * 2;
+        }
+    }
+
+    public sealed class PrefixResultTarget
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public int Compute(int seed)
+        {
+            ComposeLog.Entries.Add("body:" + seed);
+            return seed * 2;
+        }
+    }
+
+    public sealed class BoolPrefixTarget
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public int Compute(int seed)
+        {
+            ComposeLog.Entries.Add("body:" + seed);
+            return seed * 2;
+        }
+    }
+
+    public sealed class CrossRouteTarget
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public int Compute(string text)
+        {
+            ComposeLog.Entries.Add("body:" + text);
+            return text.Length;
+        }
+    }
+
+    public sealed class GuardedCopyTarget
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public int Compute(string text)
+        {
+            ComposeLog.Entries.Add("body:" + text);
+            return text.Length;
+        }
+    }
+
+    public sealed class RefAdaptedTarget
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public int Compute(string text)
+        {
+            ComposeLog.Entries.Add("body:" + text);
+            return text.Length;
+        }
+    }
+
+    public sealed class RefAdaptedStructTarget
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public int Compute(int seed)
+        {
+            ComposeLog.Entries.Add("body:" + seed);
+            return seed * 2;
+        }
+    }
+
+    public sealed class StateTarget
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public int Compute(int seed)
+        {
+            ComposeLog.Entries.Add("body:" + seed);
+            return seed * 2;
+        }
+    }
+
+    public sealed class ScratchArgTarget
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public int Compute(int seed)
+        {
+            ComposeLog.Entries.Add("body:" + seed);
+            return seed;
+        }
+    }
+
+    public sealed class InstanceArgTarget
+    {
+        public int Bonus = 7;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public int Compute(int seed)
+        {
+            ComposeLog.Entries.Add("body");
+            return seed + Bonus;
+        }
+    }
+
+    public sealed class FieldArgTarget
+    {
+        private static int offset = 2;
+
+        private int count = 4;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public int Compute(int seed)
+        {
+            ComposeLog.Entries.Add("body");
+            return seed + count + offset;
+        }
+    }
+
+    public static class ResultArgTarget
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static int Compute(int seed)
+        {
+            ComposeLog.Entries.Add("body");
+            return seed * 2;
+        }
+    }
+
+    public static class EarlyReturnTarget
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static int Compute(int seed)
+        {
+            ComposeLog.Entries.Add("body");
+            return seed * 2;
+        }
+    }
+
     public static class ComposeMods
     {
         public static void SilentHead(ControlHandle<int> ch)
@@ -548,8 +1763,9 @@ public sealed class SuppressedComposeTests
             ComposeLog.Entries.Add("concord");
         }
 
-        public static bool RefusedPrefix(int seed, ref int __result)
+        public static bool RefusedPrefix(object[] __args, ref int __result)
         {
+            GC.KeepAlive(__args);
             ComposeLog.Entries.Add("harmony");
             __result = 99;
             return false;
@@ -571,11 +1787,143 @@ public sealed class SuppressedComposeTests
             ComposeLog.Entries.Add("harmony");
         }
 
-        public static bool UnownedPrefix(int seed, ref int __result)
+        public static void ResultArgPostfix(int seed, ref int __result)
         {
             ComposeLog.Entries.Add("harmony");
-            __result = 77;
+            __result += seed;
+        }
+
+        public static void FieldArgPostfix(int seed, ref int ___count, int ___offset, ref int __result)
+        {
+            ComposeLog.Entries.Add("harmony:" + ___offset);
+            ___count += seed;
+            __result += ___count;
+        }
+
+        public static IEnumerable<string> PassThroughPostfix(IEnumerable<string> values)
+        {
+            ComposeLog.Entries.Add("harmony");
+            foreach (string value in values)
+            {
+                yield return value;
+            }
+
+            yield return "extra";
+        }
+
+        public static void ScratchArgPostfix(int seed, ref int __result)
+        {
+            seed *= 10;
+            ComposeLog.Entries.Add("harmony:" + seed);
+            __result += seed;
+        }
+
+        public static void ScratchArgReader(int seed)
+        {
+            ComposeLog.Entries.Add("reader:" + seed);
+        }
+
+        public static void PositionalPostfix(int __0)
+        {
+            ComposeLog.Entries.Add("positional:" + __0);
+        }
+
+        public static void OriginalMethodPostfix(int seed, MethodBase __originalMethod)
+        {
+            ComposeLog.Entries.Add("original:" + __originalMethod.Name + ":" + __originalMethod.DeclaringType!.Name + ":" + seed);
+        }
+
+        public static bool WritesByValueResultPrefix(int seed, int __result)
+        {
+            __result = seed + 7;
+            ComposeLog.Entries.Add("byvalueresult:" + __result);
             return false;
+        }
+
+        public static bool CancelWithResultPrefix(int seed, ref int __result)
+        {
+            ComposeLog.Entries.Add("cancelresult:" + seed);
+            __result = seed + 100;
+            return false;
+        }
+
+        public static bool ReadResultPrefix(int seed, int __result)
+        {
+            ComposeLog.Entries.Add("readresult:" + seed + ":" + __result);
+            return true;
+        }
+
+        public static bool CancelCopyPrefix(int seed)
+        {
+            ComposeLog.Entries.Add("cancelcopy:" + seed);
+            return false;
+        }
+
+        public static void AffectingShimPrefix(ref int __result)
+        {
+            ComposeLog.Entries.Add("affectingshim");
+            __result = 99;
+        }
+
+        public static void PlainShimPrefix()
+        {
+            ComposeLog.Entries.Add("plainshim");
+        }
+
+        public static bool CancelShimPrefix()
+        {
+            ComposeLog.Entries.Add("cancelshim");
+            return false;
+        }
+
+        public static void AffectingCopyPrefix(string text)
+        {
+            ComposeLog.Entries.Add("affectingcopy:" + text);
+        }
+
+        public static void StatePrefix(int seed, out int __state)
+        {
+            __state = seed + 1;
+            ComposeLog.Entries.Add("stateprefix:" + __state);
+        }
+
+        public static void StatePostfix(ref int __result, int __state)
+        {
+            ComposeLog.Entries.Add("statepostfix:" + __state);
+            __result += __state;
+        }
+
+        public static void RefAdaptedPrefix(ref string text)
+        {
+            ComposeLog.Entries.Add("refadapt:" + text);
+            text = "rewritten";
+        }
+
+        public static void RefAdaptedStructPrefix(ref int seed)
+        {
+            ComposeLog.Entries.Add("refadaptstruct:" + seed);
+            seed += 10;
+        }
+
+        public static void InstanceArgPrefix(int seed, InstanceArgTarget __instance)
+        {
+            ComposeLog.Entries.Add("pre:" + (__instance.Bonus + seed));
+        }
+
+        public static void InstanceArgPostfix(int seed, InstanceArgTarget __instance, ref int __result)
+        {
+            ComposeLog.Entries.Add("harmony");
+            __result += __instance.Bonus + seed;
+        }
+
+        public static void EarlyReturnPostfix(int seed, ref int __result)
+        {
+            if (seed == 0)
+            {
+                return;
+            }
+
+            __result = -1;
         }
     }
 }

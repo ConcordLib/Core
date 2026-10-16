@@ -236,8 +236,9 @@ public sealed class SecondHarmonyCopyTests
             CopyLog.Entries.Add("concord");
         }
 
-        public static void RefusedPrefix(ref int seed)
+        public static void RefusedPrefix(object[] __args)
         {
+            GC.KeepAlive(__args);
             CopyLog.Entries.Add("harmony");
         }
     }

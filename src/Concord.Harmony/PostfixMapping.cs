@@ -31,23 +31,28 @@ internal static class PostfixMapping {
             return "Postfix method is null.";
         }
 
-        string name = (postfix.DeclaringType?.Name ?? "<global>") + "." + postfix.Name;
+        string name = NameOf(postfix);
         if (!postfix.IsStatic) {
             return "Postfix '" + name + "' is an instance method. Harmony patch methods are static.";
         }
 
         Type returnType = ReturnTypeOf(target);
-        if (postfix.ReturnType != typeof(void)) {
-            return "Postfix '" + name + "' returns '" + postfix.ReturnType.Name + "'. Harmony treats that as a pass-through postfix, which this mapping does not cover.";
-        }
-
         if (returnType.IsByRef) {
             return "Postfix '" + name + "' patches '" + target.Name + "', which returns by-ref. Harmony routes a by-ref return through __resultRef, which this mapping does not cover.";
         }
 
-        if (!BoundParameters.ShimCarries(postfix)) {
-            HarmonyArgumentBinder.CanCopyBody(target, postfix, HarmonyPatchRole.Postfix, out string? copyRefusal);
-            return copyRefusal;
+        if (postfix.ReturnType != typeof(void)) {
+            string? passReason = PassThroughReason(name, target, postfix, returnType);
+            if (passReason != null) {
+                return passReason;
+            }
+
+            return BoundParameters.PlanCopy(
+                "Postfix", name, target, postfix, returnType, HarmonyPatchRole.Postfix, true, out _, passThrough: true);
+        }
+
+        if (!BoundParameters.ShimCarries(target, postfix)) {
+            return BoundParameters.PlanCopy("Postfix", name, target, postfix, returnType, HarmonyPatchRole.Postfix, true, out _);
         }
 
         foreach (ParameterInfo parameter in postfix.GetParameters()) {
@@ -68,10 +73,24 @@ internal static class PostfixMapping {
             throw new InvalidOperationException(reason);
         }
 
-        if (!BoundParameters.ShimCarries(postfix)) {
+        if (postfix.ReturnType != typeof(void) || !BoundParameters.ShimCarries(target, postfix)) {
+            BoundParameters.PlanCopy(
+                "Postfix", NameOf(postfix), target, postfix, ReturnTypeOf(target), HarmonyPatchRole.Postfix, true, out CopyBinding binding,
+                postfix.ReturnType != typeof(void));
             return new[] {
                 new Injection(postfix, new InjectAt.Return(0), owner, -harmonyPriority) {
                     ForeignOrigin = true,
+                    ResultArgIndex = binding.Result,
+                    InstanceArgIndex = binding.Instance,
+                    FieldArgs = binding.Fields,
+                    ScratchArgs = binding.Scratch,
+                    AddressArgs = binding.Address,
+                    StateArgIndex = binding.State,
+                    OriginalMethodArgIndex = binding.OriginalMethod,
+                    RunOriginalArgIndex = binding.RunOriginal,
+                    ArgsArgIndex = binding.Args,
+                    StateType = binding.StateType,
+                    ReturnsIntoResult = binding.PassThrough,
                     BeforeOwners = before ?? Array.Empty<string>(),
                     AfterOwners = after ?? Array.Empty<string>(),
                 },
@@ -79,7 +98,7 @@ internal static class PostfixMapping {
         }
 
         Type returnType = ReturnTypeOf(target);
-        Type? instanceType = BoundParameters.NeedsInstance(postfix) ? BoundParameters.InstanceTypeOf(target) : null;
+        Type? instanceType = BoundParameters.NeedsInstance(postfix) && BoundParameters.CanBindInstance(target) ? BoundParameters.InstanceTypeOf(target) : null;
         int slot = Register(postfix, returnType, instanceType);
 
         return new[] {
@@ -102,8 +121,32 @@ internal static class PostfixMapping {
         ((PostfixVoid)adapters[slot])();
     }
 
+    internal static string NameOf(MethodInfo patch) {
+        return (patch.DeclaringType?.Name ?? "<global>") + "." + patch.Name;
+    }
+
     internal static Type ReturnTypeOf(MethodBase target) {
         return target is MethodInfo info ? info.ReturnType : typeof(void);
+    }
+
+    private static string? PassThroughReason(string name, MethodBase target, MethodInfo postfix, Type returnType) {
+        if (returnType == typeof(void)) {
+            return "Postfix '" + name + "' returns '" + postfix.ReturnType.Name + "' but '" + target.Name +
+                   "' returns void, so there is no result to pass through.";
+        }
+
+        if (postfix.ReturnType != returnType) {
+            return "Postfix '" + name + "' returns '" + postfix.ReturnType.Name + "' but '" + target.Name + "' returns '" + returnType.Name +
+                   "'. A pass-through postfix must return the target's own return type.";
+        }
+
+        ParameterInfo[] parameters = postfix.GetParameters();
+        if (parameters.Length == 0 || parameters[0].ParameterType != returnType) {
+            return "Postfix '" + name + "' returns '" + postfix.ReturnType.Name +
+                   "', so Harmony passes the result through its first parameter, which must be a by-value '" + returnType.Name + "'.";
+        }
+
+        return null;
     }
 
     private static int Register(MethodInfo postfix, Type returnType, Type? instanceType) {

@@ -50,6 +50,12 @@ public static class RuntimeCapability {
     /// <summary>The assembly-qualified name of the runtime type this backend binds to.</summary>
     public const string UpdaterTypeName = "WaylithClr.MethodBodyUpdater, System.Private.CoreLib";
 
+    /// <summary>The runtime config key that turns IL access checks off. RimWorld 1.7 ships it enabled.</summary>
+    public const string AccessCheckKey = "WaylithClr.SkipAccessChecks";
+
+    /// <summary>The environment variable form of <see cref="AccessCheckKey" />.</summary>
+    public const string AccessCheckSwitch = "DOTNET_SkipAccessChecks";
+
     private const string SupportFlag = "IsSupported";
 
     private const string ReplaceEntry = "ReplaceMethodBody";
@@ -60,6 +66,10 @@ public static class RuntimeCapability {
 
     private static readonly (BodyReplacement Support, string? Failure) Once =
         Probe(Updater(), ForkMinter.IsAvailable);
+
+    private static readonly bool SkipsOnce = SkipsAccessChecks(
+        AppContext.GetData(AccessCheckKey),
+        Environment.GetEnvironmentVariable(AccessCheckSwitch));
 
     /// <summary>The one-shot verdict for this process.</summary>
     public static BodyReplacement Support => Once.Support;
@@ -76,8 +86,33 @@ public static class RuntimeCapability {
     /// </summary>
     public static bool IsAvailable => Support == BodyReplacement.Available;
 
+    /// <summary>
+    ///     <see langword="true" /> when this runtime has IL access checks switched off, so a body replaced in
+    ///     place may name a private or internal member of another assembly and the call still runs.
+    /// </summary>
+    public static bool IgnoresAccessChecks => SkipsOnce;
+
     /// <summary>This runtime's own description, as it appears in every message this type produces.</summary>
     public static string Runtime => RuntimeInformation.FrameworkDescription;
+
+    /// <summary>
+    ///     Judges whether access checks are off. The pure form behind <see cref="IgnoresAccessChecks" />, so a
+    ///     caller can pass stand-in values instead of this process's own configuration.
+    /// </summary>
+    /// <param name="configured">The <see cref="AccessCheckKey" /> runtime config value, boxed as the host set it.</param>
+    /// <param name="environment">The <see cref="AccessCheckSwitch" /> environment value, or <see langword="null" />.</param>
+    /// <returns><see langword="true" /> when either source turns the checks off.</returns>
+    public static bool SkipsAccessChecks(object? configured, string? environment) {
+        if (configured is bool set) {
+            return set;
+        }
+
+        if (configured is string text && bool.TryParse(text, out bool parsed)) {
+            return parsed;
+        }
+
+        return environment == "1" || string.Equals(environment, "true", StringComparison.OrdinalIgnoreCase);
+    }
 
     /// <summary>Explains this process's verdict, including the probe failure detail when there is one.</summary>
     /// <returns>A log-ready sentence naming the api, this runtime, and why replacement is or is not usable.</returns>

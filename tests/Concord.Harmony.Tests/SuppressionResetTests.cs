@@ -47,7 +47,7 @@ public sealed class SuppressionResetTests
             harmony.Patch(target, prefix: MethodOf(nameof(ResetMods.ArgumentPrefix)));
 
             string refused = Assert.Single(decider.Lines, line => line.StartsWith(UpdateWrapperHook.ComposeRefusedMarker, StringComparison.Ordinal));
-            Assert.Contains("seed", refused);
+            Assert.Contains("__args", refused);
             Assert.False(
                 ComposedHolds(target),
                 "the refused rebuild left the previously composed handle applied, so patch A still sits in Concord's body under Harmony's wrapper");
@@ -288,8 +288,9 @@ public sealed class SuppressionResetTests
             ResetLog.Entries.Add("A");
         }
 
-        public static void ArgumentPrefix(ref int seed)
+        public static void ArgumentPrefix(object[] __args)
         {
+            GC.KeepAlive(__args);
             ResetLog.Entries.Add("B");
         }
     }

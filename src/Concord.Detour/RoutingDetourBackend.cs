@@ -10,7 +10,7 @@ namespace Concord.Detour;
 ///     When the host can notify Concord before it rebuilds a method, a target Concord already detoured is
 ///     promoted onto the host rather than silently losing its injections.
 /// </summary>
-public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver {
+public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver, IForeignPatchDecider {
     /// <summary>The code carried by every refusal to route a contested target.</summary>
     public const string RejectedRouteCode = "CONC166";
 
@@ -84,7 +84,7 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
             NotifierInstalled = host.TryInstallNotifier(this, inner);
         } catch (Exception ex) {
             NotifierInstalled = false;
-            log(CoexistenceLogMarkers.HookUnavailable + " " + ex.Message);
+            log(CoexistenceLogMarkers.HookUnavailable + " " + ExceptionReason.Of(ex));
         }
     }
 
@@ -163,7 +163,26 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
                 Promote(routeKey, normalized, hostPatchState);
             }
         } catch (Exception ex) {
-            log(CoexistenceLogMarkers.PromoteFailed + " notifier failed for " + DescribeTarget(target) + ": " + ex.Message);
+            log(CoexistenceLogMarkers.PromoteFailed + " notifier failed for " + DescribeTarget(target) + ": " + ExceptionReason.Of(ex));
+        }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    ///     A target Concord detoured itself, and one nobody has claimed yet, are both kept. A routed target's
+    ///     entry point already belongs to the host and cannot be taken back.
+    /// </remarks>
+    public bool TrySuppressForeignRebuild(MethodBase target, object hostPatchState) {
+        try {
+            MethodBase routeKey = MethodIdentity.SharedBodyKey(MethodIdentity.Normalize(target));
+
+            lock (gate) {
+                RouteState state = RouteOf(routeKey);
+                return state == RouteState.Raw || state == RouteState.Unpinned;
+            }
+        } catch (Exception ex) {
+            log(CoexistenceLogMarkers.PromoteFailed + " the suppression decision failed for " + DescribeTarget(target) + ": " + ExceptionReason.Of(ex));
+            return false;
         }
     }
 
@@ -243,7 +262,7 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
             return inner.ApplyComposed(target, added);
         }
 
-        if (host == null) {
+        if (host == null || SuppressedRebuilds.Holds(target)) {
             IDetourHandle raw = inner.ApplyComposed(target, added);
             PinRaw(routeKey);
             TrackRaw(routeKey, handle);
@@ -327,7 +346,7 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
             RestoreRawAfterFailedPromotion(applies);
             LoseToHost(routeKey);
             rawInventory.Remove(routeKey);
-            log(CoexistenceLogMarkers.PromoteFailed + " " + DescribeTarget(hostTarget) + ": " + ex.Message);
+            log(CoexistenceLogMarkers.PromoteFailed + " " + DescribeTarget(hostTarget) + ": " + ExceptionReason.Of(ex));
         }
     }
 
@@ -338,7 +357,7 @@ public sealed class RoutingDetourBackend : IDetourBackend, IForeignPatchObserver
             try {
                 held.Swap(inner.ApplyComposed(held.Original, held.Injections));
             } catch (Exception ex) {
-                log(CoexistenceLogMarkers.PromoteFailed + " could not restore the detour for " + DescribeTarget(held.Original) + ": " + ex.Message);
+                log(CoexistenceLogMarkers.PromoteFailed + " could not restore the detour for " + DescribeTarget(held.Original) + ": " + ExceptionReason.Of(ex));
             }
         }
     }

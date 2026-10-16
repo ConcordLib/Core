@@ -19,9 +19,12 @@ internal static class InjectedMemberResolver {
     private const BindingFlags TargetMembers =
         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
 
-    public static InjectedMemberMap Build(Type declarationType, MethodBase target) {
+    public static InjectedMemberMap Build(Type declarationType, MethodBase target, bool foreignOrigin) {
         Type targetType = target.DeclaringType!;
-        Dictionary<string, FieldInfo> fields = ShadowResolver.BuildFieldMap(declarationType, targetType, out Dictionary<string, AttachedFieldSlot> attached);
+        Dictionary<string, AttachedFieldSlot> attached = new Dictionary<string, AttachedFieldSlot>();
+        Dictionary<string, FieldInfo> fields = foreignOrigin
+            ? new Dictionary<string, FieldInfo>()
+            : ShadowResolver.BuildFieldMap(declarationType, targetType, out attached);
         Dictionary<string, MethodInfo?> methods = new Dictionary<string, MethodInfo?>();
 
         AddInjectedInstance(declarationType, target, methods);

@@ -67,8 +67,20 @@ internal static class ForeignPatchConverter {
             injections,
             refusals);
 
-        RefuseInfixes(Inner(incoming, "InnerPrefixes"), "InnerPrefixes", original, refusals);
-        RefuseInfixes(Inner(incoming, "InnerPostfixes"), "InnerPostfixes", original, refusals);
+        MapCategory(
+            Inner(incoming, "InnerPrefixes"),
+            patch => InfixMapping.Validate(original, patch),
+            patch => InfixMapping.Map(original, patch, true),
+            injections,
+            refusals);
+
+        MapCategory(
+            Inner(incoming, "InnerPostfixes"),
+            patch => InfixMapping.Validate(original, patch),
+            patch => InfixMapping.Map(original, patch, false),
+            injections,
+            refusals);
+
         RefuseInfixes(Inner(incoming, "InnerFinalizers"), "InnerFinalizers", original, refusals);
 
         return new Conversion(injections, refusals);

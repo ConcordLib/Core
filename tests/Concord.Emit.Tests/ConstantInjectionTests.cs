@@ -32,6 +32,14 @@ public class ConstantInjectionMethods {
         return LiveEjectAge;
     }
 
+    public float FromThis(float original) {
+        return Peek(this) + original;
+    }
+
+    private static float Peek(object self) {
+        return self == null ? 1f : 0f;
+    }
+
     public float PlusOne(float original) {
         return original + 1f;
     }
@@ -76,6 +84,15 @@ public sealed class ConstantInjectionTests {
 
         ConstantInjectionMethods.LiveEjectAge = 16f;
         Assert.True(run(new ConstantHost(), 17f));
+    }
+
+    [Fact]
+    public void FloatConstant_InjectionReadingThis_Composes() {
+        ComposeResult result = ComposeConstant(nameof(ConstantHost.ShouldEject), 18f, nameof(ConstantInjectionMethods.FromThis));
+        System.Func<ConstantHost, float, bool> run = result.Wrapper.CreateDelegate<System.Func<ConstantHost, float, bool>>();
+
+        Assert.True(run(new ConstantHost(), 18.5f));
+        Assert.False(run(new ConstantHost(), 17f));
     }
 
     [Fact]

@@ -151,6 +151,11 @@ namespace Concord.Harmony.Tests
             BoundArgLog.Entries.Add("field");
         }
 
+        public static void TakesMissingField(int ___Nope)
+        {
+            BoundArgLog.Entries.Add("missing");
+        }
+
         public static void TakesArgs(object[] __args)
         {
             BoundArgLog.Entries.Add("args");
@@ -262,23 +267,23 @@ namespace Concord.Harmony.Tests
         }
 
         [Fact]
-        public void Prefix_TakingTargetArgumentByRef_IsRefused()
+        public void Prefix_TakingTargetArgumentByRef_IsAccepted_AndBindsTheArgumentsAddress()
         {
-            string? reason = PrefixMapping.Validate(Refused(), Patch(nameof(BoundArgPatches.ReadsTargetArgByRef)));
+            MethodInfo target = Refused();
+            MethodInfo prefix = Patch(nameof(BoundArgPatches.ReadsTargetArgByRef));
 
-            Assert.Contains("'ref Int32 x'", reason);
-            Assert.Contains("declares no parameter of that name and type", reason);
-            Assert.Contains("by-ref-adapted", reason);
+            Assert.Null(PrefixMapping.Validate(target, prefix));
+            Assert.Equal(new[] { 0 }, PrefixMapping.Map(target, prefix, "test.a").AddressArgs);
         }
 
         [Fact]
-        public void Prefix_TakingReferenceTypeTargetArgument_IsRefusedAsAffectingTheOriginal()
+        public void Prefix_TakingReferenceTypeTargetArgument_IsAccepted_AndMarkedAsAffectingTheOriginal()
         {
             MethodInfo target = Method(typeof(BoundArgTarget), nameof(BoundArgTarget.RefTypeArg));
-            string? reason = PrefixMapping.Validate(target, Patch(nameof(BoundArgPatches.ReadsRefTypeArg)));
+            MethodInfo prefix = Patch(nameof(BoundArgPatches.ReadsRefTypeArg));
 
-            Assert.Contains("affecting the original", reason);
-            Assert.Contains("copied body runs unconditionally", reason);
+            Assert.Null(PrefixMapping.Validate(target, prefix));
+            Assert.True(PrefixMapping.Map(target, prefix, "test.a").AffectsOriginal);
         }
 
         [Fact]
@@ -314,30 +319,32 @@ namespace Concord.Harmony.Tests
         }
 
         [Fact]
-        public void Postfix_TakingTargetArgumentAndResult_IsRefused()
+        public void Postfix_TakingTargetArgumentAndResult_IsAccepted()
         {
             MethodInfo postfix = Patch(nameof(BoundArgPatches.ReadsTargetArgAndResult));
-            string? reason = PostfixMapping.Validate(Refused(), postfix);
 
-            Assert.Contains("__result, the target's return value", reason);
-            Assert.Contains("only to the target's own parameters", reason);
+            Assert.Null(PostfixMapping.Validate(Refused(), postfix));
         }
 
         [Fact]
-        public void Prefix_ReturningBoolWithTargetArgument_IsRefused()
+        public void Prefix_ReturningBoolWithTargetArgument_IsAccepted_AndCancelsOnFalse()
         {
-            string? reason = PrefixMapping.Validate(Refused(), Patch(nameof(BoundArgPatches.BoolPrefixReadingTargetArg)));
+            MethodInfo target = Refused();
+            MethodInfo prefix = Patch(nameof(BoundArgPatches.BoolPrefixReadingTargetArg));
 
-            Assert.Contains("returns 'Boolean'", reason);
+            Assert.Null(PrefixMapping.Validate(target, prefix));
+
+            Injection injection = PrefixMapping.Map(target, prefix, "test.a");
+            Assert.True(injection.CancelsOnFalse);
+            Assert.True(injection.AffectsOriginal);
         }
 
         [Fact]
-        public void Prefix_TakingInstanceOnStaticTarget_IsRefused()
+        public void Prefix_TakingInstanceOnStaticTarget_IsAccepted()
         {
             MethodInfo target = Method(typeof(BoundArgStaticTarget), nameof(BoundArgStaticTarget.Twice));
-            string? reason = PrefixMapping.Validate(target, Patch(nameof(BoundArgPatches.ReadsInstance)));
 
-            Assert.Contains("is static, so there is no instance to bind", reason);
+            Assert.Null(PrefixMapping.Validate(target, Patch(nameof(BoundArgPatches.ReadsInstance))));
         }
 
         [Fact]
@@ -349,12 +356,7 @@ namespace Concord.Harmony.Tests
         }
 
         [Theory]
-        [InlineData(nameof(BoundArgPatches.TakesState), "per-call slot shared with the same patch class")]
-        [InlineData(nameof(BoundArgPatches.TakesField), "a field on the target's declaring type")]
-        [InlineData(nameof(BoundArgPatches.TakesArgs), "every argument boxed into an array")]
-        [InlineData(nameof(BoundArgPatches.TakesOriginalMethod), "the patched method itself")]
-        [InlineData(nameof(BoundArgPatches.TakesRunOriginal), "whether a prefix has cancelled")]
-        [InlineData(nameof(BoundArgPatches.TakesPositional), "a positional __N argument")]
+        [InlineData(nameof(BoundArgPatches.TakesMissingField), "declares no field 'Nope'")]
         public void UnbindableParameter_IsRefusedWithItsOwnReason(string patchName, string expected)
         {
             MethodInfo patch = Patch(patchName);
@@ -369,20 +371,49 @@ namespace Concord.Harmony.Tests
         }
 
         [Fact]
+        public void PatchTakingAPositionalArgument_IsAccepted()
+        {
+            MethodInfo patch = Patch(nameof(BoundArgPatches.TakesPositional));
+
+            Assert.Null(PrefixMapping.Validate(Refused(), patch));
+            Assert.Null(PostfixMapping.Validate(Refused(), patch));
+        }
+
+        [Fact]
+        public void PatchTakingTheOriginalMethod_IsAccepted()
+        {
+            MethodInfo patch = Patch(nameof(BoundArgPatches.TakesOriginalMethod));
+
+            Assert.Null(PrefixMapping.Validate(Refused(), patch));
+            Assert.Null(PostfixMapping.Validate(Refused(), patch));
+        }
+
+        [Fact]
+        public void PatchTakingArgs_IsAccepted()
+        {
+            MethodInfo patch = Patch(nameof(BoundArgPatches.TakesArgs));
+
+            Assert.Null(PrefixMapping.Validate(Refused(), patch));
+            Assert.Null(PostfixMapping.Validate(Refused(), patch));
+        }
+
+        [Fact]
+        public void PatchTakingRunOriginal_IsAccepted()
+        {
+            MethodInfo patch = Patch(nameof(BoundArgPatches.TakesRunOriginal));
+
+            Assert.Null(PrefixMapping.Validate(Refused(), patch));
+            Assert.Null(PostfixMapping.Validate(Refused(), patch));
+        }
+
+        [Fact]
         public void NoRefusal_NamesAComponentThatDoesNotExist()
         {
             string[] patchNames =
             {
-                nameof(BoundArgPatches.ReadsTargetArgByRef),
                 nameof(BoundArgPatches.ReadsTargetArgWidened),
                 nameof(BoundArgPatches.ReadsRenamedTargetArg),
-                nameof(BoundArgPatches.ReadsTargetArgAndResult),
-                nameof(BoundArgPatches.TakesState),
-                nameof(BoundArgPatches.TakesField),
-                nameof(BoundArgPatches.TakesArgs),
-                nameof(BoundArgPatches.TakesOriginalMethod),
-                nameof(BoundArgPatches.TakesRunOriginal),
-                nameof(BoundArgPatches.TakesPositional),
+                nameof(BoundArgPatches.TakesMissingField),
                 nameof(BoundArgPatches.TakesInstanceByRef),
             };
 

@@ -62,7 +62,7 @@ public static class PatchDeclarationScanner {
             try {
                 ScanType(type, patches, props);
             } catch (ConcordDeclarationException ex) {
-                string message = "[Concord] declaration error in " + type.FullName + ": " + ex.Message;
+                string message = "[Concord] declaration error in " + type.FullName + ": " + ExceptionReason.Of(ex);
                 if (log is null) {
                     PatchLog.Write(message);
                     Console.Error.WriteLine(message);
@@ -181,8 +181,8 @@ public static class PatchDeclarationScanner {
                 ScanExtendedEnumDeclaration(type);
                 found = true;
             } catch (ConcordDeclarationException ex) {
-                PatchLog.Write("[Concord] declaration error in " + type.FullName + ": " + ex.Message);
-                Console.Error.WriteLine("[Concord] declaration error in " + type.FullName + ": " + ex.Message);
+                PatchLog.Write("[Concord] declaration error in " + type.FullName + ": " + ExceptionReason.Of(ex));
+                Console.Error.WriteLine("[Concord] declaration error in " + type.FullName + ": " + ExceptionReason.Of(ex));
             }
         }
 

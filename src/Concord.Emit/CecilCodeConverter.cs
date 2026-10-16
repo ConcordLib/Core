@@ -225,7 +225,7 @@ internal static class CecilCodeConverter {
     private static object? MapOperandToClr(Instruction instruction, TranspilerContext context) {
         return instruction.Operand switch {
             null => null,
-            Instruction target => context.LabelsByInstruction[target],
+            Instruction target => LabelOf(target, context, "a branch target"),
             Instruction[] targets => MapSwitchTargets(targets, context),
             VariableDefinition variable => LocalRefFactory.Create(variable.Index, ResolveType(variable.VariableType)),
             ParameterDefinition parameter => MapArgumentOperand(instruction.OpCode.OperandType, parameter),
@@ -240,7 +240,7 @@ internal static class CecilCodeConverter {
     private static Label[] MapSwitchTargets(Instruction[] targets, TranspilerContext context) {
         Label[] labels = new Label[targets.Length];
         for (int i = 0; i < targets.Length; i++) {
-            labels[i] = context.LabelsByInstruction[targets[i]];
+            labels[i] = LabelOf(targets[i], context, "a switch target");
         }
 
         return labels;
@@ -321,7 +321,7 @@ internal static class CecilCodeConverter {
             foreach (ExceptionHandler handler in group) {
                 bool handlerEndsAtBodyEnd = handler.HandlerEnd is null;
                 Instruction handlerEndInstruction = handlerEndsAtBodyEnd ? lastInstruction : handler.HandlerEnd!;
-                int handlerEndIndex = handlerEndsAtBodyEnd ? instructionCount : indexOf[handlerEndInstruction];
+                int handlerEndIndex = handlerEndsAtBodyEnd ? instructionCount : IndexOf(handlerEndInstruction, indexOf, handler, "HandlerEnd");
                 if (handlerEndIndex > endIndex) {
                     endIndex = handlerEndIndex;
                     endInstruction = handlerEndInstruction;
@@ -329,15 +329,55 @@ internal static class CecilCodeConverter {
                 }
             }
 
-            envelopes.Add(new ExceptionEnvelope(group, key.TryStart, indexOf[key.TryStart], endInstruction, endIndex, endsAtBodyEnd));
+            envelopes.Add(new ExceptionEnvelope(group, key.TryStart, IndexOf(key.TryStart, indexOf, group[0], "TryStart"), endInstruction, endIndex, endsAtBodyEnd));
         }
 
         return envelopes;
     }
 
     private static int HandlerOpenIndex(ExceptionHandler handler, Dictionary<Instruction, int> indexOf) {
-        Instruction openPosition = handler.HandlerType == ExceptionHandlerType.Filter ? handler.FilterStart : handler.HandlerStart;
-        return indexOf[openPosition];
+        bool isFilter = handler.HandlerType == ExceptionHandlerType.Filter;
+        Instruction openPosition = isFilter ? handler.FilterStart : handler.HandlerStart;
+        return IndexOf(openPosition, indexOf, handler, isFilter ? "FilterStart" : "HandlerStart");
+    }
+
+    private static int IndexOf(Instruction boundary, Dictionary<Instruction, int> indexOf, ExceptionHandler handler, string role) {
+        if (indexOf.TryGetValue(boundary, out int at)) {
+            return at;
+        }
+
+        throw new ConcordEmitException(
+            CodeConversionFailed,
+            $"A {handler.HandlerType.ToString().ToLowerInvariant()} handler's {role} names a '{boundary.OpCode.Name}' instruction that is not in the body being converted. " +
+            $"Its boundaries are {DescribeBoundaries(handler, indexOf)}.");
+    }
+
+    private static string DescribeBoundaries(ExceptionHandler handler, Dictionary<Instruction, int> indexOf) {
+        return "TryStart " + Describe(handler.TryStart, indexOf) +
+            ", TryEnd " + Describe(handler.TryEnd, indexOf) +
+            ", FilterStart " + Describe(handler.FilterStart, indexOf) +
+            ", HandlerStart " + Describe(handler.HandlerStart, indexOf) +
+            ", HandlerEnd " + Describe(handler.HandlerEnd, indexOf);
+    }
+
+    private static string Describe(Instruction? boundary, Dictionary<Instruction, int> indexOf) {
+        if (boundary is null) {
+            return "none";
+        }
+
+        return indexOf.TryGetValue(boundary, out int at)
+            ? "at " + at
+            : "missing '" + boundary.OpCode.Name + "'";
+    }
+
+    private static Label LabelOf(Instruction target, TranspilerContext context, string role) {
+        if (context.LabelsByInstruction.TryGetValue(target, out Label label)) {
+            return label;
+        }
+
+        throw new ConcordEmitException(
+            CodeConversionFailed,
+            $"{role} names a '{target.OpCode.Name}' instruction that is not in the body being converted.");
     }
 
     private static List<ExceptionEnvelope> LinkEnvelopes(List<ExceptionEnvelope> envelopes) {
@@ -426,15 +466,15 @@ internal static class CecilCodeConverter {
 
         foreach (ExceptionHandler handler in envelope.Handlers) {
             if (handler.HandlerType == ExceptionHandlerType.Filter) {
-                points.Add((indexOf[handler.FilterStart], handler.FilterStart, new ExceptionBlock(ExceptionBlockType.BeginExceptFilterBlock)));
-                points.Add((indexOf[handler.HandlerStart], handler.HandlerStart, new ExceptionBlock(ExceptionBlockType.BeginCatchBlock)));
+                points.Add((IndexOf(handler.FilterStart, indexOf, handler, "FilterStart"), handler.FilterStart, new ExceptionBlock(ExceptionBlockType.BeginExceptFilterBlock)));
+                points.Add((IndexOf(handler.HandlerStart, indexOf, handler, "HandlerStart"), handler.HandlerStart, new ExceptionBlock(ExceptionBlockType.BeginCatchBlock)));
             } else if (handler.HandlerType == ExceptionHandlerType.Fault) {
-                points.Add((indexOf[handler.HandlerStart], handler.HandlerStart, new ExceptionBlock(ExceptionBlockType.BeginFaultBlock)));
+                points.Add((IndexOf(handler.HandlerStart, indexOf, handler, "HandlerStart"), handler.HandlerStart, new ExceptionBlock(ExceptionBlockType.BeginFaultBlock)));
             } else if (handler.HandlerType == ExceptionHandlerType.Finally) {
-                points.Add((indexOf[handler.HandlerStart], handler.HandlerStart, new ExceptionBlock(ExceptionBlockType.BeginFinallyBlock)));
+                points.Add((IndexOf(handler.HandlerStart, indexOf, handler, "HandlerStart"), handler.HandlerStart, new ExceptionBlock(ExceptionBlockType.BeginFinallyBlock)));
             } else {
                 Type? catchType = handler.CatchType is null ? null : ResolveType(handler.CatchType);
-                points.Add((indexOf[handler.HandlerStart], handler.HandlerStart, new ExceptionBlock(ExceptionBlockType.BeginCatchBlock, catchType)));
+                points.Add((IndexOf(handler.HandlerStart, indexOf, handler, "HandlerStart"), handler.HandlerStart, new ExceptionBlock(ExceptionBlockType.BeginCatchBlock, catchType)));
             }
         }
 
@@ -476,9 +516,17 @@ internal static class CecilCodeConverter {
             byte b => ResolveSlotOperand(opcode, b, definition, localsByIndex, source) ?? Instruction.Create(opcode, b),
             int i32 => ResolveSlotOperand(opcode, i32, definition, localsByIndex, source) ?? Instruction.Create(opcode, i32),
             long i64 => Instruction.Create(opcode, i64),
-            float f32 => Instruction.Create(opcode, f32),
-            double f64 => Instruction.Create(opcode, f64),
+            float f32 => CreateRealInstruction(opcode, f32, source),
+            double f64 => CreateRealInstruction(opcode, f64, source),
             _ => throw new ConcordEmitException(CodeConversionFailed, $"Unsupported operand '{source.operand}' of type '{source.operand.GetType()}' for opcode '{source.opcode.Name}'. Supported operands are MethodBase, FieldInfo, Type, Label, LocalBuilder, string, and int/long/float/double literals."),
+        };
+    }
+
+    private static Instruction CreateRealInstruction(Mono.Cecil.Cil.OpCode opcode, double value, CodeInstruction source) {
+        return opcode.OperandType switch {
+            OperandType.ShortInlineR => Instruction.Create(opcode, (float)value),
+            OperandType.InlineR => Instruction.Create(opcode, value),
+            _ => throw new ConcordEmitException(CodeConversionFailed, $"Opcode '{source.opcode.Name}' does not take a floating-point operand, but the transpiler gave it '{value}' of type '{source.operand?.GetType()}'."),
         };
     }
 

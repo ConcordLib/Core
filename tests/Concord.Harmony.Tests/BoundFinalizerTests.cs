@@ -129,7 +129,30 @@ namespace Concord.Harmony.Tests
             return __exception;
         }
 
+        public static Exception? TakesTargetArgumentByRef(Exception? __exception, ref int x)
+        {
+            x = 0;
+            return __exception;
+        }
+
+        public static Exception? TakesTargetArgumentAsLong(Exception? __exception, long x)
+        {
+            BoundFinalizerLog.Entries.Add("fin:x=" + x);
+            return __exception;
+        }
+
+        public static Exception? TakesAnArgumentThatIsNotThere(Exception? __exception, int nope)
+        {
+            BoundFinalizerLog.Entries.Add("fin:nope=" + nope);
+            return __exception;
+        }
+
         public static Exception? ByRefException(ref Exception? __exception)
+        {
+            return __exception;
+        }
+
+        public static Exception? ByRefState(Exception? __exception, ref object? __state)
         {
             return __exception;
         }
@@ -246,17 +269,40 @@ namespace Concord.Harmony.Tests
         }
 
         [Fact]
-        public void Finalizer_TakingTargetArgument_IsStillRefused()
+        public void Finalizer_TakingTargetArgument_MatchesHarmony()
+        {
+            AssertParity(
+                nameof(BoundFinalizerTarget.TakesArgument),
+                (instance, x) => instance.TakesArgument(x),
+                nameof(BoundFinalizerPatches.TakesTargetArgument),
+                new[] { 4, -1 });
+        }
+
+        [Fact]
+        public void Finalizer_TakingTargetArgumentByRef_IsRefused()
         {
             MethodInfo target = Method(typeof(BoundFinalizerTarget), nameof(BoundFinalizerTarget.TakesArgument));
-            MethodInfo finalizer = Method(typeof(BoundFinalizerPatches), nameof(BoundFinalizerPatches.TakesTargetArgument));
+            MethodInfo finalizer = Method(typeof(BoundFinalizerPatches), nameof(BoundFinalizerPatches.TakesTargetArgumentByRef));
 
-            string? reason = FinalizerParticipant.Validate(target, finalizer);
+            Assert.Contains("by reference", FinalizerParticipant.Validate(target, finalizer));
+        }
 
-            Assert.NotNull(reason);
-            Assert.Contains("takes 'x'", reason);
-            Assert.Contains("left to Harmony", reason);
-            Assert.DoesNotContain("argument binder", reason);
+        [Fact]
+        public void Finalizer_TakingTargetArgumentAtTheWrongType_IsRefused()
+        {
+            MethodInfo target = Method(typeof(BoundFinalizerTarget), nameof(BoundFinalizerTarget.TakesArgument));
+            MethodInfo finalizer = Method(typeof(BoundFinalizerPatches), nameof(BoundFinalizerPatches.TakesTargetArgumentAsLong));
+
+            Assert.Contains("only an exact type match is bound", FinalizerParticipant.Validate(target, finalizer));
+        }
+
+        [Fact]
+        public void Finalizer_NamingAnArgumentTheTargetDoesNotHave_IsRefused()
+        {
+            MethodInfo target = Method(typeof(BoundFinalizerTarget), nameof(BoundFinalizerTarget.TakesArgument));
+            MethodInfo finalizer = Method(typeof(BoundFinalizerPatches), nameof(BoundFinalizerPatches.TakesAnArgumentThatIsNotThere));
+
+            Assert.Contains("declares no parameter of that name", FinalizerParticipant.Validate(target, finalizer));
         }
 
         [Fact]
@@ -272,15 +318,24 @@ namespace Concord.Harmony.Tests
         }
 
         [Fact]
-        public void Finalizer_TakingState_IsStillRefused()
+        public void Finalizer_TakingState_IsAccepted()
         {
             MethodInfo target = Method(typeof(BoundFinalizerTarget), nameof(BoundFinalizerTarget.SeesInstance));
             MethodInfo finalizer = Method(typeof(BoundFinalizerPatches), nameof(BoundFinalizerPatches.TakesState));
 
+            Assert.Null(FinalizerParticipant.Validate(target, finalizer));
+        }
+
+        [Fact]
+        public void Finalizer_TakingStateByReference_IsRefused()
+        {
+            MethodInfo target = Method(typeof(BoundFinalizerTarget), nameof(BoundFinalizerTarget.SeesInstance));
+            MethodInfo finalizer = Method(typeof(BoundFinalizerPatches), nameof(BoundFinalizerPatches.ByRefState));
+
             string? reason = FinalizerParticipant.Validate(target, finalizer);
 
             Assert.NotNull(reason);
-            Assert.Contains("__state", reason);
+            Assert.Contains("__state by reference", reason);
         }
 
         [Fact]

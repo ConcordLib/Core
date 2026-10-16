@@ -34,4 +34,77 @@ internal readonly record struct InjectionCopyRequest(
     ///     the narrower skip the foreign rulebook asks for.
     /// </summary>
     public bool ForeignOrigin { get; init; }
+
+    /// <summary>
+    ///     The injection parameter index that reads the target's return value, or null when there is none.
+    ///     A by-ref parameter writes it too.
+    /// </summary>
+    public int? ResultArgIndex { get; init; }
+
+    /// <summary>
+    ///     The injection parameter index that reads the target instance, or null when there is none.
+    /// </summary>
+    public int? InstanceArgIndex { get; init; }
+
+    /// <summary>
+    ///     The injection parameter index that reads whether the target body still runs, or null when there
+    ///     is none.
+    /// </summary>
+    public int? RunOriginalArgIndex { get; init; }
+
+    /// <summary>
+    ///     The injection parameter index that reads every target argument boxed into an object array, or
+    ///     null when there is none.
+    /// </summary>
+    public int? ArgsArgIndex { get; init; }
+
+    /// <summary>
+    ///     Maps an injection parameter index to the field on the target's declaring type it reads.
+    ///     A by-ref parameter writes it too.
+    /// </summary>
+    public IReadOnlyDictionary<int, FieldInfo>? FieldArgs { get; init; }
+
+    /// <summary>
+    ///     Injection parameter indexes the body writes but the target passes by value, so the write needs a
+    ///     scratch local instead of the wrapper's own argument.
+    /// </summary>
+    public IReadOnlyCollection<int>? ScratchArgs { get; init; }
+
+    /// <summary>
+    ///     Whether the injection returns the target's new return value, so a return lowers to a store into
+    ///     the wrapper's return-value local instead of a bare branch.
+    /// </summary>
+    public bool ReturnsIntoResult { get; init; }
+
+    /// <summary>
+    ///     Whether the injection returns a bool that cancels the target when it is false, so a return
+    ///     lowers to a test on that bool ahead of the branch.
+    /// </summary>
+    public bool CancelsOnFalse { get; init; }
+
+    /// <summary>
+    ///     Parameter indexes declared by-ref against a target argument the target passes by value, so their
+    ///     loads lower to the address of the wrapper's own argument.
+    /// </summary>
+    public IReadOnlyCollection<int>? AddressArgs { get; init; }
+
+    /// <summary>
+    ///     Parameter index bound to the shared state slot this injection's declaring type owns on the target.
+    /// </summary>
+    public int? StateArg { get; init; }
+
+    /// <summary>
+    ///     The injection parameter index bound to the patched method itself, or null when there is none.
+    /// </summary>
+    public int? OriginalMethodArg { get; init; }
+
+    /// <summary>
+    ///     The patch declaration whose state slot this injection reads, or null when it reads none.
+    /// </summary>
+    public Type? ForeignStateOwner { get; init; }
+
+    /// <summary>
+    ///     The injection parameter index that receives the foreign state slot, or null when there is none.
+    /// </summary>
+    public int? ForeignStateArg { get; init; }
 }

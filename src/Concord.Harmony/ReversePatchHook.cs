@@ -68,7 +68,7 @@ internal static class ReversePatchHook
         catch (Exception ex)
         {
             logger = null;
-            log(CoexistenceLogMarkers.HookUnavailable + " reverse patch: " + ex.Message);
+            log(CoexistenceLogMarkers.HookUnavailable + " reverse patch: " + ExceptionReason.Of(ex));
             return false;
         }
 

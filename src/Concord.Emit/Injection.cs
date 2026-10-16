@@ -1,3 +1,4 @@
+using System;
 using System.Reflection;
 
 namespace Concord.Emit;
@@ -40,6 +41,96 @@ public sealed record Injection(MethodBase InjectionMethod, InjectAt At, string O
     ///     the host's own ordering and always run outside Concord's.
     /// </summary>
     public bool ForeignOrigin { get; set; }
+
+    /// <summary>
+    ///     The parameter index that reads the target's return value, or null when there is none. A by-ref
+    ///     parameter writes it too. Only a return-position injection may set it.
+    /// </summary>
+    public int? ResultArgIndex { get; set; }
+
+    /// <summary>
+    ///     The parameter index that reads the target instance, or null when there is none. Only valid on
+    ///     an injection whose target is an instance method.
+    /// </summary>
+    public int? InstanceArgIndex { get; set; }
+
+    /// <summary>
+    ///     The parameter index that reads whether the target body still runs, or null when there is none.
+    ///     It reads the wrapper's cancel flag inverted.
+    /// </summary>
+    public int? RunOriginalArgIndex { get; set; }
+
+    /// <summary>
+    ///     The parameter index that reads every target argument boxed into an object array, or null when
+    ///     there is none. The array is built fresh for the injection and never written back.
+    /// </summary>
+    public int? ArgsArgIndex { get; set; }
+
+    /// <summary>
+    ///     Maps a parameter index to the field on the target's declaring type it reads. A by-ref parameter
+    ///     writes it too.
+    /// </summary>
+    public IReadOnlyDictionary<int, FieldInfo>? FieldArgs { get; set; }
+
+    /// <summary>
+    ///     Parameter indexes the body writes but the target passes by value, so the write lands in a scratch
+    ///     local instead of the wrapper's own argument.
+    /// </summary>
+    public IReadOnlyCollection<int>? ScratchArgs { get; set; }
+
+    /// <summary>
+    ///     Parameter indexes declared by-ref against a target argument the target passes by value, so they
+    ///     bind to the address of the wrapper's own argument and a write reaches the target body.
+    /// </summary>
+    public IReadOnlyCollection<int>? AddressArgs { get; set; }
+
+    /// <summary>
+    ///     Parameter index bound to the shared state slot this injection's declaring type owns on the target.
+    /// </summary>
+    public int? StateArgIndex { get; set; }
+
+    /// <summary>
+    ///     Type of the shared state slot <see cref="StateArgIndex" /> binds to.
+    /// </summary>
+    public Type? StateType { get; set; }
+
+    /// <summary>
+    ///     Parameter index bound to the patched method itself, which the wrapper loads from a handle table.
+    /// </summary>
+    public int? OriginalMethodArgIndex { get; set; }
+
+    /// <summary>
+    ///     Patch declaration whose state slot this injection reads, when it is not the injection's own.
+    /// </summary>
+    public Type? ForeignStateOwner { get; set; }
+
+    /// <summary>
+    ///     Type of the state slot named by <see cref="ForeignStateOwner" />.
+    /// </summary>
+    public Type? ForeignStateType { get; set; }
+
+    /// <summary>
+    ///     Parameter index that receives the foreign state slot, boxed. Bound to null when there is no owner.
+    /// </summary>
+    public int? ForeignStateArgIndex { get; set; }
+
+    /// <summary>
+    ///     Whether this injection returns the target's new return value, so its return stores into the
+    ///     wrapper's return-value local.
+    /// </summary>
+    public bool ReturnsIntoResult { get; set; }
+
+    /// <summary>
+    ///     Whether this injection returns a bool that cancels the target when it is false, the shape
+    ///     Harmony gives a prefix.
+    /// </summary>
+    public bool CancelsOnFalse { get; set; }
+
+    /// <summary>
+    ///     Whether a cancelling head injection ahead of this one skips it. Null works the answer out
+    ///     from the injection's own signature.
+    /// </summary>
+    public bool? AffectsOriginal { get; set; }
 
     /// <summary>
     ///     Whether this injection also runs on the landing a cancelling head injection branches to,

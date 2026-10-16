@@ -35,8 +35,9 @@ public static class SharedStateHonestyMods
         ch.Cancel();
     }
 
-    public static bool RefusedPrefix(int seed, ref int __result)
+    public static bool RefusedPrefix(object[] __args, ref int __result)
     {
+        GC.KeepAlive(__args);
         __result = 42;
         return false;
     }

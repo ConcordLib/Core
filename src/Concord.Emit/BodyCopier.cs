@@ -16,6 +16,7 @@ internal static class BodyCopier {
     private static readonly MethodInfo AttachedRef = typeof(AttachedStorage).GetMethod(nameof(AttachedStorage.GetOrAddRef))!;
     private static readonly MethodInfo GetTypeFromHandle = typeof(Type).GetMethod(nameof(Type.GetTypeFromHandle))!;
     private static readonly MethodInfo TypeAssemblyGetter = typeof(Type).GetProperty(nameof(Type.Assembly))!.GetGetMethod()!;
+    private static readonly MethodInfo OriginalMethodGetter = typeof(OriginalMethods).GetMethod(nameof(OriginalMethods.Get))!;
 
     /// <summary>
     ///     Copies the original target body into a destination dynamic method definition.
@@ -97,7 +98,8 @@ internal static class BodyCopier {
         RejectConstructedLocalHandle(injectionBody, request.InjectionMethod);
         ModuleDefinition module = request.Destination.Module;
 
-        Dictionary<int, int> argRemap = BuildArgRemap(request.Target, request.InjectionMethod);
+        Dictionary<int, int> argRemap = BuildArgRemap(
+            request.Target, request.InjectionMethod, out Dictionary<int, int>? derefArgs, out Dictionary<int, int>? narrowArgs);
         captureBinding = LocalResolver.Bind(request, locals, captureBinding);
         if (captureBinding is not null) {
             foreach (int captured in captureBinding.Keys) {
@@ -118,6 +120,60 @@ internal static class BodyCopier {
             argRemap.Remove(bound);
         }
 
+        if (request.ResultArgIndex is int resultArg) {
+            argRemap.Remove(resultArg);
+        }
+
+        int nullInstanceArg = -1;
+        int structInstanceArg = -1;
+        if (request.InstanceArgIndex is int instanceArg) {
+            if (request.Target.IsStatic) {
+                argRemap.Remove(instanceArg);
+                nullInstanceArg = instanceArg;
+            } else if (request.Target.DeclaringType?.IsValueType == true) {
+                argRemap.Remove(instanceArg);
+                structInstanceArg = instanceArg;
+            } else if (NarrowsInstance(request, instanceArg)) {
+                argRemap.Remove(instanceArg);
+                narrowArgs ??= new Dictionary<int, int>();
+                narrowArgs[instanceArg] = 0;
+            } else {
+                argRemap[instanceArg] = 0;
+            }
+        }
+
+        Dictionary<int, int>? addressArgs = BindAddressArgs(request, argRemap);
+        if (request.StateArg is int stateArg) {
+            argRemap.Remove(stateArg);
+        }
+
+        if (request.OriginalMethodArg is int originalMethodArg) {
+            argRemap.Remove(originalMethodArg);
+        }
+
+        if (request.RunOriginalArgIndex is int runOriginalArg) {
+            argRemap.Remove(runOriginalArg);
+        }
+
+        if (request.ArgsArgIndex is int argsArg) {
+            argRemap.Remove(argsArg);
+        }
+
+        if (request.ForeignStateArg is int foreignStateArg) {
+            argRemap.Remove(foreignStateArg);
+        }
+
+        List<Instruction> scratchPrologue = [];
+        Dictionary<int, VariableDefinition>? scratchArgs =
+            SpillScratchArgs(request, argRemap, module, scratchPrologue);
+        scratchArgs = SpillDerefArgs(request, derefArgs, scratchArgs, module, scratchPrologue);
+        scratchArgs = SpillNarrowArgs(request, narrowArgs, scratchArgs, module, scratchPrologue);
+        scratchArgs = SpillNullInstance(request, nullInstanceArg, scratchArgs, module, scratchPrologue);
+        scratchArgs = SpillStructInstance(request, structInstanceArg, scratchArgs, module, scratchPrologue);
+        scratchArgs = SpillRunOriginal(request, locals, scratchArgs, module, scratchPrologue);
+        scratchArgs = SpillArgsArray(request, scratchArgs, module, scratchPrologue);
+        VariableDefinition? resultCopy = SpillResultCopy(request, locals, insideAround, module, scratchPrologue);
+
         int controlHandleArgIndex = ControlHandleLowering.FindControlHandleArgIndex(request.InjectionMethod);
         int operationArgIndex = ControlHandleLowering.FindOperationArgIndex(request.InjectionMethod);
 
@@ -129,6 +185,8 @@ internal static class BodyCopier {
         List<Instruction> boundPrologue = [];
         Dictionary<int, VariableDefinition> boundConstants =
             BoundConstants.SpillToLocals(boundValues, request.InjectionMethod, request.Destination.Body, module, boundPrologue);
+        SpillOriginalMethod(request, module, boundPrologue, boundConstants);
+        SpillForeignState(request, locals, module, boundPrologue, boundConstants);
 
         InjectionLoweringSite site = new InjectionLoweringSite(
             controlHandleArgIndex,
@@ -143,7 +201,16 @@ internal static class BodyCopier {
             insideAround,
             captureBinding,
             boundConstants,
-            localHandles) { InsideCatch = insideCatch, At = request.At, ForeignOrigin = request.ForeignOrigin };
+            localHandles) {
+            InsideCatch = insideCatch, At = request.At, ForeignOrigin = request.ForeignOrigin, ResultArgIndex = request.ResultArgIndex,
+            FieldArgs = request.FieldArgs,
+            ScratchArgs = scratchArgs,
+            ReturnsIntoResult = request.ReturnsIntoResult,
+            CancelsOnFalse = request.CancelsOnFalse,
+            AddressArgs = addressArgs,
+            StateArg = request.StateArg,
+            ResultCopy = resultCopy,
+        };
 
         List<(Instruction Source, List<Instruction> Emitted)> entries =
             new List<(Instruction Source, List<Instruction> Emitted)>(injectionBody.Instructions.Count);
@@ -155,7 +222,8 @@ internal static class BodyCopier {
 
         Dictionary<Instruction, Instruction> instructionMap = BuildInstructionMap(entries);
 
-        List<Instruction> result = new List<Instruction>(injectionBody.Instructions.Count + boundPrologue.Count);
+        List<Instruction> result = new List<Instruction>(injectionBody.Instructions.Count + boundPrologue.Count + scratchPrologue.Count);
+        result.AddRange(scratchPrologue);
         result.AddRange(boundPrologue);
         foreach ((Instruction _, List<Instruction> emitted) in entries) {
             foreach (Instruction copy in emitted) {
@@ -284,14 +352,13 @@ internal static class BodyCopier {
         IReadOnlyList<VariableDefinition> argLocals,
         OpCode originalOpCode,
         CallSiteShape shape) {
-        BoundConstants.RejectDeclarations(request.InjectionMethod, "an invoke-wrap injection");
         RejectLocalParameters(request.InjectionMethod, "an invoke-wrap injection");
 
         MethodBody injectionBody = request.InjectionDefinition.Body;
         RejectConstructedLocalHandle(injectionBody, request.InjectionMethod);
         ModuleDefinition module = request.Destination.Module;
 
-        Dictionary<int, VariableDefinition> wrapArgBinding = BuildWrapArgBinding(request.InjectionMethod, argLocals, shape);
+        Dictionary<int, VariableDefinition> wrapArgBinding = BuildWrapArgBinding(request.InjectionMethod, argLocals, receiverLocal, shape);
         Dictionary<int, int> thisRemap = request.InjectionMethod.IsStatic ? new Dictionary<int, int>() : new Dictionary<int, int> { [0] = 0 };
         int operationArgIndex = ControlHandleLowering.FindOperationArgIndex(request.InjectionMethod);
 
@@ -311,6 +378,14 @@ internal static class BodyCopier {
             module, variableMap, injectionBody.Variables, request.InjectedMembers, thisRemap, request.Destination.Body.Variables,
             request.InjectionMethod.DeclaringType!, request.InjectionMethod);
 
+        List<Instruction> boundPrologue = [];
+        Dictionary<int, VariableDefinition> boundConstants = BoundConstants.SpillToLocals(
+            BoundConstants.Resolve(request.InjectionMethod, request.BoundArguments),
+            request.InjectionMethod,
+            request.Destination.Body,
+            module,
+            boundPrologue);
+
         WrapLoweringSite site = new WrapLoweringSite(
             operationArgIndex,
             wrapEnd,
@@ -318,7 +393,8 @@ internal static class BodyCopier {
             receiverLocal,
             invokeParameterTypes,
             originalOpCode,
-            wrapArgBinding);
+            wrapArgBinding,
+            boundConstants);
 
         List<(Instruction Source, List<Instruction> Emitted)> entries =
             new List<(Instruction Source, List<Instruction> Emitted)>(injectionBody.Instructions.Count);
@@ -330,7 +406,8 @@ internal static class BodyCopier {
 
         Dictionary<Instruction, Instruction> instructionMap = BuildInstructionMap(entries);
 
-        List<Instruction> result = new List<Instruction>(injectionBody.Instructions.Count);
+        List<Instruction> result = new List<Instruction>(injectionBody.Instructions.Count + boundPrologue.Count);
+        result.AddRange(boundPrologue);
         foreach ((Instruction _, List<Instruction> emitted) in entries) {
             foreach (Instruction copy in emitted) {
                 RemapBranchTargets(copy, instructionMap);
@@ -458,6 +535,10 @@ internal static class BodyCopier {
 
         if (TryLowerArgBinding(source, site.WrapArgBinding, out Instruction? bound)) {
             return new List<Instruction> { bound! };
+        }
+
+        if (TryLowerArgBinding(source, site.BoundConstants, out Instruction? boundConstant)) {
+            return new List<Instruction> { boundConstant! };
         }
 
         if (TryLowerGetExecutingAssembly(source, ctx, out List<Instruction>? executingAssembly)) {
@@ -599,6 +680,31 @@ internal static class BodyCopier {
     }
 
     private static List<Instruction>? TryLowerBinding(Instruction source, LoweringContext ctx, InjectionLoweringSite site) {
+        List<Instruction>? resultBinding = TryLowerResultBinding(source, site);
+        if (resultBinding is not null) {
+            return resultBinding;
+        }
+
+        List<Instruction>? fieldBinding = TryLowerFieldBinding(source, ctx, site);
+        if (fieldBinding is not null) {
+            return fieldBinding;
+        }
+
+        List<Instruction>? scratchBinding = TryLowerScratchBinding(source, site);
+        if (scratchBinding is not null) {
+            return scratchBinding;
+        }
+
+        List<Instruction>? stateBinding = TryLowerStateBinding(source, site);
+        if (stateBinding is not null) {
+            return stateBinding;
+        }
+
+        List<Instruction>? addressArg = TryLowerAddressArg(source, site);
+        if (addressArg is not null) {
+            return addressArg;
+        }
+
         List<Instruction>? localAddress = TryLowerLocalAddress(source, ctx);
         if (localAddress is not null) {
             return localAddress;
@@ -613,6 +719,480 @@ internal static class BodyCopier {
         }
 
         return TryLowerCommon(source, ctx);
+    }
+
+    private static List<Instruction>? TryLowerResultBinding(Instruction source, InjectionLoweringSite site) {
+        if (site.ResultArgIndex is not int resultArg || GetArgIndex(source) != resultArg) {
+            return null;
+        }
+
+        bool isAddress = source.OpCode == OpCodes.Ldarga || source.OpCode == OpCodes.Ldarga_S;
+        bool isStore = source.OpCode == OpCodes.Starg || source.OpCode == OpCodes.Starg_S;
+        if (site.ResultCopy is not null) {
+            if (isStore) {
+                return new List<Instruction> { Instruction.Create(OpCodes.Stloc, site.ResultCopy) };
+            }
+
+            if (!isAddress && !IsLoadArgOpCode(source.OpCode)) {
+                return null;
+            }
+
+            return new List<Instruction> { Instruction.Create(isAddress ? OpCodes.Ldloca : OpCodes.Ldloc, site.ResultCopy) };
+        }
+
+        if (isStore && !site.ReturnsIntoResult) {
+            throw new ConcordEmitException(
+                "CONC172",
+                "Injection '" + site.InjectionMethod.Name + "' reassigns the parameter bound to the target's return value. Write through it instead.");
+        }
+
+        if (!isAddress && !isStore && !IsLoadArgOpCode(source.OpCode)) {
+            return null;
+        }
+
+        VariableDefinition? slot = site.InsideAround && site.Locals.SpliceValue is not null ? site.Locals.SpliceValue : site.Locals.ReturnValue;
+        if (slot is null) {
+            throw new ConcordEmitException(
+                "CONC172",
+                "Injection '" + site.InjectionMethod.Name + "' binds the target's return value, but the target returns void.");
+        }
+
+        if (isStore) {
+            return new List<Instruction> { Instruction.Create(OpCodes.Stloc, slot) };
+        }
+
+        bool byRef = isAddress || ParameterIsByRef(site.InjectionMethod, resultArg);
+        return new List<Instruction> { Instruction.Create(byRef ? OpCodes.Ldloca : OpCodes.Ldloc, slot) };
+    }
+
+    private static Dictionary<int, int>? BindAddressArgs(InjectionCopyRequest request, Dictionary<int, int> argRemap) {
+        if (request.AddressArgs is null) {
+            return null;
+        }
+
+        ParameterInfo[] parameters = request.InjectionMethod.GetParameters();
+        ParameterInfo[] targetParams = request.Target.GetParameters();
+        int offset = request.InjectionMethod.IsStatic ? 0 : 1;
+        int targetOffset = request.Target.IsStatic ? 0 : 1;
+
+        Dictionary<int, int>? bound = null;
+        foreach (int address in request.AddressArgs) {
+            int index = address - offset;
+            if (index < 0 || index >= parameters.Length) {
+                continue;
+            }
+
+            int positional = PositionalIndex(parameters[index].Name);
+            if (positional >= 0 && positional < targetParams.Length) {
+                argRemap.Remove(address);
+                bound ??= new Dictionary<int, int>();
+                bound[address] = positional + targetOffset;
+                continue;
+            }
+
+            for (int si = 0; si < targetParams.Length; si++) {
+                if (targetParams[si].Name != parameters[index].Name) {
+                    continue;
+                }
+
+                argRemap.Remove(address);
+                bound ??= new Dictionary<int, int>();
+                bound[address] = si + targetOffset;
+                break;
+            }
+        }
+
+        return bound;
+    }
+
+    private static List<Instruction>? TryLowerStateBinding(Instruction source, InjectionLoweringSite site) {
+        if (site.StateArg is not int stateArg) {
+            return null;
+        }
+
+        bool isAddress = source.OpCode == OpCodes.Ldarga || source.OpCode == OpCodes.Ldarga_S;
+        if (!isAddress && !IsLoadArgOpCode(source.OpCode)) {
+            return null;
+        }
+
+        if (GetArgIndex(source) != stateArg) {
+            return null;
+        }
+
+        bool byRef = isAddress || ParameterIsByRef(site.InjectionMethod, stateArg);
+        return new List<Instruction> { Instruction.Create(byRef ? OpCodes.Ldloca : OpCodes.Ldloc, ResolveStateLocal(site)) };
+    }
+
+    private static List<Instruction>? TryLowerAddressArg(Instruction source, InjectionLoweringSite site) {
+        if (site.AddressArgs is null || !IsLoadArgOpCode(source.OpCode)) {
+            return null;
+        }
+
+        int arg = GetArgIndex(source);
+        if (arg < 0 || !site.AddressArgs.TryGetValue(arg, out int wrapperArg)) {
+            return null;
+        }
+
+        Instruction load = Instruction.Create(OpCodes.Ldarg_0);
+        load.OpCode = wrapperArg <= byte.MaxValue ? OpCodes.Ldarga_S : OpCodes.Ldarga;
+        load.Operand = wrapperArg;
+        return new List<Instruction> { load };
+    }
+
+    private static void SpillForeignState(
+        InjectionCopyRequest request,
+        ProtocolLocals locals,
+        ModuleDefinition module,
+        List<Instruction> prologue,
+        Dictionary<int, VariableDefinition> boundLocals) {
+        if (request.ForeignStateArg is not int foreignStateArg) {
+            return;
+        }
+
+        VariableDefinition local = new VariableDefinition(module.ImportReference(typeof(object)));
+        request.Destination.Body.Variables.Add(local);
+        request.Destination.Body.InitLocals = true;
+
+        if (request.ForeignStateOwner is Type owner) {
+            if (locals.State is null || !locals.State.TryGetValue(owner, out VariableDefinition? slot)) {
+                throw new ConcordEmitException(
+                    "CONC142",
+                    "Concord bug: no state slot exists for patch declaration '" + owner.Name + "' even though injection '" +
+                    request.InjectionMethod.Name + "' reads it. Report it with the declaration.");
+            }
+
+            prologue.Add(Instruction.Create(OpCodes.Ldloc, slot));
+            if (slot.VariableType.IsValueType) {
+                prologue.Add(Instruction.Create(OpCodes.Box, slot.VariableType));
+            }
+        } else {
+            prologue.Add(Instruction.Create(OpCodes.Ldnull));
+        }
+
+        prologue.Add(Instruction.Create(OpCodes.Stloc, local));
+        boundLocals[foreignStateArg] = local;
+    }
+
+    private static void SpillOriginalMethod(
+        InjectionCopyRequest request, ModuleDefinition module, List<Instruction> prologue, Dictionary<int, VariableDefinition> locals) {
+        if (request.OriginalMethodArg is not int originalMethodArg) {
+            return;
+        }
+
+        int offset = request.InjectionMethod.IsStatic ? 0 : 1;
+        Type declared = request.InjectionMethod.GetParameters()[originalMethodArg - offset].ParameterType;
+        VariableDefinition local = new VariableDefinition(module.ImportReference(declared));
+        request.Destination.Body.Variables.Add(local);
+        request.Destination.Body.InitLocals = true;
+
+        prologue.Add(Instruction.Create(OpCodes.Ldc_I4, OriginalMethods.Register(request.Target)));
+        prologue.Add(Instruction.Create(OpCodes.Call, module.ImportReference(OriginalMethodGetter)));
+        if (declared != typeof(MethodBase)) {
+            prologue.Add(Instruction.Create(OpCodes.Castclass, module.ImportReference(declared)));
+        }
+
+        prologue.Add(Instruction.Create(OpCodes.Stloc, local));
+        locals[originalMethodArg] = local;
+    }
+
+    private static VariableDefinition? SpillResultCopy(
+        InjectionCopyRequest request, ProtocolLocals locals, bool insideAround, ModuleDefinition module, List<Instruction> prologue) {
+        if (!request.ForeignOrigin || request.ResultArgIndex is not int resultArg) {
+            return null;
+        }
+
+        ParameterInfo[] parameters = request.InjectionMethod.GetParameters();
+        int offset = request.InjectionMethod.IsStatic ? 0 : 1;
+        if (resultArg - offset < 0 || resultArg - offset >= parameters.Length) {
+            return null;
+        }
+
+        Type declared = parameters[resultArg - offset].ParameterType;
+        if (declared.IsByRef) {
+            return null;
+        }
+
+        VariableDefinition? slot = insideAround && locals.SpliceValue is not null ? locals.SpliceValue : locals.ReturnValue;
+        if (slot is null || slot.VariableType.FullName != module.ImportReference(declared).FullName) {
+            return null;
+        }
+
+        VariableDefinition copy = new VariableDefinition(module.ImportReference(declared));
+        request.Destination.Body.Variables.Add(copy);
+        prologue.Add(Instruction.Create(OpCodes.Ldloc, slot));
+        prologue.Add(Instruction.Create(OpCodes.Stloc, copy));
+        return copy;
+    }
+
+    private static Dictionary<int, VariableDefinition>? SpillScratchArgs(
+        InjectionCopyRequest request, Dictionary<int, int> argRemap, ModuleDefinition module, List<Instruction> prologue) {
+        if (request.ScratchArgs is null) {
+            return null;
+        }
+
+        ParameterInfo[] parameters = request.InjectionMethod.GetParameters();
+        int offset = request.InjectionMethod.IsStatic ? 0 : 1;
+        Dictionary<int, VariableDefinition>? spilled = null;
+        foreach (int scratch in request.ScratchArgs) {
+            if (!argRemap.TryGetValue(scratch, out int wrapperArg) || scratch - offset < 0 || scratch - offset >= parameters.Length) {
+                continue;
+            }
+
+            VariableDefinition local = new VariableDefinition(module.ImportReference(parameters[scratch - offset].ParameterType));
+            request.Destination.Body.Variables.Add(local);
+            prologue.Add(LoadArgInstruction(wrapperArg));
+            prologue.Add(Instruction.Create(OpCodes.Stloc, local));
+            argRemap.Remove(scratch);
+            spilled ??= new Dictionary<int, VariableDefinition>();
+            spilled[scratch] = local;
+        }
+
+        return spilled;
+    }
+
+    private static Dictionary<int, VariableDefinition>? SpillNullInstance(
+        InjectionCopyRequest request,
+        int nullInstanceArg,
+        Dictionary<int, VariableDefinition>? spilled,
+        ModuleDefinition module,
+        List<Instruction> prologue) {
+        if (nullInstanceArg < 0) {
+            return spilled;
+        }
+
+        int index = nullInstanceArg - (request.InjectionMethod.IsStatic ? 0 : 1);
+        Type declared = request.InjectionMethod.GetParameters()[index].ParameterType;
+        VariableDefinition local = new VariableDefinition(module.ImportReference(declared));
+        request.Destination.Body.Variables.Add(local);
+        prologue.Add(Instruction.Create(OpCodes.Ldnull));
+        prologue.Add(Instruction.Create(OpCodes.Stloc, local));
+        spilled ??= new Dictionary<int, VariableDefinition>();
+        spilled[nullInstanceArg] = local;
+        return spilled;
+    }
+
+    private static Dictionary<int, VariableDefinition>? SpillStructInstance(
+        InjectionCopyRequest request,
+        int structInstanceArg,
+        Dictionary<int, VariableDefinition>? spilled,
+        ModuleDefinition module,
+        List<Instruction> prologue) {
+        if (structInstanceArg < 0) {
+            return spilled;
+        }
+
+        TypeReference declared = module.ImportReference(request.Target.DeclaringType!);
+        VariableDefinition local = new VariableDefinition(declared);
+        request.Destination.Body.Variables.Add(local);
+        prologue.Add(LoadArgInstruction(0));
+        prologue.Add(Instruction.Create(OpCodes.Ldobj, declared));
+        prologue.Add(Instruction.Create(OpCodes.Stloc, local));
+        spilled ??= new Dictionary<int, VariableDefinition>();
+        spilled[structInstanceArg] = local;
+        return spilled;
+    }
+
+    private static Dictionary<int, VariableDefinition>? SpillRunOriginal(
+        InjectionCopyRequest request,
+        ProtocolLocals locals,
+        Dictionary<int, VariableDefinition>? spilled,
+        ModuleDefinition module,
+        List<Instruction> prologue) {
+        if (request.RunOriginalArgIndex is not int runOriginalArg) {
+            return spilled;
+        }
+
+        VariableDefinition local = new VariableDefinition(module.ImportReference(typeof(bool)));
+        request.Destination.Body.Variables.Add(local);
+        prologue.Add(Instruction.Create(OpCodes.Ldloc, locals.Cancel));
+        prologue.Add(Instruction.Create(OpCodes.Ldc_I4_0));
+        prologue.Add(Instruction.Create(OpCodes.Ceq));
+        prologue.Add(Instruction.Create(OpCodes.Stloc, local));
+        spilled ??= new Dictionary<int, VariableDefinition>();
+        spilled[runOriginalArg] = local;
+        return spilled;
+    }
+
+    private static Dictionary<int, VariableDefinition>? SpillArgsArray(
+        InjectionCopyRequest request,
+        Dictionary<int, VariableDefinition>? spilled,
+        ModuleDefinition module,
+        List<Instruction> prologue) {
+        if (request.ArgsArgIndex is not int argsArg) {
+            return spilled;
+        }
+
+        ParameterInfo[] targetParams = request.Target.GetParameters();
+        TypeReference objectType = module.ImportReference(typeof(object));
+        VariableDefinition array = new VariableDefinition(module.ImportReference(typeof(object[])));
+        request.Destination.Body.Variables.Add(array);
+        prologue.Add(Instruction.Create(OpCodes.Ldc_I4, targetParams.Length));
+        prologue.Add(Instruction.Create(OpCodes.Newarr, objectType));
+        prologue.Add(Instruction.Create(OpCodes.Stloc, array));
+
+        int offset = request.Target.IsStatic ? 0 : 1;
+        for (int i = 0; i < targetParams.Length; i++) {
+            Type declared = targetParams[i].ParameterType;
+            prologue.Add(Instruction.Create(OpCodes.Ldloc, array));
+            prologue.Add(Instruction.Create(OpCodes.Ldc_I4, i));
+            prologue.Add(LoadArgInstruction(i + offset));
+            if (declared.IsByRef) {
+                declared = declared.GetElementType()!;
+                prologue.Add(declared.IsValueType
+                    ? Instruction.Create(OpCodes.Ldobj, module.ImportReference(declared))
+                    : Instruction.Create(OpCodes.Ldind_Ref));
+            }
+
+            if (declared.IsValueType) {
+                prologue.Add(Instruction.Create(OpCodes.Box, module.ImportReference(declared)));
+            }
+
+            prologue.Add(Instruction.Create(OpCodes.Stelem_Ref));
+        }
+
+        spilled ??= new Dictionary<int, VariableDefinition>();
+        spilled[argsArg] = array;
+        return spilled;
+    }
+
+    private static Dictionary<int, VariableDefinition>? SpillDerefArgs(
+        InjectionCopyRequest request,
+        Dictionary<int, int>? derefArgs,
+        Dictionary<int, VariableDefinition>? spilled,
+        ModuleDefinition module,
+        List<Instruction> prologue) {
+        if (derefArgs is null) {
+            return spilled;
+        }
+
+        ParameterInfo[] parameters = request.InjectionMethod.GetParameters();
+        int offset = request.InjectionMethod.IsStatic ? 0 : 1;
+        foreach (KeyValuePair<int, int> entry in derefArgs) {
+            int index = entry.Key - offset;
+            if (index < 0 || index >= parameters.Length) {
+                continue;
+            }
+
+            Type declared = parameters[index].ParameterType;
+            Type element = request.Target.GetParameters()[entry.Value - (request.Target.IsStatic ? 0 : 1)].ParameterType.GetElementType()!;
+            VariableDefinition local = new VariableDefinition(module.ImportReference(declared));
+            request.Destination.Body.Variables.Add(local);
+            prologue.Add(LoadArgInstruction(entry.Value));
+            prologue.Add(Instruction.Create(OpCodes.Ldobj, module.ImportReference(element)));
+            prologue.Add(Instruction.Create(OpCodes.Stloc, local));
+            spilled ??= new Dictionary<int, VariableDefinition>();
+            spilled[entry.Key] = local;
+        }
+
+        return spilled;
+    }
+
+    private static Dictionary<int, VariableDefinition>? SpillNarrowArgs(
+        InjectionCopyRequest request,
+        Dictionary<int, int>? narrowArgs,
+        Dictionary<int, VariableDefinition>? spilled,
+        ModuleDefinition module,
+        List<Instruction> prologue) {
+        if (narrowArgs is null) {
+            return spilled;
+        }
+
+        ParameterInfo[] parameters = request.InjectionMethod.GetParameters();
+        int offset = request.InjectionMethod.IsStatic ? 0 : 1;
+        foreach (KeyValuePair<int, int> entry in narrowArgs) {
+            int index = entry.Key - offset;
+            if (index < 0 || index >= parameters.Length) {
+                continue;
+            }
+
+            TypeReference declared = module.ImportReference(parameters[index].ParameterType);
+            VariableDefinition local = new VariableDefinition(declared);
+            request.Destination.Body.Variables.Add(local);
+            prologue.Add(LoadArgInstruction(entry.Value));
+            prologue.Add(Instruction.Create(OpCodes.Castclass, declared));
+            prologue.Add(Instruction.Create(OpCodes.Stloc, local));
+            spilled ??= new Dictionary<int, VariableDefinition>();
+            spilled[entry.Key] = local;
+        }
+
+        return spilled;
+    }
+
+    private static Instruction LoadArgInstruction(int index) {
+        switch (index) {
+            case 0: return Instruction.Create(OpCodes.Ldarg_0);
+            case 1: return Instruction.Create(OpCodes.Ldarg_1);
+            case 2: return Instruction.Create(OpCodes.Ldarg_2);
+            case 3: return Instruction.Create(OpCodes.Ldarg_3);
+            default: break;
+        }
+
+        Instruction load = Instruction.Create(OpCodes.Ldarg_0);
+        load.OpCode = index <= byte.MaxValue ? OpCodes.Ldarg_S : OpCodes.Ldarg;
+        load.Operand = index <= byte.MaxValue ? (byte)index : index;
+        return load;
+    }
+
+    private static List<Instruction>? TryLowerScratchBinding(Instruction source, InjectionLoweringSite site) {
+        if (site.ScratchArgs is null) {
+            return null;
+        }
+
+        int arg = GetArgIndex(source);
+        if (arg < 0 || !site.ScratchArgs.TryGetValue(arg, out VariableDefinition? local)) {
+            return null;
+        }
+
+        if (source.OpCode == OpCodes.Starg || source.OpCode == OpCodes.Starg_S) {
+            return new List<Instruction> { Instruction.Create(OpCodes.Stloc, local) };
+        }
+
+        bool isAddress = source.OpCode == OpCodes.Ldarga || source.OpCode == OpCodes.Ldarga_S;
+        if (!isAddress && !IsLoadArgOpCode(source.OpCode)) {
+            return null;
+        }
+
+        return new List<Instruction> { Instruction.Create(isAddress ? OpCodes.Ldloca : OpCodes.Ldloc, local) };
+    }
+
+    private static List<Instruction>? TryLowerFieldBinding(Instruction source, LoweringContext ctx, InjectionLoweringSite site) {
+        if (site.FieldArgs is null) {
+            return null;
+        }
+
+        int arg = GetArgIndex(source);
+        if (arg < 0 || !site.FieldArgs.TryGetValue(arg, out FieldInfo? field)) {
+            return null;
+        }
+
+        bool isAddress = source.OpCode == OpCodes.Ldarga || source.OpCode == OpCodes.Ldarga_S;
+        if (source.OpCode == OpCodes.Starg || source.OpCode == OpCodes.Starg_S) {
+            throw new ConcordEmitException(
+                "CONC173",
+                "Injection '" + site.InjectionMethod.Name + "' reassigns the parameter bound to field '" + field.Name + "'. Write through it instead.");
+        }
+
+        if (!isAddress && !IsLoadArgOpCode(source.OpCode)) {
+            return null;
+        }
+
+        bool byRef = isAddress || ParameterIsByRef(site.InjectionMethod, arg);
+        FieldReference reference = ctx.Module.ImportReference(field);
+        List<Instruction> emitted = new List<Instruction>(2);
+        if (field.IsStatic) {
+            emitted.Add(Instruction.Create(byRef ? OpCodes.Ldsflda : OpCodes.Ldsfld, reference));
+            return emitted;
+        }
+
+        emitted.Add(Instruction.Create(OpCodes.Ldarg_0));
+        emitted.Add(Instruction.Create(byRef ? OpCodes.Ldflda : OpCodes.Ldfld, reference));
+        return emitted;
+    }
+
+    private static bool ParameterIsByRef(MethodBase injectionMethod, int resultArg) {
+        int index = resultArg - (injectionMethod.IsStatic ? 0 : 1);
+        ParameterInfo[] parameters = injectionMethod.GetParameters();
+        return index >= 0 && index < parameters.Length && parameters[index].ParameterType.IsByRef;
     }
 
     private static List<Instruction>? TryLowerCommon(Instruction source, LoweringContext ctx) {
@@ -764,6 +1344,24 @@ internal static class BodyCopier {
     }
 
     private static List<Instruction> LowerReturn(InjectionLoweringSite site) {
+        if (site.CancelsOnFalse) {
+            Instruction runOriginal = Instruction.Create(OpCodes.Br, site.ReturnBranchTarget);
+            return new List<Instruction> {
+                Instruction.Create(OpCodes.Brtrue, runOriginal),
+                Instruction.Create(OpCodes.Ldc_I4_1),
+                Instruction.Create(OpCodes.Stloc, site.Locals.SkipAffectingHeads),
+                Instruction.Create(OpCodes.Ldc_I4_1),
+                Instruction.Create(OpCodes.Stloc, site.Locals.Cancel),
+                runOriginal,
+            };
+        }
+
+        if (site.ReturnsIntoResult && site.Locals.ReturnValue is not null) {
+            return new List<Instruction> {
+                Instruction.Create(OpCodes.Stloc, site.Locals.ReturnValue), Instruction.Create(OpCodes.Br, site.ReturnBranchTarget),
+            };
+        }
+
         if (site.SpineTemplate is not null && site.Locals.ReturnValue is not null) {
             return new List<Instruction> {
                 Instruction.Create(OpCodes.Stloc, site.Locals.ReturnValue), Instruction.Create(OpCodes.Br, site.ReturnBranchTarget),
@@ -1053,7 +1651,56 @@ internal static class BodyCopier {
         }
     }
 
+    private static int PositionalIndex(string? name) {
+        if (name is null || !name.StartsWith("__", StringComparison.Ordinal) || name.Length < 3) {
+            return -1;
+        }
+
+        for (int i = 2; i < name.Length; i++) {
+            if (name[i] < '0' || name[i] > '9') {
+                return -1;
+            }
+        }
+
+        return int.Parse(name.Substring(2), System.Globalization.CultureInfo.InvariantCulture);
+    }
+
     private static Dictionary<int, int> BuildArgRemap(MethodBase target, MethodBase injectionMethod) {
+        return BuildArgRemap(target, injectionMethod, out _, out _);
+    }
+
+    private static bool Narrows(Type declared, Type candidate) {
+        if (declared == candidate) {
+            return false;
+        }
+
+        return !declared.IsValueType && !declared.IsByRef && !candidate.IsValueType && !candidate.IsByRef &&
+               candidate.IsAssignableFrom(declared);
+    }
+
+    private static bool NarrowsInstance(InjectionCopyRequest request, int instanceArg) {
+        ParameterInfo[] parameters = request.InjectionMethod.GetParameters();
+        int index = instanceArg - (request.InjectionMethod.IsStatic ? 0 : 1);
+        if (index < 0 || index >= parameters.Length) {
+            return false;
+        }
+
+        Type? declaringType = request.Target.DeclaringType;
+        return declaringType != null && Narrows(parameters[index].ParameterType, declaringType);
+    }
+
+    private static bool Widens(Type declared, Type candidate) {
+        if (declared == candidate) {
+            return true;
+        }
+
+        return !declared.IsValueType && !declared.IsByRef && !candidate.IsValueType && !candidate.IsByRef && declared.IsAssignableFrom(candidate);
+    }
+
+    private static Dictionary<int, int> BuildArgRemap(
+        MethodBase target, MethodBase injectionMethod, out Dictionary<int, int>? derefArgs, out Dictionary<int, int>? narrowArgs) {
+        derefArgs = null;
+        narrowArgs = null;
         ParameterInfo[] targetParams = target.GetParameters();
         ParameterInfo[] injectionParameters = injectionMethod.GetParameters();
 
@@ -1069,10 +1716,42 @@ internal static class BodyCopier {
         for (int ti = 0; ti < injectionParameters.Length; ti++) {
             int injectionArgIndex = ti + injectionOffset;
 
+            int positional = PositionalIndex(injectionParameters[ti].Name);
+            if (positional >= 0 && positional < targetParams.Length) {
+                Type declared = injectionParameters[ti].ParameterType;
+                Type declaredTarget = targetParams[positional].ParameterType;
+                if (declared == declaredTarget || (declared.IsByRef && declared.GetElementType() == declaredTarget)) {
+                    remap[injectionArgIndex] = positional + targetOffset;
+                    continue;
+                }
+            }
+
             for (int si = 0; si < targetParams.Length; si++) {
-                if (injectionParameters[ti].Name == targetParams[si].Name &&
-                    injectionParameters[ti].ParameterType == targetParams[si].ParameterType) {
+                if (injectionParameters[ti].Name != targetParams[si].Name) {
+                    continue;
+                }
+
+                Type declaredType = injectionParameters[ti].ParameterType;
+                Type targetType = targetParams[si].ParameterType;
+                if (declaredType == targetType) {
                     remap[injectionArgIndex] = si + targetOffset;
+                    break;
+                }
+
+                if (!targetType.IsByRef && Widens(declaredType, targetType)) {
+                    remap[injectionArgIndex] = si + targetOffset;
+                    break;
+                }
+
+                if (targetType.IsByRef && !declaredType.IsByRef && Widens(declaredType, targetType.GetElementType()!)) {
+                    derefArgs ??= new Dictionary<int, int>();
+                    derefArgs[injectionArgIndex] = si + targetOffset;
+                    break;
+                }
+
+                if (!targetType.IsByRef && Narrows(declaredType, targetType)) {
+                    narrowArgs ??= new Dictionary<int, int>();
+                    narrowArgs[injectionArgIndex] = si + targetOffset;
                     break;
                 }
             }
@@ -1084,17 +1763,32 @@ internal static class BodyCopier {
     private static Dictionary<int, VariableDefinition> BuildWrapArgBinding(
         MethodBase injectionMethod,
         IReadOnlyList<VariableDefinition> argLocals,
+        VariableDefinition? receiverLocal,
         CallSiteShape shape) {
         ParameterInfo[] parameters = injectionMethod.GetParameters();
         int offset = injectionMethod.IsStatic ? 0 : 1;
 
+        int leading = 0;
+        while (leading < parameters.Length && !ControlHandleLowering.IsOperationType(parameters[leading].ParameterType)) {
+            leading++;
+        }
+
         Dictionary<int, VariableDefinition> binding = new Dictionary<int, VariableDefinition>();
-        int siteArg = 0;
-        for (int i = 0; i < parameters.Length; i++) {
-            if (ControlHandleLowering.IsOperationType(parameters[i].ParameterType)) {
-                break;
+        int first = 0;
+        if (receiverLocal is not null && leading == argLocals.Count + 1) {
+            if (parameters[0].ParameterType != shape.ReceiverType) {
+                throw new ConcordEmitException(
+                    "CONC039",
+                    $"Around-invoke injection '{injectionMethod.DeclaringType?.Name}.{injectionMethod.Name}' declares leading parameter '{parameters[0].Name}' " +
+                    $"of type '{parameters[0].ParameterType.Name}' but the matched call's receiver is of type '{shape.ReceiverType!.Name}'.");
             }
 
+            binding[offset] = receiverLocal;
+            first = 1;
+        }
+
+        int siteArg = 0;
+        for (int i = first; i < leading; i++) {
             if (siteArg >= argLocals.Count) {
                 throw new ConcordEmitException(
                     "CONC039",

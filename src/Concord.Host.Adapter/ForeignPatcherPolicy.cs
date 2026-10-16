@@ -70,6 +70,12 @@ public static class ForeignPatcherPolicy {
         ArgumentNullException.ThrowIfNull(target);
 
         MethodBase key = Key(target);
+        if (SuppressedRebuilds.Holds(target)) {
+            Withdrawn.TryRemove(key, out _);
+            Published.TryAdd(key, target);
+            return Allowed;
+        }
+
         if (Withdrawn.TryGetValue(key, out byte hadBody)) {
             return new ForeignVerdict(
                 ForeignHandling.Disown, Describe(target, null, hadBody != 0 ? WithdrawnBody : NoBody), null);
@@ -103,7 +109,7 @@ public static class ForeignPatcherPolicy {
         List<string> found = [];
         foreach (KeyValuePair<MethodBase, MethodBase> entry in Published) {
             IReadOnlyList<string>? owners = probe.Owners(entry.Value);
-            if (owners is null) {
+            if (owners is null || SuppressedRebuilds.Holds(entry.Value)) {
                 continue;
             }
 

@@ -74,7 +74,7 @@ public sealed class ContentionWatcher {
                 dialogOnce(message);
             }
         } catch (Exception ex) {
-            warn($"{CoexistenceLogMarkers.LateContention} foreign-owner lookup failed for {target}: {ex.Message}");
+            warn($"{CoexistenceLogMarkers.LateContention} foreign-owner lookup failed for {target}: {ExceptionReason.Of(ex)}");
         }
     }
 }

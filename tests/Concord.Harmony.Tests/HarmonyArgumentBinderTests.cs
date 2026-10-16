@@ -72,6 +72,16 @@ namespace Concord.Harmony.Tests
             BinderLog.Entries.Add("patch:" + other);
         }
 
+        public static void ReadsBoxWidened(object box)
+        {
+            BinderLog.Entries.Add("patch:" + box);
+        }
+
+        public static void ReadsCountByValue(int count)
+        {
+            BinderLog.Entries.Add("patch:" + count);
+        }
+
         public static void ReadsText(string text)
         {
             BinderLog.Entries.Add("patch:" + text);
@@ -91,6 +101,11 @@ namespace Concord.Harmony.Tests
         public static void ByRefAgainstByValue(ref int second)
         {
             second = 0;
+        }
+
+        public static void RebindsItsByRefArgument(ref int second, ref int first)
+        {
+            second = ref first;
         }
 
         public static void MutatesAStructArgument(BinderBox box)
@@ -131,6 +146,18 @@ namespace Concord.Harmony.Tests
         }
 
         public static void TakesPositional(int __0)
+        {
+        }
+
+        public static void TakesPositionalByRef(ref int __0)
+        {
+        }
+
+        public static void TakesPositionalOutOfRange(int __9)
+        {
+        }
+
+        public static void TakesPositionalWidened(object __0)
         {
         }
 
@@ -202,7 +229,7 @@ namespace Concord.Harmony.Tests
             MethodInfo target = Target(nameof(BinderTargets.TwoInts));
             MethodInfo patch = Patch(nameof(BinderPatches.ReadsSecond));
 
-            Assert.True(HarmonyArgumentBinder.CanCopyBody(target, patch, HarmonyPatchRole.Postfix, out string? refusal), refusal);
+            Assert.True(HarmonyArgumentBinder.CanCopyBody(target, patch, HarmonyPatchRole.Postfix, out string? refusal, out _, out _, out _), refusal);
 
             Func<int, int, int> wrapper = ComposeTwoInts(target, patch, new InjectAt.Return(0));
 
@@ -219,7 +246,7 @@ namespace Concord.Harmony.Tests
             MethodInfo target = Target(nameof(BinderTargets.TwoInts));
             MethodInfo patch = Patch(nameof(BinderPatches.ReadsRenamed));
 
-            Assert.False(HarmonyArgumentBinder.CanCopyBody(target, patch, HarmonyPatchRole.Postfix, out string? refusal));
+            Assert.False(HarmonyArgumentBinder.CanCopyBody(target, patch, HarmonyPatchRole.Postfix, out string? refusal, out _, out _, out _));
             Assert.Contains("declares no parameter of that name and type", refusal);
 
             Func<int, int, int> wrapper = ComposeTwoInts(target, patch, new InjectAt.Return(0));
@@ -236,7 +263,7 @@ namespace Concord.Harmony.Tests
             MethodInfo target = Target(nameof(BinderTargets.TakesText));
             MethodInfo patch = Patch(nameof(BinderPatches.ReadsText));
 
-            Assert.True(HarmonyArgumentBinder.CanCopyBody(target, patch, HarmonyPatchRole.Postfix, out string? refusal), refusal);
+            Assert.True(HarmonyArgumentBinder.CanCopyBody(target, patch, HarmonyPatchRole.Postfix, out string? refusal, out _, out _, out _), refusal);
 
             ComposeResult composed = WrapperComposer.Compose(target, new[] { Direct(patch, new InjectAt.Return(0)) });
             Assert.Empty(composed.Rejected);
@@ -255,7 +282,7 @@ namespace Concord.Harmony.Tests
             MethodInfo target = Target(nameof(BinderTargets.ByRefArg));
             MethodInfo patch = Patch(nameof(BinderPatches.ReadsBothByRef));
 
-            Assert.True(HarmonyArgumentBinder.CanCopyBody(target, patch, HarmonyPatchRole.Postfix, out string? refusal), refusal);
+            Assert.True(HarmonyArgumentBinder.CanCopyBody(target, patch, HarmonyPatchRole.Postfix, out string? refusal, out _, out _, out _), refusal);
 
             ComposeResult composed = WrapperComposer.Compose(target, new[] { Direct(patch, new InjectAt.Return(0)) });
             Assert.Empty(composed.Rejected);
@@ -275,7 +302,7 @@ namespace Concord.Harmony.Tests
             MethodInfo target = Target(nameof(BinderTargets.TwoInts));
             MethodInfo patch = Patch(nameof(BinderPatches.ReadsSecond));
 
-            Assert.True(HarmonyArgumentBinder.CanCopyBody(target, patch, HarmonyPatchRole.Prefix, out string? refusal), refusal);
+            Assert.True(HarmonyArgumentBinder.CanCopyBody(target, patch, HarmonyPatchRole.Prefix, out string? refusal, out _, out _, out _), refusal);
 
             Func<int, int, int> wrapper = ComposeTwoInts(target, patch, new InjectAt.Head());
 
@@ -286,58 +313,75 @@ namespace Concord.Harmony.Tests
         }
 
         [Fact]
-        public void ReferenceTypeArgumentOnAPrefix_IsRefusedBecauseHarmonySkipsItAfterACancel()
+        public void ReferenceTypeArgumentOnAPrefix_IsAccepted_BecauseTheWrapperGuardsIt()
         {
-            Assert.False(
-                HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TakesText)), Patch(nameof(BinderPatches.ReadsText)), HarmonyPatchRole.Prefix, out string? refusal));
-            Assert.Contains("skips it once an earlier prefix has cancelled", refusal);
+            Assert.True(
+                HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TakesText)), Patch(nameof(BinderPatches.ReadsText)), HarmonyPatchRole.Prefix, out string? refusal, out _, out _, out _));
+            Assert.Null(refusal);
         }
 
         [Fact]
-        public void WidenedArgumentType_IsRefused()
+        public void WidenedReferenceArgumentType_IsAccepted()
         {
-            Assert.False(
-                HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TakesText)), Patch(nameof(BinderPatches.WidenedArgument)), HarmonyPatchRole.Postfix, out string? refusal));
-            Assert.Contains("declares no parameter of that name and type", refusal);
+            Assert.True(
+                HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TakesText)), Patch(nameof(BinderPatches.WidenedArgument)), HarmonyPatchRole.Postfix, out string? refusal, out _, out _, out _),
+                refusal);
         }
 
         [Fact]
-        public void ByRefAgainstAByValueTarget_IsRefused()
+        public void ByRefAgainstAByValueTarget_BindsTheArgumentsAddress()
         {
-            Assert.False(
-                HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TwoInts)), Patch(nameof(BinderPatches.ByRefAgainstByValue)), HarmonyPatchRole.Postfix, out string? refusal));
-            Assert.Contains("declares no parameter of that name and type", refusal);
+            Assert.True(
+                HarmonyArgumentBinder.CanCopyBody(
+                    Target(nameof(BinderTargets.TwoInts)), Patch(nameof(BinderPatches.ByRefAgainstByValue)), HarmonyPatchRole.Postfix,
+                    out string? refusal, out List<int>? scratch, out List<int>? address, out _),
+                refusal);
+            Assert.Null(scratch);
+            Assert.Equal(new[] { 0 }, address);
         }
 
         [Fact]
-        public void AssigningAByValueArgument_IsRefused()
+        public void RebindingAByRefArgument_IsRefused()
         {
             Assert.False(
-                HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TwoInts)), Patch(nameof(BinderPatches.AssignsItsOwnArgument)), HarmonyPatchRole.Postfix, out string? refusal));
-            Assert.Contains("assigns to or takes the address of 'second'", refusal);
+                HarmonyArgumentBinder.CanCopyBody(
+                    Target(nameof(BinderTargets.TwoInts)), Patch(nameof(BinderPatches.RebindsItsByRefArgument)), HarmonyPatchRole.Postfix,
+                    out string? refusal, out _, out _, out _));
+            Assert.Contains("rebinds its by-ref parameter 'second'", refusal);
         }
 
         [Fact]
-        public void TakingTheAddressOfAPrimitiveArgumentToPassItByRef_IsRefused()
+        public void AssigningAByValueArgument_SpillsItToAScratchLocal()
         {
-            Assert.False(
-                HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TwoInts)), Patch(nameof(BinderPatches.PassesItsOwnArgumentByRefToAHelper)), HarmonyPatchRole.Postfix, out string? refusal));
-            Assert.Contains("assigns to or takes the address of 'second'", refusal);
+            Assert.True(
+                HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TwoInts)), Patch(nameof(BinderPatches.AssignsItsOwnArgument)), HarmonyPatchRole.Postfix, out string? refusal, out List<int>? scratch, out _, out _),
+                refusal);
+            Assert.Equal(new[] { 0 }, scratch);
         }
 
         [Fact]
-        public void AStaticCallOnTheArgumentsOwnTypeThatWritesIt_IsRefused()
+        public void TakingTheAddressOfAPrimitiveArgument_SpillsItToAScratchLocal()
         {
-            Assert.False(
-                HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TwoInts)), Patch(nameof(BinderPatches.StaticCallOnOwnTypeWritesIt)), HarmonyPatchRole.Postfix, out string? refusal));
-            Assert.Contains("assigns to or takes the address of 'second'", refusal);
+            Assert.True(
+                HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TwoInts)), Patch(nameof(BinderPatches.PassesItsOwnArgumentByRefToAHelper)), HarmonyPatchRole.Postfix, out string? refusal, out List<int>? scratch, out _, out _),
+                refusal);
+            Assert.Equal(new[] { 0 }, scratch);
+        }
+
+        [Fact]
+        public void AStaticCallOnTheArgumentsOwnTypeThatWritesIt_SpillsItToAScratchLocal()
+        {
+            Assert.True(
+                HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TwoInts)), Patch(nameof(BinderPatches.StaticCallOnOwnTypeWritesIt)), HarmonyPatchRole.Postfix, out string? refusal, out List<int>? scratch, out _, out _),
+                refusal);
+            Assert.Equal(new[] { 0 }, scratch);
         }
 
         [Fact]
         public void MethodLevelHarmonyArgument_IsRefused()
         {
             Assert.False(
-                HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TwoInts)), Patch(nameof(BinderPatches.RenamedForTheWholeMethod)), HarmonyPatchRole.Postfix, out string? refusal));
+                HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TwoInts)), Patch(nameof(BinderPatches.RenamedForTheWholeMethod)), HarmonyPatchRole.Postfix, out string? refusal, out _, out _, out _));
             Assert.Contains("[HarmonyArgument] is refused", refusal);
         }
 
@@ -345,23 +389,32 @@ namespace Concord.Harmony.Tests
         public void ClassLevelHarmonyArgument_IsRefused()
         {
             MethodInfo patch = Method(typeof(BinderClassLevelHarmonyArgumentPatches), nameof(BinderClassLevelHarmonyArgumentPatches.RenamedByTheClass));
-            Assert.False(HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TwoInts)), patch, HarmonyPatchRole.Postfix, out string? refusal));
+            Assert.False(HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TwoInts)), patch, HarmonyPatchRole.Postfix, out string? refusal, out _, out _, out _));
             Assert.Contains("[HarmonyArgument] is refused", refusal);
         }
 
         [Fact]
-        public void TakingTheAddressOfAStructArgument_IsRefused()
+        public void TakingTheAddressOfAStructArgument_SpillsItToAScratchLocal()
         {
-            Assert.False(
-                HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TakesBox)), Patch(nameof(BinderPatches.MutatesAStructArgument)), HarmonyPatchRole.Postfix, out string? refusal));
-            Assert.Contains("assigns to or takes the address of 'box'", refusal);
+            Assert.True(
+                HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TakesBox)), Patch(nameof(BinderPatches.MutatesAStructArgument)), HarmonyPatchRole.Postfix, out string? refusal, out List<int>? scratch, out _, out _),
+                refusal);
+            Assert.Equal(new[] { 0 }, scratch);
         }
 
         [Fact]
-        public void CancellingPrefix_IsRefused()
+        public void CancellingPrefix_IsAccepted()
+        {
+            Assert.True(
+                HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TwoInts)), Patch(nameof(BinderPatches.CancellingPrefix)), HarmonyPatchRole.Prefix, out string? refusal, out _, out _, out _));
+            Assert.Null(refusal);
+        }
+
+        [Fact]
+        public void BoolReturningPostfix_IsStillRefused()
         {
             Assert.False(
-                HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TwoInts)), Patch(nameof(BinderPatches.CancellingPrefix)), HarmonyPatchRole.Prefix, out string? refusal));
+                HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TwoInts)), Patch(nameof(BinderPatches.CancellingPrefix)), HarmonyPatchRole.Postfix, out string? refusal, out _, out _, out _));
             Assert.Contains("returns 'Boolean'", refusal);
         }
 
@@ -369,7 +422,7 @@ namespace Concord.Harmony.Tests
         public void PassThroughPostfix_IsRefused()
         {
             Assert.False(
-                HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TwoInts)), Patch(nameof(BinderPatches.PassThroughPostfix)), HarmonyPatchRole.Postfix, out string? refusal));
+                HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TwoInts)), Patch(nameof(BinderPatches.PassThroughPostfix)), HarmonyPatchRole.Postfix, out string? refusal, out _, out _, out _));
             Assert.Contains("returns 'Int32'", refusal);
         }
 
@@ -377,7 +430,7 @@ namespace Concord.Harmony.Tests
         public void Finalizer_IsRefused()
         {
             Assert.False(
-                HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TwoInts)), Patch(nameof(BinderPatches.ReadsSecond)), HarmonyPatchRole.Finalizer, out string? refusal));
+                HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TwoInts)), Patch(nameof(BinderPatches.ReadsSecond)), HarmonyPatchRole.Finalizer, out string? refusal, out _, out _, out _));
             Assert.Contains("catch protocol", refusal);
         }
 
@@ -385,7 +438,7 @@ namespace Concord.Harmony.Tests
         public void NoParameters_IsLeftToTheShimMapping()
         {
             Assert.False(
-                HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TwoInts)), Patch(nameof(BinderPatches.NoParameters)), HarmonyPatchRole.Postfix, out string? refusal));
+                HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TwoInts)), Patch(nameof(BinderPatches.NoParameters)), HarmonyPatchRole.Postfix, out string? refusal, out _, out _, out _));
             Assert.Contains("takes no parameters", refusal);
         }
 
@@ -394,7 +447,7 @@ namespace Concord.Harmony.Tests
         {
             MethodInfo patch = Method(typeof(BinderInstancePatch), nameof(BinderInstancePatch.InstanceMethod));
 
-            Assert.False(HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TwoInts)), patch, HarmonyPatchRole.Postfix, out string? refusal));
+            Assert.False(HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TwoInts)), patch, HarmonyPatchRole.Postfix, out string? refusal, out _, out _, out _));
             Assert.Contains("is an instance method", refusal);
         }
 
@@ -402,13 +455,9 @@ namespace Concord.Harmony.Tests
         [InlineData(nameof(BinderPatches.TakesInstance), "Instance", "__instance")]
         [InlineData(nameof(BinderPatches.TakesResult), "Result", "__result")]
         [InlineData(nameof(BinderPatches.TakesResultRef), "ResultRef", "__resultRef")]
-        [InlineData(nameof(BinderPatches.TakesState), "State", "__state")]
         [InlineData(nameof(BinderPatches.TakesException), "Exception", "__exception")]
         [InlineData(nameof(BinderPatches.TakesField), "Field", "___field")]
-        [InlineData(nameof(BinderPatches.TakesPositional), "Positional", "__N")]
-        [InlineData(nameof(BinderPatches.TakesArgs), "ArgsArray", "__args")]
         [InlineData(nameof(BinderPatches.TakesOriginalMethod), "OriginalMethod", "__originalMethod")]
-        [InlineData(nameof(BinderPatches.TakesRunOriginal), "RunOriginal", "__runOriginal")]
         [InlineData(nameof(BinderPatches.TakesHarmonyArgument), "Renamed", "[HarmonyArgument]")]
         public void EveryKindConcordCannotBind_IsClassifiedAndNamedInTheRefusal(string patchName, string kind, string token)
         {
@@ -416,8 +465,108 @@ namespace Concord.Harmony.Tests
 
             Assert.Equal(kind, HarmonyArgumentBinder.KindOf(patch.GetParameters()[0]).ToString());
 
-            Assert.False(HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TwoInts)), patch, HarmonyPatchRole.Postfix, out string? refusal));
+            Assert.False(HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TwoInts)), patch, HarmonyPatchRole.Postfix, out string? refusal, out _, out _, out _));
             Assert.Contains(token + " is refused", refusal);
+        }
+
+        [Fact]
+        public void ArgsArray_IsAcceptedWhenTheBodyNeverTouchesIt()
+        {
+            MethodInfo patch = Patch(nameof(BinderPatches.TakesArgs));
+
+            Assert.Equal("ArgsArray", HarmonyArgumentBinder.KindOf(patch.GetParameters()[0]).ToString());
+            Assert.True(
+                HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TwoInts)), patch, HarmonyPatchRole.Postfix, out string? refusal, out _, out _, out _),
+                refusal);
+        }
+
+        [Fact]
+        public void RunOriginal_IsAcceptedAndBoundFromTheCancelFlag()
+        {
+            MethodInfo patch = Patch(nameof(BinderPatches.TakesRunOriginal));
+
+            Assert.Equal("RunOriginal", HarmonyArgumentBinder.KindOf(patch.GetParameters()[0]).ToString());
+            Assert.True(
+                HarmonyArgumentBinder.CanCopyBody(Target(nameof(BinderTargets.TwoInts)), patch, HarmonyPatchRole.Postfix, out string? refusal, out _, out _, out _),
+                refusal);
+        }
+
+        [Fact]
+        public void Positional_BindsTheTargetArgumentAtThatIndex()
+        {
+            MethodInfo patch = Patch(nameof(BinderPatches.TakesPositional));
+
+            Assert.Equal("Positional", HarmonyArgumentBinder.KindOf(patch.GetParameters()[0]).ToString());
+            Assert.True(
+                HarmonyArgumentBinder.CanCopyBody(
+                    Target(nameof(BinderTargets.TwoInts)), patch, HarmonyPatchRole.Postfix, out string? refusal, out _, out _, out _),
+                refusal);
+        }
+
+        [Fact]
+        public void ValueArgumentWidenedToObject_IsRefused()
+        {
+            Assert.False(
+                HarmonyArgumentBinder.CanCopyBody(
+                    Target(nameof(BinderTargets.TakesBox)), Patch(nameof(BinderPatches.ReadsBoxWidened)), HarmonyPatchRole.Postfix,
+                    out string? refusal, out _, out _, out _));
+            Assert.Contains("box", refusal);
+        }
+
+        [Fact]
+        public void ByValueParameter_AgainstAByRefArgument_IsAccepted()
+        {
+            Assert.True(
+                HarmonyArgumentBinder.CanCopyBody(
+                    Target(nameof(BinderTargets.ByRefArg)), Patch(nameof(BinderPatches.ReadsCountByValue)), HarmonyPatchRole.Postfix,
+                    out string? refusal, out _, out List<int>? addressArgs, out _),
+                refusal);
+            Assert.Null(addressArgs);
+        }
+
+        [Fact]
+        public void ByRefPositional_AgainstAByRefArgument_BindsWithoutAnAddress()
+        {
+            Assert.True(
+                HarmonyArgumentBinder.CanCopyBody(
+                    Target(nameof(BinderTargets.ByRefArg)), Patch(nameof(BinderPatches.TakesPositionalByRef)), HarmonyPatchRole.Postfix,
+                    out string? refusal, out _, out List<int>? addressArgs, out _),
+                refusal);
+            Assert.Null(addressArgs);
+        }
+
+        [Fact]
+        public void PositionalPastTheLastArgument_IsRefusedWithTheIndex()
+        {
+            Assert.False(
+                HarmonyArgumentBinder.CanCopyBody(
+                    Target(nameof(BinderTargets.TwoInts)), Patch(nameof(BinderPatches.TakesPositionalOutOfRange)), HarmonyPatchRole.Postfix,
+                    out string? refusal, out _, out _, out _));
+            Assert.Contains("no parameter at that index", refusal);
+        }
+
+        [Fact]
+        public void WidenedPositional_IsRefused()
+        {
+            Assert.False(
+                HarmonyArgumentBinder.CanCopyBody(
+                    Target(nameof(BinderTargets.TwoInts)), Patch(nameof(BinderPatches.TakesPositionalWidened)), HarmonyPatchRole.Postfix,
+                    out string? refusal, out _, out _, out _));
+            Assert.Contains("at that index", refusal);
+        }
+
+        [Fact]
+        public void State_BindsTheSharedSlot()
+        {
+            MethodInfo patch = Patch(nameof(BinderPatches.TakesState));
+
+            Assert.Equal("State", HarmonyArgumentBinder.KindOf(patch.GetParameters()[0]).ToString());
+            Assert.True(
+                HarmonyArgumentBinder.CanCopyBody(
+                    Target(nameof(BinderTargets.TwoInts)), patch, HarmonyPatchRole.Postfix,
+                    out string? refusal, out _, out _, out int stateArg),
+                refusal);
+            Assert.Equal(0, stateArg);
         }
 
         [Fact]

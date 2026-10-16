@@ -35,12 +35,25 @@ internal static class FinalizerParticipant {
         string[] afterOwners = after ?? Array.Empty<string>();
         Type? receiver = ReceiverFor(target);
 
+        MethodInfo onReturn = shape.NeedsArgs
+            ? Shim(nameof(OnReturnArgs), nameof(OnReturnVoidArgs), returnType, receiver)
+            : Shim(nameof(OnReturn), nameof(OnReturnVoid), returnType, receiver);
+        MethodInfo onThrow = shape.NeedsArgs
+            ? Shim(nameof(OnThrowArgs), nameof(OnThrowVoidArgs), returnType, receiver)
+            : Shim(nameof(OnThrow), nameof(OnThrowVoid), returnType, receiver);
+        Type? stateOwner = shape.StateIndex >= 0 ? finalizer.DeclaringType : null;
+        Type? stateType = shape.StateIndex >= 0 ? shape.StateType : null;
+
         return new[] {
-            new Injection(Shim(nameof(OnReturn), nameof(OnReturnVoid), returnType, receiver), new InjectAt.Return(0), owner, 0) {
+            new Injection(onReturn, new InjectAt.Return(0), owner, 0) {
                 ForeignOrigin = true, BoundArguments = bound, BeforeOwners = beforeOwners, AfterOwners = afterOwners,
+                ForeignStateOwner = stateOwner, ForeignStateType = stateType, ForeignStateArgIndex = StateArgOf(onReturn),
+                ArgsArgIndex = shape.NeedsArgs ? ArgsArgOf(onReturn) : null,
             },
-            new Injection(Shim(nameof(OnThrow), nameof(OnThrowVoid), returnType, receiver), new InjectAt.Catch(), owner, 0) {
+            new Injection(onThrow, new InjectAt.Catch(), owner, 0) {
                 ForeignOrigin = true, BoundArguments = bound, BeforeOwners = beforeOwners, AfterOwners = afterOwners,
+                ForeignStateOwner = stateOwner, ForeignStateType = stateType, ForeignStateArgIndex = StateArgOf(onThrow),
+                ArgsArgIndex = shape.NeedsArgs ? ArgsArgOf(onThrow) : null,
             },
             new Injection(Shim(nameof(ReturnTerminal), nameof(ReturnTerminalVoid), returnType, receiver), new InjectAt.Return(0), TerminalOwner, int.MaxValue) {
                 ReplayOnCancel = true, RunsAfterForeign = true,
@@ -64,17 +77,55 @@ internal static class FinalizerParticipant {
         return declaringType;
     }
 
-    internal static void OnReturn<T>(ControlHandle<T> control, [Bound] int slot) {
+    internal static void OnReturn<T>(ControlHandle<T> control, [Bound] int slot, object? state) {
         Pass pass = control.GetState<Pass>();
         T result = control.ReturnValue;
-        pass = ReturnPass(pass, slot, null, ref result);
+        pass = ReturnPass(pass, slot, null, null, state, ref result);
         control.ReturnValue = result;
         control.SetState(pass);
     }
 
-    internal static void OnReturnVoid(ControlHandle control, [Bound] int slot) {
+    internal static void OnReturnVoid(ControlHandle control, [Bound] int slot, object? state) {
         Pass pass = control.GetState<Pass>();
-        pass = ReturnPassVoid(pass, slot, null);
+        pass = ReturnPassVoid(pass, slot, null, null, state);
+        control.SetState(pass);
+    }
+
+    internal static void OnReturnArgs<T>(ControlHandle<T> control, [Bound] int slot, object[] args, object? state) {
+        Pass pass = control.GetState<Pass>();
+        T result = control.ReturnValue;
+        pass = ReturnPass(pass, slot, null, args, state, ref result);
+        control.ReturnValue = result;
+        control.SetState(pass);
+    }
+
+    internal static void OnReturnVoidArgs(ControlHandle control, [Bound] int slot, object[] args, object? state) {
+        Pass pass = control.GetState<Pass>();
+        pass = ReturnPassVoid(pass, slot, null, args, state);
+        control.SetState(pass);
+    }
+
+    internal static void OnThrowArgs<T>(ControlHandle<T> control, [Bound] int slot, object[] args, object? state) {
+        Pass pass = control.GetState<Pass>();
+        if (pass.Phase == Finalized) {
+            return;
+        }
+
+        Exception caught = control.Exception;
+        T result = control.ReturnValue;
+        pass = ThrowPass(pass, slot, null, args, state, caught, ref result);
+        control.ReturnValue = result;
+        control.SetState(pass);
+    }
+
+    internal static void OnThrowVoidArgs(ControlHandle control, [Bound] int slot, object[] args, object? state) {
+        Pass pass = control.GetState<Pass>();
+        if (pass.Phase == Finalized) {
+            return;
+        }
+
+        Exception caught = control.Exception;
+        pass = ThrowPassVoid(pass, slot, null, args, state, caught);
         control.SetState(pass);
     }
 
@@ -100,7 +151,7 @@ internal static class FinalizerParticipant {
         throw pass.Current;
     }
 
-    internal static void OnThrow<T>(ControlHandle<T> control, [Bound] int slot) {
+    internal static void OnThrow<T>(ControlHandle<T> control, [Bound] int slot, object? state) {
         Pass pass = control.GetState<Pass>();
         if (pass.Phase == Finalized) {
             return;
@@ -108,19 +159,19 @@ internal static class FinalizerParticipant {
 
         Exception caught = control.Exception;
         T result = control.ReturnValue;
-        pass = ThrowPass(pass, slot, null, caught, ref result);
+        pass = ThrowPass(pass, slot, null, null, state, caught, ref result);
         control.ReturnValue = result;
         control.SetState(pass);
     }
 
-    internal static void OnThrowVoid(ControlHandle control, [Bound] int slot) {
+    internal static void OnThrowVoid(ControlHandle control, [Bound] int slot, object? state) {
         Pass pass = control.GetState<Pass>();
         if (pass.Phase == Finalized) {
             return;
         }
 
         Exception caught = control.Exception;
-        pass = ThrowPassVoid(pass, slot, null, caught);
+        pass = ThrowPassVoid(pass, slot, null, null, state, caught);
         control.SetState(pass);
     }
 
@@ -166,73 +217,73 @@ internal static class FinalizerParticipant {
         throw current;
     }
 
-    private static Pass ReturnPass<T>(Pass pass, int slot, object? instance, ref T result) {
+    private static Pass ReturnPass<T>(Pass pass, int slot, object? instance, object?[]? args, object? state, ref T result) {
         if (pass.Phase == Untouched) {
             pass.Phase = Returning;
         }
 
-        pass.Current = Invoke(slot, pass.Current, instance, ref result);
+        pass.Current = Invoke(slot, pass.Current, instance, args, state, ref result);
         return pass;
     }
 
-    private static Pass ReturnPassVoid(Pass pass, int slot, object? instance) {
+    private static Pass ReturnPassVoid(Pass pass, int slot, object? instance, object?[]? args, object? state) {
         if (pass.Phase == Untouched) {
             pass.Phase = Returning;
         }
 
-        pass.Current = InvokeVoid(slot, pass.Current, instance);
+        pass.Current = InvokeVoid(slot, pass.Current, instance, args, state);
         return pass;
     }
 
-    private static Pass ThrowPass<T>(Pass pass, int slot, object? instance, Exception caught, ref T result) {
+    private static Pass ThrowPass<T>(Pass pass, int slot, object? instance, object?[]? args, object? state, Exception caught, ref T result) {
         if (pass.Phase != Catching) {
             pass.Phase = Catching;
             pass.Current = caught;
         }
 
-        pass.Current = RunSwallowingThrows(slot, pass.Current, instance, ref result);
+        pass.Current = RunSwallowingThrows(slot, pass.Current, instance, args, state, ref result);
         return pass;
     }
 
-    private static Pass ThrowPassVoid(Pass pass, int slot, object? instance, Exception caught) {
+    private static Pass ThrowPassVoid(Pass pass, int slot, object? instance, object?[]? args, object? state, Exception caught) {
         if (pass.Phase != Catching) {
             pass.Phase = Catching;
             pass.Current = caught;
         }
 
-        pass.Current = RunVoidSwallowingThrows(slot, pass.Current, instance);
+        pass.Current = RunVoidSwallowingThrows(slot, pass.Current, instance, args, state);
         return pass;
     }
 
-    private static Exception? Invoke<T>(int slot, Exception? current, object? instance, ref T result) {
+    private static Exception? Invoke<T>(int slot, Exception? current, object? instance, object?[]? args, object? state, ref T result) {
         Delegate adapter = adapters[slot];
         if (adapter is FinalizeResultOn<T> onInstance) {
-            return onInstance(current, ref result, instance);
+            return onInstance(current, ref result, instance, args, state);
         }
 
-        return ((FinalizeResult<T>)adapter)(current, ref result);
+        return ((FinalizeResult<T>)adapter)(current, ref result, args, state);
     }
 
-    private static Exception? InvokeVoid(int slot, Exception? current, object? instance) {
+    private static Exception? InvokeVoid(int slot, Exception? current, object? instance, object?[]? args, object? state) {
         Delegate adapter = adapters[slot];
         if (adapter is FinalizeVoidOn onInstance) {
-            return onInstance(current, instance);
+            return onInstance(current, instance, args, state);
         }
 
-        return ((FinalizeVoid)adapter)(current);
+        return ((FinalizeVoid)adapter)(current, args, state);
     }
 
-    private static Exception? RunSwallowingThrows<T>(int slot, Exception? current, object? instance, ref T result) {
+    private static Exception? RunSwallowingThrows<T>(int slot, Exception? current, object? instance, object?[]? args, object? state, ref T result) {
         try {
-            return Invoke(slot, current, instance, ref result);
+            return Invoke(slot, current, instance, args, state, ref result);
         } catch (Exception) {
             return current;
         }
     }
 
-    private static Exception? RunVoidSwallowingThrows(int slot, Exception? current, object? instance) {
+    private static Exception? RunVoidSwallowingThrows(int slot, Exception? current, object? instance, object?[]? args, object? state) {
         try {
-            return InvokeVoid(slot, current, instance);
+            return InvokeVoid(slot, current, instance, args, state);
         } catch (Exception) {
             return current;
         }
@@ -253,6 +304,14 @@ internal static class FinalizerParticipant {
             Slots[key] = grown.Length - 1;
             return grown.Length - 1;
         }
+    }
+
+    private static int StateArgOf(MethodInfo shim) {
+        return (shim.IsStatic ? 0 : 1) + shim.GetParameters().Length - 1;
+    }
+
+    private static int ArgsArgOf(MethodInfo shim) {
+        return (shim.IsStatic ? 0 : 1) + shim.GetParameters().Length - 2;
     }
 
     private static MethodInfo Shim(string generic, string plain, Type returnType, Type? receiver = null) {
@@ -342,21 +401,21 @@ internal static class FinalizerParticipant {
             throw current;
         }
 
-        internal void OnReturn<T>(ControlHandle<T> control, [Bound] int slot) {
+        internal void OnReturn<T>(ControlHandle<T> control, [Bound] int slot, object? state) {
             Pass pass = control.GetState<Pass>();
             T result = control.ReturnValue;
-            pass = ReturnPass(pass, slot, Self, ref result);
+            pass = ReturnPass(pass, slot, Self, null, state, ref result);
             control.ReturnValue = result;
             control.SetState(pass);
         }
 
-        internal void OnReturnVoid(ControlHandle control, [Bound] int slot) {
+        internal void OnReturnVoid(ControlHandle control, [Bound] int slot, object? state) {
             Pass pass = control.GetState<Pass>();
-            pass = ReturnPassVoid(pass, slot, Self);
+            pass = ReturnPassVoid(pass, slot, Self, null, state);
             control.SetState(pass);
         }
 
-        internal void OnThrow<T>(ControlHandle<T> control, [Bound] int slot) {
+        internal void OnThrow<T>(ControlHandle<T> control, [Bound] int slot, object? state) {
             Pass pass = control.GetState<Pass>();
             if (pass.Phase == Finalized) {
                 return;
@@ -364,19 +423,57 @@ internal static class FinalizerParticipant {
 
             Exception caught = control.Exception;
             T result = control.ReturnValue;
-            pass = ThrowPass(pass, slot, Self, caught, ref result);
+            pass = ThrowPass(pass, slot, Self, null, state, caught, ref result);
             control.ReturnValue = result;
             control.SetState(pass);
         }
 
-        internal void OnThrowVoid(ControlHandle control, [Bound] int slot) {
+        internal void OnThrowVoid(ControlHandle control, [Bound] int slot, object? state) {
             Pass pass = control.GetState<Pass>();
             if (pass.Phase == Finalized) {
                 return;
             }
 
             Exception caught = control.Exception;
-            pass = ThrowPassVoid(pass, slot, Self, caught);
+            pass = ThrowPassVoid(pass, slot, Self, null, state, caught);
+            control.SetState(pass);
+        }
+
+        internal void OnReturnArgs<T>(ControlHandle<T> control, [Bound] int slot, object[] args, object? state) {
+            Pass pass = control.GetState<Pass>();
+            T result = control.ReturnValue;
+            pass = ReturnPass(pass, slot, Self, args, state, ref result);
+            control.ReturnValue = result;
+            control.SetState(pass);
+        }
+
+        internal void OnReturnVoidArgs(ControlHandle control, [Bound] int slot, object[] args, object? state) {
+            Pass pass = control.GetState<Pass>();
+            pass = ReturnPassVoid(pass, slot, Self, args, state);
+            control.SetState(pass);
+        }
+
+        internal void OnThrowArgs<T>(ControlHandle<T> control, [Bound] int slot, object[] args, object? state) {
+            Pass pass = control.GetState<Pass>();
+            if (pass.Phase == Finalized) {
+                return;
+            }
+
+            Exception caught = control.Exception;
+            T result = control.ReturnValue;
+            pass = ThrowPass(pass, slot, Self, args, state, caught, ref result);
+            control.ReturnValue = result;
+            control.SetState(pass);
+        }
+
+        internal void OnThrowVoidArgs(ControlHandle control, [Bound] int slot, object[] args, object? state) {
+            Pass pass = control.GetState<Pass>();
+            if (pass.Phase == Finalized) {
+                return;
+            }
+
+            Exception caught = control.Exception;
+            pass = ThrowPassVoid(pass, slot, Self, args, state, caught);
             control.SetState(pass);
         }
     }

@@ -37,3 +37,22 @@ public interface IOwnsBodyQuery {
     /// <returns><see langword="true" /> if this backend published the body currently in effect for <paramref name="target" />.</returns>
     bool OwnsBody(MethodBase target);
 }
+
+/// <summary>
+///     Lets a backend tell a foreign patch host whether Concord may keep a target's body instead of letting
+///     that host rebuild it. A backend that does not implement this leaves suppression off.
+/// </summary>
+public interface ISuppressionProbes {
+    /// <summary>
+    ///     Reports why a body cannot be replaced in place on this host.
+    /// </summary>
+    /// <returns><see langword="null" /> when bodies can be replaced here, otherwise the reason they cannot.</returns>
+    string? BodyReplacementUnavailable();
+
+    /// <summary>
+    ///     Reports whether a profiler may rewrite method bodies in this process, which would delete anything
+    ///     folded into a body Concord owns.
+    /// </summary>
+    /// <returns><see langword="true" /> while a profiler is attached.</returns>
+    bool ProfilerMayRewriteBodies();
+}

@@ -49,7 +49,7 @@ internal static class TranspilerParticipant {
             return CodeInstructionConverter.FromConcord(outgoing, harmonyContext, generator);
         } catch (ConcordEmitException ex) {
             LastStreamFailure = ex;
-            Log?.Invoke(CoexistenceLogMarkers.StreamRejected + " " + original.Name + ": " + ex.Message);
+            Log?.Invoke(CoexistenceLogMarkers.StreamRejected + " " + original.Name + ": " + ExceptionReason.Of(ex));
             return instructions;
         }
     }

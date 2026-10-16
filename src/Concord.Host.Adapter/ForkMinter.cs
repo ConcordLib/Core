@@ -74,7 +74,14 @@ public sealed class ForkMinter : IMetadataMinter {
     /// <inheritdoc />
     /// <exception cref="PlatformNotSupportedException">This runtime has no token api; keep the detour backend.</exception>
     public int Token(Module target, MethodBase method) {
-        return Bound(MethodToken, TokenEntry, nameof(MethodBase))(target, method);
+        Func<Module, MethodBase, int> mint = Bound(MethodToken, TokenEntry, nameof(MethodBase));
+        if (method is not MethodInfo { IsGenericMethod: true, IsGenericMethodDefinition: false } constructed
+            || !MethodSpecMinter.IsAvailable) {
+            return mint(target, method);
+        }
+
+        int parent = mint(target, constructed.GetGenericMethodDefinition());
+        return MethodSpecMinter.Token(target, parent, constructed.GetGenericArguments());
     }
 
     /// <inheritdoc />

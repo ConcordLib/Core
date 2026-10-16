@@ -91,7 +91,7 @@ public sealed class WaylithTokenSource : ITokenSource {
     }
 
     private void RefuseMethodSpec(MethodBase method) {
-        if (method is not MethodInfo { IsGenericMethod: true } generic) {
+        if (method is not MethodInfo { IsGenericMethod: true } generic || MethodSpecMinter.IsAvailable) {
             return;
         }
 
@@ -114,6 +114,10 @@ public sealed class WaylithTokenSource : ITokenSource {
     }
 
     private void Refuse(MemberInfo member) {
+        if (RuntimeCapability.IgnoresAccessChecks) {
+            return;
+        }
+
         if (MemberReach.Explain(member, target) is string reason) {
             throw new TokenAccessException(reason);
         }
