@@ -17,7 +17,8 @@ public sealed partial class HarmonyBridge
             return false;
         }
 
-        if (patchInfo.InnerPrefixes.Count > 0 || patchInfo.InnerPostfixes.Count > 0)
+        if (HarmonyPatchSort.InnerCategory(patchInfo, "InnerPrefixes").Count > 0 ||
+            HarmonyPatchSort.InnerCategory(patchInfo, "InnerPostfixes").Count > 0)
         {
             return true;
         }
@@ -41,8 +42,8 @@ public sealed partial class HarmonyBridge
         CollectForeignOwners(patchInfo.Postfixes, owners);
         CollectForeignOwners(patchInfo.Transpilers, owners);
         CollectForeignOwners(patchInfo.Finalizers, owners);
-        CollectForeignOwners(patchInfo.InnerPrefixes, owners);
-        CollectForeignOwners(patchInfo.InnerPostfixes, owners);
+        CollectForeignOwners(HarmonyPatchSort.InnerCategory(patchInfo, "InnerPrefixes"), owners);
+        CollectForeignOwners(HarmonyPatchSort.InnerCategory(patchInfo, "InnerPostfixes"), owners);
 
         return new List<string>(owners);
     }

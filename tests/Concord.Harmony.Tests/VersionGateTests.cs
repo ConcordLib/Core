@@ -10,6 +10,8 @@ namespace Concord.Harmony.Tests;
 public sealed class VersionGateTests
 {
     [Theory]
+    [InlineData("2.4.2.0")]
+    [InlineData("2.4.3.0")]
     [InlineData("3.0.0.0")]
     [InlineData("3.0.1.0")]
     [InlineData("3.0.17.4")]
@@ -19,11 +21,7 @@ public sealed class VersionGateTests
     }
 
     [Theory]
-    [InlineData("2.2.2.0")]
-    [InlineData("2.3.3.0")]
     [InlineData("2.4.1.0")]
-    [InlineData("2.4.2.0")]
-    [InlineData("2.4.3.0")]
     [InlineData("2.5.0.0")]
     [InlineData("3.1.0.0")]
     [InlineData("4.0.0.0")]
@@ -34,6 +32,20 @@ public sealed class VersionGateTests
         Assert.NotNull(refusal);
         Assert.Contains("is unchecked", refusal);
         Assert.DoesNotContain("is refused", refusal);
+        Assert.Contains("stays asleep", refusal);
+    }
+
+    [Theory]
+    [InlineData("2.2.2.0", "MonoMod.Core.DetourFactory")]
+    [InlineData("2.3.3.0", "MonoMod.Core.DetourFactory.SetCurrentFactory")]
+    [InlineData("2.3.6.0", "MonoMod.Core.DetourFactory.SetCurrentFactory")]
+    public void GateRefusesAMeasuredReleaseThatLacksTheDetourFactorySeam(string version, string lacking)
+    {
+        string? refusal = SupportMatrix.BackstopRefusal(version);
+
+        Assert.NotNull(refusal);
+        Assert.Contains("is refused", refusal);
+        Assert.Contains(lacking, refusal);
         Assert.Contains("stays asleep", refusal);
     }
 

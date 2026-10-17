@@ -15,6 +15,14 @@
 
   <Import Project="$(MSBuildThisFileDirectory)../../Harmony.targets"/>
 
+  <ItemGroup>
+    <PackageDownload Include="Lib.Harmony" Version="[2.2.2];[2.3.3];[2.3.6];[2.4.2];[2.4.3];[3.0.0-rc.3]"/>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>NuGetPackageRoot</_Parameter1>
+      <_Parameter2>$(NuGetPackageRoot)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
   <ItemGroup Condition="'$(TargetFramework)' == 'net472'">
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all"/>
     <PackageReference Include="xunit.runner.console" Version="2.9.3" PrivateAssets="all"/>
