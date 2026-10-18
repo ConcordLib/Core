@@ -372,7 +372,7 @@ internal static class UpdateWrapperHook
         }
         catch (Exception ex)
         {
-            log(CoexistenceLogMarkers.HookUnavailable + " " + Describe(copy) +
+            log(CoexistenceLogMarkers.SeedUnreadable + " " + Describe(copy) +
                 ": its already-patched targets could not be read, so one may be suppressed into a dead body write: " + ExceptionReason.Of(ex));
         }
     }

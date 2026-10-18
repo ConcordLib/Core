@@ -37,6 +37,7 @@ public sealed class CapabilityProbeTests
                 "a 0Harmony carrying both PatchFunctions.UpdateWrapper and HarmonySharedState.UpdatePatchInfo was refused the notifier detour over its version string: "
                     + string.Join(" | ", log));
             Assert.Contains(log, line => line.StartsWith(CoexistenceLogMarkers.HookInstalled, StringComparison.Ordinal) && line.Contains(stamp));
+            Assert.DoesNotContain(log, line => line.StartsWith(CoexistenceLogMarkers.HookUnavailable, StringComparison.Ordinal) && line.Contains(stamp));
         }
         finally
         {
