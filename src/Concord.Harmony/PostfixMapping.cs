@@ -98,7 +98,7 @@ internal static class PostfixMapping {
         }
 
         Type returnType = ReturnTypeOf(target);
-        Type? instanceType = BoundParameters.NeedsInstance(postfix) && BoundParameters.CanBindInstance(target) ? BoundParameters.InstanceTypeOf(target) : null;
+        Type? instanceType = BoundParameters.NeedsInstance(postfix) && BoundParameters.CanBindInstance(target) ? BoundParameters.InstanceTypeOf(target, postfix) : null;
         int slot = Register(postfix, returnType, instanceType);
 
         return new[] {

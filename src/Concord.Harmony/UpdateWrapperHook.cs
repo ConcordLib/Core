@@ -17,6 +17,8 @@ internal static class UpdateWrapperHook
 
     internal const string SuppressFailedMarker = "[Concord.Coex] suppress-failed";
 
+    internal const string SuppressedMarker = "[Concord.Coex] suppressed";
+
     internal const string ComposeRefusedMarker = "[Concord.Coex] compose-refused";
 
     internal const string ComposeUnownedMarker = "[Concord.Coex] compose-unowned";
@@ -473,6 +475,7 @@ internal static class UpdateWrapperHook
                 HarmonyApiHonesty.ReplicateSharedStateWrite(original, stub, patchInfo);
             }
 
+            logger?.Invoke(SuppressedMarker + " " + Describe(original));
             return stub;
         }
         catch (Exception ex)
@@ -484,15 +487,16 @@ internal static class UpdateWrapperHook
 
     private static void LogSuppressionRefusal(MethodBase original, string reason)
     {
-        bool firstForThisReason;
+        string described = Describe(original);
+        bool firstForThisTarget;
         lock (SuppressionRefusalsLogged)
         {
-            firstForThisReason = SuppressionRefusalsLogged.Add(reason);
+            firstForThisTarget = SuppressionRefusalsLogged.Add(described + " :: " + reason);
         }
 
-        if (firstForThisReason)
+        if (firstForThisTarget)
         {
-            logger?.Invoke(SuppressBlockedMarker + " " + Describe(original) + ": " + reason);
+            logger?.Invoke(SuppressBlockedMarker + " " + described + ": " + reason);
         }
     }
 

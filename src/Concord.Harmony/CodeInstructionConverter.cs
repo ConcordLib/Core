@@ -33,7 +33,9 @@ internal static class CodeInstructionConverter {
     ///     Thrown with code <c>CONC124</c> when the stream contains a <c>calli</c> instruction, or with
     ///     code <c>CONC125</c> when a block carries an exception block kind neither model recognises.
     /// </exception>
-    internal static List<Concord.CodeInstruction> ToConcord(List<CodeInstruction> stream, Concord.ITranspilerContext context, out HarmonyStreamContext harmonyContext) {
+    /// <param name="scratchLocalTypes">Types of the locals the transpiler declared on its generator, by slot.</param>
+    internal static List<Concord.CodeInstruction> ToConcord(
+        List<CodeInstruction> stream, Concord.ITranspilerContext context, out HarmonyStreamContext harmonyContext, IReadOnlyList<Type?>? scratchLocalTypes = null) {
         HarmonyStreamContext built = new HarmonyStreamContext();
         Dictionary<Label, Concord.Label> concordLabelByHarmony = new Dictionary<Label, Concord.Label>();
 
@@ -48,7 +50,7 @@ internal static class CodeInstructionConverter {
             return minted;
         }
 
-        List<Concord.LocalRef> localRefBySlot = DeclareLocalsForStream(stream, context, built);
+        List<Concord.LocalRef> localRefBySlot = DeclareLocalsForStream(stream, context, built, scratchLocalTypes);
         List<Concord.CodeInstruction> converted = ConvertInstructions(stream, LabelFor, localRefBySlot);
 
         if (HasExceptionBlocks(converted)) {
@@ -101,7 +103,8 @@ internal static class CodeInstructionConverter {
     ///     Compact <c>ldloc.0</c>-style slots carry no operand, so the gap filler takes its type from
     ///     the original body's local at that slot. Harmony declares from the same list, so slots line up.
     /// </remarks>
-    private static List<Concord.LocalRef> DeclareLocalsForStream(List<CodeInstruction> stream, Concord.ITranspilerContext context, HarmonyStreamContext built) {
+    private static List<Concord.LocalRef> DeclareLocalsForStream(
+        List<CodeInstruction> stream, Concord.ITranspilerContext context, HarmonyStreamContext built, IReadOnlyList<Type?>? scratchLocalTypes) {
         Dictionary<int, LocalVariableInfo> localBySlot = new Dictionary<int, LocalVariableInfo>();
         int maxSlot = ScanLocalSlots(stream, localBySlot);
 
@@ -109,7 +112,7 @@ internal static class CodeInstructionConverter {
         List<Concord.LocalRef> localRefBySlot = new List<Concord.LocalRef>(maxSlot + 1);
         for (int slot = 0; slot <= maxSlot; slot++) {
             localBySlot.TryGetValue(slot, out LocalVariableInfo? original);
-            Concord.LocalRef declared = context.DeclareLocal(LocalTypeForSlot(original, originalLocals, slot));
+            Concord.LocalRef declared = context.DeclareLocal(LocalTypeForSlot(original, originalLocals, slot, scratchLocalTypes));
             localRefBySlot.Add(declared);
             if (original is not null) {
                 built.HarmonyLocalByRef[declared] = original;
@@ -127,6 +130,8 @@ internal static class CodeInstructionConverter {
                 if (localInfo.LocalIndex > maxSlot) {
                     maxSlot = localInfo.LocalIndex;
                 }
+            } else if (NumberedLocalSlot(instruction) is int numbered && numbered > maxSlot) {
+                maxSlot = numbered;
             }
 
             int compactSlot = CompactLocalSlot(instruction.opcode);
@@ -138,9 +143,34 @@ internal static class CodeInstructionConverter {
         return maxSlot;
     }
 
-    private static Type LocalTypeForSlot(LocalVariableInfo? original, IList<LocalVariableInfo>? originalLocals, int slot) {
+    private static int? NumberedLocalSlot(CodeInstruction instruction) {
+        if (!IsLocalOpCode(instruction.opcode)) {
+            return null;
+        }
+
+        return instruction.operand switch {
+            sbyte sb => sb,
+            byte b => b,
+            short i16 => i16,
+            ushort u16 => u16,
+            int i32 => i32,
+            _ => null,
+        };
+    }
+
+    private static bool IsLocalOpCode(OpCode opcode) {
+        return opcode == OpCodes.Ldloc || opcode == OpCodes.Ldloc_S || opcode == OpCodes.Ldloca || opcode == OpCodes.Ldloca_S ||
+               opcode == OpCodes.Stloc || opcode == OpCodes.Stloc_S;
+    }
+
+    private static Type LocalTypeForSlot(
+        LocalVariableInfo? original, IList<LocalVariableInfo>? originalLocals, int slot, IReadOnlyList<Type?>? scratchLocalTypes) {
         if (original is not null) {
             return original.LocalType;
+        }
+
+        if (scratchLocalTypes is not null && slot < scratchLocalTypes.Count && scratchLocalTypes[slot] is Type declaredOnGenerator) {
+            return declaredOnGenerator;
         }
 
         if (originalLocals is not null && slot < originalLocals.Count) {

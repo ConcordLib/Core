@@ -1109,7 +1109,6 @@ internal static class BodyCopier {
             VariableDefinition local = new VariableDefinition(declared);
             request.Destination.Body.Variables.Add(local);
             prologue.Add(LoadArgInstruction(entry.Value));
-            prologue.Add(Instruction.Create(OpCodes.Castclass, declared));
             prologue.Add(Instruction.Create(OpCodes.Stloc, local));
             spilled ??= new Dictionary<int, VariableDefinition>();
             spilled[entry.Key] = local;

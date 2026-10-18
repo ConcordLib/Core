@@ -27,7 +27,7 @@ internal static class InjectedMemberResolver {
             : ShadowResolver.BuildFieldMap(declarationType, targetType, out attached);
         Dictionary<string, MethodInfo?> methods = new Dictionary<string, MethodInfo?>();
 
-        AddInjectedInstance(declarationType, target, methods);
+        AddInjectedInstance(declarationType, target, methods, foreignOrigin);
         AddInjectedFields(declarationType, targetType, fields);
         AddInjectedProperties(declarationType, targetType, methods);
         AddInjectedMethods(declarationType, targetType, methods);
@@ -35,7 +35,7 @@ internal static class InjectedMemberResolver {
         return new InjectedMemberMap(fields, methods, attached, declarationType.FullName);
     }
 
-    private static void AddInjectedInstance(Type declarationType, MethodBase target, Dictionary<string, MethodInfo?> methods) {
+    private static void AddInjectedInstance(Type declarationType, MethodBase target, Dictionary<string, MethodInfo?> methods, bool foreignOrigin) {
         Type targetType = target.DeclaringType!;
         PropertyInfo? instanceProperty = null;
 
@@ -68,7 +68,8 @@ internal static class InjectedMemberResolver {
             throw Error(CodeCONC074, "[InjectInstance] does not support value-type target '" + targetType.Name + "'.");
         }
 
-        if (!instanceProperty.PropertyType.IsAssignableFrom(targetType)) {
+        bool narrows = foreignOrigin && targetType.IsAssignableFrom(instanceProperty.PropertyType);
+        if (!narrows && !instanceProperty.PropertyType.IsAssignableFrom(targetType)) {
             throw Error(
                 CodeCONC072,
                 "[InjectInstance] property '" + declarationType.Name + "." + instanceProperty.Name + HasType +

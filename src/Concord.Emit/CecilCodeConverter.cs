@@ -499,7 +499,21 @@ internal static class CecilCodeConverter {
     }
 
     private static Instruction CreateInstruction(CodeInstruction source, MethodDefinition definition, Dictionary<int, VariableDefinition> localsByIndex, ModuleDefinition module) {
+        try {
+            return BuildInstruction(source, definition, localsByIndex, module);
+        } catch (ArgumentException) {
+            throw new ConcordEmitException(
+                CodeConversionFailed,
+                $"Opcode '{source.opcode.Name}' expects a {MapOpCodeToCecil(source.opcode).OperandType} operand, but the transpiler gave it " +
+                $"'{source.operand ?? "null"}' of type '{source.operand?.GetType().Name ?? "null"}', which Cecil refused.");
+        }
+    }
+
+    private static Instruction BuildInstruction(CodeInstruction source, MethodDefinition definition, Dictionary<int, VariableDefinition> localsByIndex, ModuleDefinition module) {
         Mono.Cecil.Cil.OpCode opcode = MapOpCodeToCecil(source.opcode);
+        if (opcode.OperandType == OperandType.InlineNone) {
+            return Instruction.Create(opcode);
+        }
 
         return source.operand switch {
             null => Instruction.Create(opcode),
@@ -512,14 +526,37 @@ internal static class CecilCodeConverter {
             ConstructorInfo ctor => Instruction.Create(opcode, module.ImportReference(ctor)),
             MethodInfo method => Instruction.Create(opcode, module.ImportReference(method)),
             string s => Instruction.Create(opcode, s),
-            sbyte sb => Instruction.Create(opcode, sb),
-            byte b => ResolveSlotOperand(opcode, b, definition, localsByIndex, source) ?? Instruction.Create(opcode, b),
-            int i32 => ResolveSlotOperand(opcode, i32, definition, localsByIndex, source) ?? Instruction.Create(opcode, i32),
-            long i64 => Instruction.Create(opcode, i64),
+            sbyte sb => ResolveSlotOperand(opcode, sb, definition, localsByIndex, source) ?? CreateIntegerInstruction(opcode, sb, source),
+            byte b => ResolveSlotOperand(opcode, b, definition, localsByIndex, source) ?? CreateIntegerInstruction(opcode, b, source),
+            short i16 => ResolveSlotOperand(opcode, i16, definition, localsByIndex, source) ?? CreateIntegerInstruction(opcode, i16, source),
+            ushort u16 => ResolveSlotOperand(opcode, u16, definition, localsByIndex, source) ?? CreateIntegerInstruction(opcode, u16, source),
+            int i32 => ResolveSlotOperand(opcode, i32, definition, localsByIndex, source) ?? CreateIntegerInstruction(opcode, i32, source),
+            long i64 => CreateIntegerInstruction(opcode, i64, source),
             float f32 => CreateRealInstruction(opcode, f32, source),
             double f64 => CreateRealInstruction(opcode, f64, source),
             _ => throw new ConcordEmitException(CodeConversionFailed, $"Unsupported operand '{source.operand}' of type '{source.operand.GetType()}' for opcode '{source.opcode.Name}'. Supported operands are MethodBase, FieldInfo, Type, Label, LocalBuilder, string, and int/long/float/double literals."),
         };
+    }
+
+    private static Instruction CreateIntegerInstruction(Mono.Cecil.Cil.OpCode opcode, long value, CodeInstruction source) {
+        switch (opcode.OperandType) {
+            case OperandType.ShortInlineI:
+                return opcode.Code == Code.Ldc_I4_S
+                    ? Instruction.Create(opcode, checked((sbyte)value))
+                    : Instruction.Create(opcode, checked((byte)value));
+            case OperandType.InlineI:
+                return Instruction.Create(opcode, checked((int)value));
+            case OperandType.InlineI8:
+                return Instruction.Create(opcode, value);
+            case OperandType.ShortInlineR:
+                return Instruction.Create(opcode, (float)value);
+            case OperandType.InlineR:
+                return Instruction.Create(opcode, (double)value);
+            default:
+                throw new ConcordEmitException(
+                    CodeConversionFailed,
+                    $"Opcode '{source.opcode.Name}' does not take an integer operand, but the transpiler gave it '{value}'.");
+        }
     }
 
     private static Instruction CreateRealInstruction(Mono.Cecil.Cil.OpCode opcode, double value, CodeInstruction source) {

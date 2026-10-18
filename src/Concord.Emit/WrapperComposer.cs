@@ -569,6 +569,17 @@ public static class WrapperComposer {
             IEnumerable<CodeInstruction> produced = TranspilerInvoker.Invoke(transpilers[i].InjectionMethod, instructions, context);
             instructions = produced as List<CodeInstruction> ?? new List<CodeInstruction>(produced);
 
+            if (ControlFlowValidator.FindIllegalBranch(instructions) is string illegal) {
+                MethodBase culprit = transpilers[i].InjectionMethod;
+                throw new ConcordEmitException(
+                    ControlFlowValidator.Code,
+                    $"Transpiler '{culprit.DeclaringType?.Name}.{culprit.Name}' on '{resolved.DeclaringType?.Name}.{resolved.Name}' produced a body the runtime refuses: {illegal}") {
+                    LocalBindingMethod = culprit,
+                    LocalBindingInjection = transpilers[i],
+                    BrokenByAForeignEdit = true,
+                };
+            }
+
             int emitted = CountGetExecutingAssemblyCalls(instructions);
             if (emitted > baseline) {
                 MethodBase offender = transpilers[i].InjectionMethod;

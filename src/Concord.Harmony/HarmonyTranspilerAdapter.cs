@@ -104,7 +104,8 @@ internal static class HarmonyTranspilerAdapter {
             copy.Add(new Concord.CodeInstruction(instruction));
         }
 
-        ILGenerator generator = ThrowawayGenerator();
+        using TranspilerScratch scratch = new TranspilerScratch();
+        ILGenerator generator = scratch.Generator;
         HarmonyStreamContext outbound = new HarmonyStreamContext();
         int existing = HighestLocalSlot(copy) + 1;
         for (int slot = 0; slot < existing; slot++) {
@@ -119,15 +120,10 @@ internal static class HarmonyTranspilerAdapter {
         }
 
         List<CodeInstruction> materialized = new List<CodeInstruction>(produced);
-        List<Concord.CodeInstruction> outgoing = CodeInstructionConverter.ToConcord(materialized, new SlotMappingContext(context, existing), out _);
+        List<Concord.CodeInstruction> outgoing = CodeInstructionConverter.ToConcord(
+            materialized, new SlotMappingContext(context, existing), out _, scratch.DeclaredLocalTypes);
         ReplaceGetExecutingAssembly(outgoing, context.Original.DeclaringType);
         return outgoing;
-    }
-
-    private static ILGenerator ThrowawayGenerator() {
-        AssemblyBuilder assembly = AssemblyBuilder.DefineDynamicAssembly(new AssemblyName("Concord.Harmony.TranspilerScratch"), AssemblyBuilderAccess.RunAndCollect);
-        TypeBuilder type = assembly.DefineDynamicModule("Concord.Harmony.TranspilerScratch").DefineType("Scratch", TypeAttributes.Public | TypeAttributes.Abstract | TypeAttributes.Sealed);
-        return type.DefineMethod("Run", MethodAttributes.Public | MethodAttributes.Static, typeof(void), Type.EmptyTypes).GetILGenerator();
     }
 
     private static int HighestLocalSlot(List<Concord.CodeInstruction> stream) {

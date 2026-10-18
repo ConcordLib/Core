@@ -24,6 +24,12 @@ public static class TranspilerAdapterTargets
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
+    public static int Scaled(int x)
+    {
+        return x + 100;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static int Branchy(int x)
     {
         return x;
@@ -87,6 +93,48 @@ public class TranspilerAdapterTranspilers
         foreach (CodeInstruction instruction in instructions)
         {
             yield return instruction.opcode == OpCodes.Ldc_I4_5 ? new CodeInstruction(OpCodes.Ldc_I4, 10) : instruction;
+        }
+    }
+
+    public static IEnumerable<CodeInstruction> RetypeShortConstant(IEnumerable<CodeInstruction> instructions)
+    {
+        foreach (CodeInstruction instruction in instructions)
+        {
+            if (instruction.opcode == OpCodes.Ldc_I4_S)
+            {
+                instruction.operand = -1;
+            }
+
+            yield return instruction;
+        }
+    }
+
+    public static IEnumerable<CodeInstruction> StashThroughNumberedLocal(IEnumerable<CodeInstruction> instructions, ILGenerator ilg)
+    {
+        LocalBuilder stash = ilg.DeclareLocal(typeof(string));
+        bool stashed = false;
+        foreach (CodeInstruction instruction in instructions)
+        {
+            if (!stashed && instruction.opcode == OpCodes.Ldarg_0)
+            {
+                yield return new CodeInstruction(OpCodes.Ldstr, "stashed");
+                yield return new CodeInstruction(OpCodes.Stloc, ((LocalVariableInfo)stash).LocalIndex);
+                yield return new CodeInstruction(OpCodes.Ldloc, ((LocalVariableInfo)stash).LocalIndex);
+                yield return CodeInstruction.Call(typeof(string), "get_Length");
+                yield return new CodeInstruction(OpCodes.Pop);
+                stashed = true;
+            }
+
+            yield return instruction;
+        }
+    }
+
+    public static IEnumerable<CodeInstruction> NopOutCallKeepingOperand(IEnumerable<CodeInstruction> instructions)
+    {
+        yield return new CodeInstruction(OpCodes.Nop, AccessTools.Method(typeof(TranspilerAdapterTargets), nameof(TranspilerAdapterTargets.Doubled)));
+        foreach (CodeInstruction instruction in instructions)
+        {
+            yield return instruction;
         }
     }
 
@@ -202,6 +250,27 @@ public sealed class HarmonyTranspilerAdapterTests
     {
         AssertParity(nameof(TranspilerAdapterTargets.Priced), x => TranspilerAdapterTargets.Priced(x), new[] { 0 }, new[] { "ok:10" },
             (nameof(TranspilerAdapterTranspilers.FiveToTen), High));
+    }
+
+    [Fact]
+    public void ShortConstantRetypedToInt_MatchesHarmony()
+    {
+        AssertParity(nameof(TranspilerAdapterTargets.Scaled), x => TranspilerAdapterTargets.Scaled(x), new[] { 0 }, new[] { "ok:-1" },
+            (nameof(TranspilerAdapterTranspilers.RetypeShortConstant), High));
+    }
+
+    [Fact]
+    public void LocalDeclaredOnGeneratorAndUsedBySlotNumber_MatchesHarmony()
+    {
+        AssertParity(nameof(TranspilerAdapterTargets.Doubled), x => TranspilerAdapterTargets.Doubled(x), new[] { 3 }, new[] { "ok:6" },
+            (nameof(TranspilerAdapterTranspilers.StashThroughNumberedLocal), High));
+    }
+
+    [Fact]
+    public void OpcodeChangedToNopKeepingItsOperand_MatchesHarmony()
+    {
+        AssertParity(nameof(TranspilerAdapterTargets.Squared), x => TranspilerAdapterTargets.Squared(x), new[] { 3 }, new[] { "ok:16" },
+            (nameof(TranspilerAdapterTranspilers.NopOutCallKeepingOperand), High));
     }
 
     [Fact]
