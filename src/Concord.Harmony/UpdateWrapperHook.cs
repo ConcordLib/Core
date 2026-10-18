@@ -110,7 +110,7 @@ internal static class UpdateWrapperHook
         if (armed == 0)
         {
             log(CoexistenceLogMarkers.HookUnavailable +
-                " no loaded assembly carries HarmonyLib.PatchFunctions.UpdateWrapper. Late contention stays unrecoverable");
+                " every loaded Harmony copy was refused or failed to arm, each for the reason logged above it. Late contention stays unrecoverable");
             return false;
         }
 
@@ -177,6 +177,12 @@ internal static class UpdateWrapperHook
         }
 
         AppDomain.CurrentDomain.AssemblyLoad -= OnAssemblyLoad;
+    }
+
+    internal static bool CarriesSharedStateWriterOfAnySignature(Assembly copy)
+    {
+        Type? sharedState = copy.GetType("HarmonyLib.HarmonySharedState");
+        return sharedState?.GetMember("UpdatePatchInfo", BindingFlags.NonPublic | BindingFlags.Static).Length > 0;
     }
 
     private static string VersionTextOf(Assembly copy)
@@ -260,6 +266,7 @@ internal static class UpdateWrapperHook
         }
 
         MethodInfo? updateWrapper;
+        bool carriesSharedStateWriter;
         try
         {
             if (copy.GetType("HarmonyLib.Harmony") == null)
@@ -267,14 +274,8 @@ internal static class UpdateWrapperHook
                 return false;
             }
 
-            string? refusal = SupportMatrix.BackstopRefusal(VersionTextOf(copy), copy);
-            if (refusal != null)
-            {
-                log(CoexistenceLogMarkers.HookUnavailable + " " + Describe(copy) + ": " + refusal);
-                return false;
-            }
-
             updateWrapper = ResolveUpdateWrapper(copy);
+            carriesSharedStateWriter = CarriesSharedStateWriterOfAnySignature(copy);
         }
         catch (Exception ex)
         {
@@ -286,6 +287,13 @@ internal static class UpdateWrapperHook
         {
             log(CoexistenceLogMarkers.HookUnavailable + " " + Describe(copy) +
                 " carries no HarmonyLib.PatchFunctions.UpdateWrapper, so patches made through that copy stay invisible");
+            return false;
+        }
+
+        if (!carriesSharedStateWriter)
+        {
+            log(CoexistenceLogMarkers.HookUnavailable + " " + Describe(copy) +
+                " carries no HarmonyLib.HarmonySharedState.UpdatePatchInfo, so where it writes its shared patch state cannot be measured and no rebuild through it can be held");
             return false;
         }
 

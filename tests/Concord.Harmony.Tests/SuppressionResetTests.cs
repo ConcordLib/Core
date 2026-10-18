@@ -18,7 +18,7 @@ public sealed class SuppressionResetTests
 
     private const string ConcordOwner = "test.suppressionreset.concord";
 
-    private const string Seam = "SetCurrentFactory";
+    private const string SharedStateWriter = "UpdatePatchInfo";
 
     [Fact]
     public void ARefusedRebuildAfterAComposedOne_DropsTheComposedHandle_SoTheFirstPatchStopsRunning()
@@ -73,7 +73,7 @@ public sealed class SuppressionResetTests
     }
 
     [Fact]
-    public void ACopyStampedMeasuredWithoutTheSeam_IsRefusedOnTheLateCopyArmingPath()
+    public void ACopyCarryingNoSharedStateWriter_IsRefusedOnTheLateCopyArmingPath()
     {
         List<string> log = new List<string>();
 
@@ -81,18 +81,23 @@ public sealed class SuppressionResetTests
         {
             HarmonyArrival.Install(null, new MonoModDetourBackend(), log.Add, null, null);
 
-            Assembly faked = Assembly.Load(WithoutSeam(AssemblyImage.WithFreshModuleId(HarmonyImage())));
+            Assembly faked = Assembly.Load(WithoutMember(AssemblyImage.WithFreshModuleId(HarmonyImage()), SharedStateWriter));
 
             Assert.NotNull(faked.GetType("HarmonyLib.Harmony"));
             Assert.Equal(typeof(HarmonyLib.Harmony).Assembly.GetName().Version, faked.GetName().Version);
-            Assert.Null(faked.GetType("MonoMod.Core.DetourFactory")
-                ?.GetMethod(Seam, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static));
+            Assert.NotNull(faked.GetType("HarmonyLib.PatchFunctions")
+                ?.GetMethod("UpdateWrapper", BindingFlags.NonPublic | BindingFlags.Static));
+
+            Type sharedState = faked.GetType("HarmonyLib.HarmonySharedState")
+                ?? throw new InvalidOperationException("the forged copy lost HarmonyLib.HarmonySharedState entirely, so the refusal below would not pin to the missing writer");
+            Assert.Empty(sharedState.GetMember(SharedStateWriter, BindingFlags.NonPublic | BindingFlags.Static));
 
             Assert.True(HarmonyArrival.IsArmed(faked));
             Assert.False(
                 Hooked(faked),
-                "a 0Harmony stamped with a measured version but carrying no MonoMod seam got the notifier detour from the late-copy arming path");
-            Assert.Contains(log, line => line.Contains("MonoMod.Core.DetourFactory." + Seam));
+                "a 0Harmony carrying UpdateWrapper but no HarmonySharedState." + SharedStateWriter +
+                " got the notifier detour from the late-copy arming path, so a rebuild through it would be held with nowhere to write the shared patch state");
+            Assert.Contains(log, line => line.Contains("HarmonyLib.HarmonySharedState." + SharedStateWriter));
         }
         finally
         {
@@ -179,12 +184,12 @@ public sealed class SuppressionResetTests
         return File.ReadAllBytes(typeof(HarmonyLib.Harmony).Assembly.Location);
     }
 
-    private static byte[] WithoutSeam(byte[] image)
+    private static byte[] WithoutMember(byte[] image, string name)
     {
-        byte[] pattern = new byte[Seam.Length + 1];
-        for (int i = 0; i < Seam.Length; i++)
+        byte[] pattern = new byte[name.Length + 1];
+        for (int i = 0; i < name.Length; i++)
         {
-            pattern[i] = (byte)Seam[i];
+            pattern[i] = (byte)name[i];
         }
 
         int hit = -1;
@@ -192,12 +197,12 @@ public sealed class SuppressionResetTests
         {
             if (Matches(image, i, pattern))
             {
-                Assert.True(hit < 0, "the metadata string '" + Seam + "' appears more than once, so renaming it is ambiguous");
+                Assert.True(hit < 0, "the metadata string '" + name + "' appears more than once, so renaming it is ambiguous");
                 hit = i;
             }
         }
 
-        Assert.True(hit >= 0, "the metadata string '" + Seam + "' was not found in the 0Harmony image");
+        Assert.True(hit >= 0, "the metadata string '" + name + "' was not found in the 0Harmony image");
         image[hit] = (byte)'Z';
         return image;
     }

@@ -106,7 +106,7 @@ public sealed class VersionGateTests
 public sealed class VersionGateArrivalTests
 {
     [Fact]
-    public void AnUncheckedNewerHarmonyArrives_StaysUnhooked_AndALaterMeasuredCopyStillArms()
+    public void AnUncheckedNewerHarmonyArrives_ArmsAndHooks_AndALaterMeasuredCopyStillArms()
     {
         List<string> log = new List<string>();
 
@@ -118,11 +118,12 @@ public sealed class VersionGateArrivalTests
 
             Assert.Contains("Version=4.0.0.0", newer.FullName);
             Assert.True(HarmonyArrival.IsArmed(newer));
-            Assert.False(Hooked(newer), "a 0Harmony no version of this build measured got a notifier detour");
-            Assert.Contains(log, line => line.Contains("Harmony 4.0.0.0 is unchecked"));
+            Assert.True(
+                Hooked(newer),
+                "a 0Harmony no version of this build measured carries both probed members and still did not get a notifier detour");
 
             string newerStamp = " #" + newer.GetHashCode() + " ";
-            Assert.Contains(log, line => line.StartsWith(HarmonyArrival.ArmFailedMarker, StringComparison.Ordinal) && line.Contains(newerStamp));
+            Assert.Contains(log, line => line.StartsWith(HarmonyArrival.ArmedMarker, StringComparison.Ordinal) && line.Contains(newerStamp));
 
             Assembly measured = Assembly.Load(AssemblyImage.WithFreshModuleId(HarmonyImage()));
 
@@ -133,6 +134,36 @@ public sealed class VersionGateArrivalTests
         {
             HarmonyArrival.Reset();
             SuppressionGate.ClearProbes();
+            UpdateWrapperHook.DetachObserver();
+        }
+    }
+
+    [Fact]
+    public void ACopyMissingTheSharedStateWriter_IsRefusedByTheCapabilityProbe()
+    {
+        List<string> log = new List<string>();
+        MonoModDetourBackend backend = new MonoModDetourBackend();
+
+        try
+        {
+            Assembly stripped = Assembly.Load(WithoutMemberName(AssemblyImage.WithFreshModuleId(HarmonyImage()), "UpdatePatchInfo"));
+
+            Assert.NotNull(stripped.GetType("HarmonyLib.Harmony"));
+            Assert.False(UpdateWrapperHook.CarriesSharedStateWriterOfAnySignature(stripped));
+
+            UpdateWrapperHook.TryInstall(null!, backend, log.Add);
+
+            Assert.False(
+                Hooked(stripped),
+                "a 0Harmony missing HarmonySharedState.UpdatePatchInfo got the notifier detour anyway");
+            Assert.Contains(
+                log,
+                line => line.Contains("#" + stripped.GetHashCode()) &&
+                        line.Contains(
+                            "carries no HarmonyLib.HarmonySharedState.UpdatePatchInfo, so where it writes its shared patch state cannot be measured and no rebuild through it can be held"));
+        }
+        finally
+        {
             UpdateWrapperHook.DetachObserver();
         }
     }
@@ -171,6 +202,32 @@ public sealed class VersionGateArrivalTests
         BitConverter.GetBytes((ushort)version.Build).CopyTo(row, 8);
         BitConverter.GetBytes((ushort)version.Revision).CopyTo(row, 10);
         return row;
+    }
+
+    private static byte[] WithoutMemberName(byte[] image, string name)
+    {
+        byte[] pattern = new byte[name.Length + 2];
+        pattern[0] = 0;
+        for (int i = 0; i < name.Length; i++)
+        {
+            pattern[i + 1] = (byte)name[i];
+        }
+
+        pattern[pattern.Length - 1] = 0;
+
+        int hit = -1;
+        for (int i = 0; i <= image.Length - pattern.Length; i++)
+        {
+            if (Matches(image, i, pattern))
+            {
+                Assert.True(hit < 0, "the metadata string '" + name + "' appears more than once, so renaming it is ambiguous");
+                hit = i;
+            }
+        }
+
+        Assert.True(hit >= 0, "the metadata string '" + name + "' was not found in the 0Harmony image");
+        image[hit + 1] = (byte)'Z';
+        return image;
     }
 
     private static bool Matches(byte[] image, int offset, byte[] pattern)
