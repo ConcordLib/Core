@@ -27,4 +27,7 @@ internal sealed class HarmonyStreamContext {
 
     /// <summary>Whether the incoming stream needed the sacrificial trailing Nop for end-of-body handlers.</summary>
     public bool AppendedSacrificialNop { get; set; }
+
+    /// <summary>The label minted onto the sacrificial Nop, which identifies it after composition.</summary>
+    public Concord.Label? SacrificialNopLabel { get; set; }
 }

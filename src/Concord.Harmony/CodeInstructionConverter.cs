@@ -54,7 +54,7 @@ internal static class CodeInstructionConverter {
         List<Concord.CodeInstruction> converted = ConvertInstructions(stream, LabelFor, localRefBySlot);
 
         if (HasExceptionBlocks(converted)) {
-            AppendSacrificialNopAndShiftEnds(converted);
+            built.SacrificialNopLabel = AppendSacrificialNopAndShiftEnds(converted, context);
             built.AppendedSacrificialNop = true;
         }
 
@@ -68,8 +68,8 @@ internal static class CodeInstructionConverter {
     /// <param name="generator">Harmony's own <see cref="ILGenerator" />, used to mint labels/locals composition introduced.</param>
     /// <returns>The outgoing Harmony stream.</returns>
     internal static List<CodeInstruction> FromConcord(List<Concord.CodeInstruction> composed, HarmonyStreamContext context, ILGenerator generator) {
-        if (context.AppendedSacrificialNop) {
-            StripSacrificialNop(composed);
+        if (context.AppendedSacrificialNop && context.SacrificialNopLabel is Concord.Label filler) {
+            StripSacrificialNop(composed, filler);
         }
 
         // Unconditional: composition can introduce regions the incoming stream never had, and those
@@ -347,8 +347,11 @@ internal static class CodeInstructionConverter {
     // ordering intact for the case where a shifted End lands on the same instruction as the next
     // region's own Begin (e.g. a catch immediately followed by a finally) - stack-based semantics in
     // CecilCodeConverter.ApplyBlock require the closing marker to be processed first.
-    private static void AppendSacrificialNopAndShiftEnds(List<Concord.CodeInstruction> stream) {
-        stream.Add(new Concord.CodeInstruction(OpCodes.Nop));
+    private static Concord.Label AppendSacrificialNopAndShiftEnds(List<Concord.CodeInstruction> stream, Concord.ITranspilerContext context) {
+        Concord.Label filler = context.DefineLabel();
+        Concord.CodeInstruction sacrificial = new Concord.CodeInstruction(OpCodes.Nop);
+        sacrificial.labels.Add(filler);
+        stream.Add(sacrificial);
 
         for (int i = stream.Count - 2; i >= 0; i--) {
             Concord.CodeInstruction current = stream[i];
@@ -369,6 +372,8 @@ internal static class CodeInstructionConverter {
 
             stream[i + 1].blocks.InsertRange(0, ends);
         }
+
+        return filler;
     }
 
     // The filler is found structurally - the sole Nop with no operand carrying an EndExceptionBlock
@@ -377,20 +382,18 @@ internal static class CodeInstructionConverter {
     // place rather than stripped: that is exactly the terminal, non-null HandlerEnd anchor the
     // sacrificial instruction exists to provide, so removing it would recreate the null-HandlerEnd
     // problem it was added to avoid.
-    private static void StripSacrificialNop(List<Concord.CodeInstruction> composed) {
-        int index = composed.FindIndex(instruction =>
-            instruction.opcode == OpCodes.Nop &&
-            instruction.operand is null &&
-            instruction.blocks.Exists(block => block.blockType == Concord.ExceptionBlockType.EndExceptionBlock));
+    private static void StripSacrificialNop(List<Concord.CodeInstruction> composed, Concord.Label filler) {
+        int index = composed.FindIndex(instruction => instruction.labels.Contains(filler));
 
         if (index < 0 || index == composed.Count - 1) {
             return;
         }
 
-        Concord.CodeInstruction filler = composed[index];
+        Concord.CodeInstruction sacrificial = composed[index];
         Concord.CodeInstruction next = composed[index + 1];
-        next.blocks.InsertRange(0, filler.blocks);
-        next.labels.AddRange(filler.labels);
+        next.blocks.InsertRange(0, sacrificial.blocks);
+        next.labels.AddRange(sacrificial.labels);
+        next.labels.Remove(filler);
         composed.RemoveAt(index);
     }
 
