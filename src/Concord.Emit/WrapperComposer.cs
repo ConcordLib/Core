@@ -1189,6 +1189,7 @@ public static class WrapperComposer {
         AssembleInto(wrapper.Definition, resolved, declarative, returnType, rawLocalCount);
         RunTranspilers(wrapper.Definition, resolved, finalTranspilers);
         MultiDimArrayCalls.Rewrite(wrapper.Definition);
+        HandlerEndTrimmer.Apply(wrapper.Definition);
         DescribeComposedBody(wrapper.Definition, resolved, ordered, out ComposedBody? body, out string? bodyRejection);
         MethodInfo wrapperMethod = wrapper.Generate();
         return new ComposeResult(wrapperMethod, () => OriginalBody.Clone(resolved), rejected, body, bodyRejection);
@@ -1298,6 +1299,8 @@ public static class WrapperComposer {
         RunTranspilers(wrapper.Definition, resolved, preTranspilers);
         AssembleInto(wrapper.Definition, resolved, declarative, returnType, rawLocalCount);
         RunTranspilers(wrapper.Definition, resolved, finalTranspilers);
+
+        HandlerEndTrimmer.Apply(wrapper.Definition);
 
         TranspilerContext readContext = new TranspilerContext(resolved);
         return CecilCodeConverter.ToInstructions(wrapper.Definition, readContext, provenance, firstFreshLabelId);

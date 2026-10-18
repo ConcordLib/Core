@@ -7,7 +7,7 @@ internal static class ControlFlowValidator {
     internal const string Code = "CONC174";
 
     internal static string? FindIllegalBranch(IReadOnlyList<CodeInstruction> instructions) {
-        string[] regions = MapRegions(instructions);
+        string[] regions = MapRegions(instructions, out string[] entryRegions);
         Dictionary<Label, int> targets = MapLabels(instructions);
 
         for (int i = 0; i < instructions.Count; i++) {
@@ -21,7 +21,7 @@ internal static class ControlFlowValidator {
             }
 
             foreach (Label label in BranchTargets(instruction)) {
-                if (!targets.TryGetValue(label, out int target) || regions[target] == regions[i]) {
+                if (!targets.TryGetValue(label, out int target) || regions[target] == regions[i] || entryRegions[target] == regions[i]) {
                     continue;
                 }
 
@@ -58,8 +58,9 @@ internal static class ControlFlowValidator {
         return map;
     }
 
-    private static string[] MapRegions(IReadOnlyList<CodeInstruction> instructions) {
+    private static string[] MapRegions(IReadOnlyList<CodeInstruction> instructions, out string[] entryRegions) {
         string[] regions = new string[instructions.Count];
+        string[] entries = new string[instructions.Count];
         List<int> frames = new List<int>();
         List<int> sections = new List<int>();
         int nextFrame = 0;
@@ -67,10 +68,12 @@ internal static class ControlFlowValidator {
         for (int i = 0; i < instructions.Count; i++) {
             foreach (ExceptionBlock block in instructions[i].blocks) {
                 if (block.blockType == ExceptionBlockType.BeginExceptionBlock) {
+                    entries[i] ??= Describe(frames, sections);
                     frames.Add(nextFrame++);
                     sections.Add(0);
                 } else if (block.blockType == ExceptionBlockType.EndExceptionBlock) {
                     if (frames.Count == 0) {
+                        entryRegions = EveryInstructionUnregioned(instructions.Count);
                         return EveryInstructionUnregioned(instructions.Count);
                     }
 
@@ -82,9 +85,16 @@ internal static class ControlFlowValidator {
             }
 
             regions[i] = Describe(frames, sections);
+            entries[i] ??= regions[i];
         }
 
-        return frames.Count == 0 ? regions : EveryInstructionUnregioned(instructions.Count);
+        if (frames.Count != 0) {
+            entryRegions = EveryInstructionUnregioned(instructions.Count);
+            return EveryInstructionUnregioned(instructions.Count);
+        }
+
+        entryRegions = entries;
+        return regions;
     }
 
     private static string[] EveryInstructionUnregioned(int count) {
