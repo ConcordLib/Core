@@ -6,6 +6,8 @@ namespace Concord.Emit;
 internal static class ControlFlowValidator {
     internal const string Code = "CONC174";
 
+    internal const string InheritedCode = "CONC175";
+
     internal static string? FindIllegalBranch(IReadOnlyList<CodeInstruction> instructions) {
         string[] regions = MapRegions(instructions, out string[] entryRegions);
         Dictionary<Label, int> targets = MapLabels(instructions);

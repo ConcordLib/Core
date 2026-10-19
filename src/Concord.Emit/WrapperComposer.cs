@@ -164,6 +164,16 @@ public static class WrapperComposer {
         IReadOnlyList<Injection> ordered,
         ITranspilerContext context,
         out IReadOnlyList<RejectedInjection> rejected) {
+        if (ControlFlowValidator.FindIllegalBranch(source) is string inherited) {
+            throw new ConcordEmitException(
+                ControlFlowValidator.InheritedCode,
+                $"The instruction stream handed to Concord for '{target.DeclaringType?.Name}.{target.Name}' is already one the runtime refuses, " +
+                $"before any Concord injection ran: {inherited} Another patcher produced this stream, so Concord blames no injection of its own, " +
+                "drops none of them, and composes nothing onto it. Whoever edited this method before Concord has to fix it.") {
+                BrokenByAForeignEdit = true,
+            };
+        }
+
         List<RejectedInjection> dropped = new List<RejectedInjection>();
         IReadOnlyList<Injection> live = ordered;
         while (true) {

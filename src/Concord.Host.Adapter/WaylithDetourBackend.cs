@@ -222,9 +222,9 @@ public sealed class ComposedBodyPublisher : ITargetBodyOwner {
         bool held = WaylithDetourBackend.Writers.HoldsClaim(target);
         ComposeResult composed = WrapperComposer.Compose(target, ordered);
         foreach (RejectedInjection rejection in composed.Rejected) {
-            WaylithDetourBackend.Log(
-                $"[Concord.Waylith] injection-evicted '{target.DeclaringType?.FullName}.{target.Name}' owner " +
-                $"'{rejection.Owner}': {rejection.Message}");
+            if (EvictionReport.Compose("[Concord.Waylith] injection-evicted", target, rejection) is string report) {
+                WaylithDetourBackend.Log(report);
+            }
         }
 
         if (composed.Body is null) {
