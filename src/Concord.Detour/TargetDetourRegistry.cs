@@ -118,6 +118,12 @@ internal sealed class TargetDetourRegistry {
         return result;
     }
 
+    private static void ReportEviction(MethodBase target, RejectedInjection rejection) {
+        if (EvictionReport.Compose(CoexistenceLogMarkers.InjectionEvicted, target, rejection) is string report) {
+            PatchLog.Write(report);
+        }
+    }
+
     private IDetourHandle AddInternal(IReadOnlyList<Injection> added) {
         lock (gate) {
             List<long> owned = new List<long>(added.Count);
@@ -197,9 +203,7 @@ internal sealed class TargetDetourRegistry {
 
             composed = WrapperComposer.Compose(target, ordered);
             foreach (RejectedInjection rejection in composed.Rejected) {
-                PatchLog.Write(
-                    CoexistenceLogMarkers.InjectionEvicted + " " + target.DeclaringType?.FullName + "." + target.Name +
-                    " owner '" + rejection.Owner + "': " + rejection.Message);
+                ReportEviction(target, rejection);
             }
         }
 
