@@ -17,6 +17,8 @@ internal static class UpdateWrapperHook
 
     internal const string SuppressFailedMarker = "[Concord.Coex] suppress-failed";
 
+    internal const string SuppressedMarker = "[Concord.Coex] suppressed";
+
     internal const string ComposeRefusedMarker = "[Concord.Coex] compose-refused";
 
     internal const string ComposeUnownedMarker = "[Concord.Coex] compose-unowned";
@@ -110,7 +112,7 @@ internal static class UpdateWrapperHook
         if (armed == 0)
         {
             log(CoexistenceLogMarkers.HookUnavailable +
-                " no loaded assembly carries HarmonyLib.PatchFunctions.UpdateWrapper. Late contention stays unrecoverable");
+                " every loaded Harmony copy was refused or failed to arm, each for the reason logged above it. Late contention stays unrecoverable");
             return false;
         }
 
@@ -177,6 +179,12 @@ internal static class UpdateWrapperHook
         }
 
         AppDomain.CurrentDomain.AssemblyLoad -= OnAssemblyLoad;
+    }
+
+    internal static bool CarriesSharedStateWriterOfAnySignature(Assembly copy)
+    {
+        Type? sharedState = copy.GetType("HarmonyLib.HarmonySharedState");
+        return sharedState?.GetMember("UpdatePatchInfo", BindingFlags.NonPublic | BindingFlags.Static).Length > 0;
     }
 
     private static string VersionTextOf(Assembly copy)
@@ -260,6 +268,7 @@ internal static class UpdateWrapperHook
         }
 
         MethodInfo? updateWrapper;
+        bool carriesSharedStateWriter;
         try
         {
             if (copy.GetType("HarmonyLib.Harmony") == null)
@@ -267,14 +276,8 @@ internal static class UpdateWrapperHook
                 return false;
             }
 
-            string? refusal = SupportMatrix.BackstopRefusal(VersionTextOf(copy), copy);
-            if (refusal != null)
-            {
-                log(CoexistenceLogMarkers.HookUnavailable + " " + Describe(copy) + ": " + refusal);
-                return false;
-            }
-
             updateWrapper = ResolveUpdateWrapper(copy);
+            carriesSharedStateWriter = CarriesSharedStateWriterOfAnySignature(copy);
         }
         catch (Exception ex)
         {
@@ -286,6 +289,13 @@ internal static class UpdateWrapperHook
         {
             log(CoexistenceLogMarkers.HookUnavailable + " " + Describe(copy) +
                 " carries no HarmonyLib.PatchFunctions.UpdateWrapper, so patches made through that copy stay invisible");
+            return false;
+        }
+
+        if (!carriesSharedStateWriter)
+        {
+            log(CoexistenceLogMarkers.HookUnavailable + " " + Describe(copy) +
+                " carries no HarmonyLib.HarmonySharedState.UpdatePatchInfo, so where it writes its shared patch state cannot be measured and no rebuild through it can be held");
             return false;
         }
 
@@ -364,7 +374,7 @@ internal static class UpdateWrapperHook
         }
         catch (Exception ex)
         {
-            log(CoexistenceLogMarkers.HookUnavailable + " " + Describe(copy) +
+            log(CoexistenceLogMarkers.SeedUnreadable + " " + Describe(copy) +
                 ": its already-patched targets could not be read, so one may be suppressed into a dead body write: " + ExceptionReason.Of(ex));
         }
     }
@@ -465,6 +475,7 @@ internal static class UpdateWrapperHook
                 HarmonyApiHonesty.ReplicateSharedStateWrite(original, stub, patchInfo);
             }
 
+            logger?.Invoke(SuppressedMarker + " " + Describe(original));
             return stub;
         }
         catch (Exception ex)
@@ -476,15 +487,16 @@ internal static class UpdateWrapperHook
 
     private static void LogSuppressionRefusal(MethodBase original, string reason)
     {
-        bool firstForThisReason;
+        string described = Describe(original);
+        bool firstForThisTarget;
         lock (SuppressionRefusalsLogged)
         {
-            firstForThisReason = SuppressionRefusalsLogged.Add(reason);
+            firstForThisTarget = SuppressionRefusalsLogged.Add(described + " :: " + reason);
         }
 
-        if (firstForThisReason)
+        if (firstForThisTarget)
         {
-            logger?.Invoke(SuppressBlockedMarker + " " + Describe(original) + ": " + reason);
+            logger?.Invoke(SuppressBlockedMarker + " " + described + ": " + reason);
         }
     }
 

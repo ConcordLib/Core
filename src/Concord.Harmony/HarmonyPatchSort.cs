@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
@@ -18,6 +19,8 @@ public static class HarmonyPatchSort
 
     private static readonly MethodInfo? SorterSort =
         SorterType?.GetMethod("Sort", BindingFlags.NonPublic | BindingFlags.Instance, null, Type.EmptyTypes, null);
+
+    private static readonly ConcurrentDictionary<string, (FieldInfo? Field, PropertyInfo? Property)> InnerAccessors = new();
 
     /// <summary>
     ///     Reports whether <c>HarmonyLib.PatchSorter</c> is reachable on the Harmony loaded in this process.
@@ -88,6 +91,25 @@ public static class HarmonyPatchSort
         return (Patch[])sort.Invoke(sorter, Array.Empty<object>())!;
     }
 
+    internal static IReadOnlyList<Patch> InnerCategory(Patches patchInfo, string name)
+    {
+        (FieldInfo? field, PropertyInfo? property) = InnerAccessors.GetOrAdd(name, static n => (
+            typeof(Patches).GetField(n, BindingFlags.Public | BindingFlags.Instance),
+            typeof(Patches).GetProperty(n, BindingFlags.Public | BindingFlags.Instance)));
+
+        if (field != null)
+        {
+            return field.GetValue(patchInfo) as IReadOnlyList<Patch> ?? Array.Empty<Patch>();
+        }
+
+        if (property != null)
+        {
+            return property.GetValue(patchInfo) as IReadOnlyList<Patch> ?? Array.Empty<Patch>();
+        }
+
+        return Array.Empty<Patch>();
+    }
+
     private static ConstructorInfo? FindSorterCtor()
     {
         if (SorterType == null)
@@ -116,23 +138,6 @@ public static class HarmonyPatchSort
         }
 
         return null;
-    }
-
-    private static IReadOnlyList<Patch> InnerCategory(Patches patchInfo, string name)
-    {
-        FieldInfo? field = typeof(Patches).GetField(name, BindingFlags.Public | BindingFlags.Instance);
-        if (field != null)
-        {
-            return field.GetValue(patchInfo) as IReadOnlyList<Patch> ?? Array.Empty<Patch>();
-        }
-
-        PropertyInfo? property = typeof(Patches).GetProperty(name, BindingFlags.Public | BindingFlags.Instance);
-        if (property == null)
-        {
-            return Array.Empty<Patch>();
-        }
-
-        return property.GetValue(patchInfo) as IReadOnlyList<Patch> ?? Array.Empty<Patch>();
     }
 
     private static string HarmonyVersionText()

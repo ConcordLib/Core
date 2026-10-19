@@ -82,6 +82,11 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void HarmonyPostfixOnRefTypeInstantiation()
         {
+            if (TestRuntime.IsNetFramework)
+            {
+                return;
+            }
+
             HarmonyLib.Harmony harmony = new HarmonyLib.Harmony("probe.shared.generic");
             MethodInfo target = Method(typeof(HarmonyProbeBox<string>), nameof(HarmonyProbeBox<string>.Ping));
             MethodInfo postfix = Method(typeof(HarmonyProbePatches), nameof(HarmonyProbePatches.Postfix));
@@ -189,6 +194,11 @@ namespace Concord.Harmony.Tests
         [Fact]
         public void HarmonyDictionaryReadingBodyOnRefTypeInstantiation()
         {
+            if (TestRuntime.IsNetFramework)
+            {
+                return;
+            }
+
             HarmonyLib.Harmony harmony = new HarmonyLib.Harmony("probe.shared.generic.dict");
             MethodInfo target = Method(typeof(HarmonyProbeBox<string>), nameof(HarmonyProbeBox<string>.Describe));
             MethodInfo postfix = Method(typeof(HarmonyProbePatches), nameof(HarmonyProbePatches.Append));

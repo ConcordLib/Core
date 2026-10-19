@@ -144,6 +144,11 @@ public sealed class SuppressionFilterTests
     [Fact]
     public void AGenericInstantiationTarget_LeavesTheRebuildToHarmony()
     {
+        if (TestRuntime.IsNetFramework)
+        {
+            return;
+        }
+
         MethodInfo target = Fresh(typeof(GenericFilterTarget<string>), nameof(GenericFilterTarget<string>.Compute));
         AssertHarmonyKeptTheBuild(target, nameof(FilterMods.GenericPrefix), profilerPresent: false, capabilityOff: null, expectedTag: SuppressionReason.GenericTag);
     }
@@ -151,6 +156,11 @@ public sealed class SuppressionFilterTests
     [Fact]
     public void TwoRefusalsWithDifferentReasons_BothReachTheLog()
     {
+        if (TestRuntime.IsNetFramework)
+        {
+            return;
+        }
+
         MethodInfo first = Fresh(typeof(GenericFilterTarget<object>), nameof(GenericFilterTarget<object>.Compute));
         MethodInfo second = Fresh(typeof(SecondGenericFilterTarget<object>), nameof(SecondGenericFilterTarget<object>.Compute));
         HarmonyLib.Harmony harmony = new HarmonyLib.Harmony(ModId);

@@ -33,7 +33,9 @@ internal static class CodeInstructionConverter {
     ///     Thrown with code <c>CONC124</c> when the stream contains a <c>calli</c> instruction, or with
     ///     code <c>CONC125</c> when a block carries an exception block kind neither model recognises.
     /// </exception>
-    internal static List<Concord.CodeInstruction> ToConcord(List<CodeInstruction> stream, Concord.ITranspilerContext context, out HarmonyStreamContext harmonyContext) {
+    /// <param name="scratchLocalTypes">Types of the locals the transpiler declared on its generator, by slot.</param>
+    internal static List<Concord.CodeInstruction> ToConcord(
+        List<CodeInstruction> stream, Concord.ITranspilerContext context, out HarmonyStreamContext harmonyContext, IReadOnlyList<Type?>? scratchLocalTypes = null) {
         HarmonyStreamContext built = new HarmonyStreamContext();
         Dictionary<Label, Concord.Label> concordLabelByHarmony = new Dictionary<Label, Concord.Label>();
 
@@ -48,11 +50,11 @@ internal static class CodeInstructionConverter {
             return minted;
         }
 
-        List<Concord.LocalRef> localRefBySlot = DeclareLocalsForStream(stream, context, built);
+        List<Concord.LocalRef> localRefBySlot = DeclareLocalsForStream(stream, context, built, scratchLocalTypes);
         List<Concord.CodeInstruction> converted = ConvertInstructions(stream, LabelFor, localRefBySlot);
 
         if (HasExceptionBlocks(converted)) {
-            AppendSacrificialNopAndShiftEnds(converted);
+            built.SacrificialNopLabel = AppendSacrificialNopAndShiftEnds(converted, context);
             built.AppendedSacrificialNop = true;
         }
 
@@ -66,8 +68,8 @@ internal static class CodeInstructionConverter {
     /// <param name="generator">Harmony's own <see cref="ILGenerator" />, used to mint labels/locals composition introduced.</param>
     /// <returns>The outgoing Harmony stream.</returns>
     internal static List<CodeInstruction> FromConcord(List<Concord.CodeInstruction> composed, HarmonyStreamContext context, ILGenerator generator) {
-        if (context.AppendedSacrificialNop) {
-            StripSacrificialNop(composed);
+        if (context.AppendedSacrificialNop && context.SacrificialNopLabel is Concord.Label filler) {
+            StripSacrificialNop(composed, filler);
         }
 
         // Unconditional: composition can introduce regions the incoming stream never had, and those
@@ -101,7 +103,8 @@ internal static class CodeInstructionConverter {
     ///     Compact <c>ldloc.0</c>-style slots carry no operand, so the gap filler takes its type from
     ///     the original body's local at that slot. Harmony declares from the same list, so slots line up.
     /// </remarks>
-    private static List<Concord.LocalRef> DeclareLocalsForStream(List<CodeInstruction> stream, Concord.ITranspilerContext context, HarmonyStreamContext built) {
+    private static List<Concord.LocalRef> DeclareLocalsForStream(
+        List<CodeInstruction> stream, Concord.ITranspilerContext context, HarmonyStreamContext built, IReadOnlyList<Type?>? scratchLocalTypes) {
         Dictionary<int, LocalVariableInfo> localBySlot = new Dictionary<int, LocalVariableInfo>();
         int maxSlot = ScanLocalSlots(stream, localBySlot);
 
@@ -109,7 +112,7 @@ internal static class CodeInstructionConverter {
         List<Concord.LocalRef> localRefBySlot = new List<Concord.LocalRef>(maxSlot + 1);
         for (int slot = 0; slot <= maxSlot; slot++) {
             localBySlot.TryGetValue(slot, out LocalVariableInfo? original);
-            Concord.LocalRef declared = context.DeclareLocal(LocalTypeForSlot(original, originalLocals, slot));
+            Concord.LocalRef declared = context.DeclareLocal(LocalTypeForSlot(original, originalLocals, slot, scratchLocalTypes));
             localRefBySlot.Add(declared);
             if (original is not null) {
                 built.HarmonyLocalByRef[declared] = original;
@@ -127,6 +130,8 @@ internal static class CodeInstructionConverter {
                 if (localInfo.LocalIndex > maxSlot) {
                     maxSlot = localInfo.LocalIndex;
                 }
+            } else if (NumberedLocalSlot(instruction) is int numbered && numbered > maxSlot) {
+                maxSlot = numbered;
             }
 
             int compactSlot = CompactLocalSlot(instruction.opcode);
@@ -138,9 +143,34 @@ internal static class CodeInstructionConverter {
         return maxSlot;
     }
 
-    private static Type LocalTypeForSlot(LocalVariableInfo? original, IList<LocalVariableInfo>? originalLocals, int slot) {
+    private static int? NumberedLocalSlot(CodeInstruction instruction) {
+        if (!IsLocalOpCode(instruction.opcode)) {
+            return null;
+        }
+
+        return instruction.operand switch {
+            sbyte sb => sb,
+            byte b => b,
+            short i16 => i16,
+            ushort u16 => u16,
+            int i32 => i32,
+            _ => null,
+        };
+    }
+
+    private static bool IsLocalOpCode(OpCode opcode) {
+        return opcode == OpCodes.Ldloc || opcode == OpCodes.Ldloc_S || opcode == OpCodes.Ldloca || opcode == OpCodes.Ldloca_S ||
+               opcode == OpCodes.Stloc || opcode == OpCodes.Stloc_S;
+    }
+
+    private static Type LocalTypeForSlot(
+        LocalVariableInfo? original, IList<LocalVariableInfo>? originalLocals, int slot, IReadOnlyList<Type?>? scratchLocalTypes) {
         if (original is not null) {
             return original.LocalType;
+        }
+
+        if (scratchLocalTypes is not null && slot < scratchLocalTypes.Count && scratchLocalTypes[slot] is Type declaredOnGenerator) {
+            return declaredOnGenerator;
         }
 
         if (originalLocals is not null && slot < originalLocals.Count) {
@@ -317,8 +347,11 @@ internal static class CodeInstructionConverter {
     // ordering intact for the case where a shifted End lands on the same instruction as the next
     // region's own Begin (e.g. a catch immediately followed by a finally) - stack-based semantics in
     // CecilCodeConverter.ApplyBlock require the closing marker to be processed first.
-    private static void AppendSacrificialNopAndShiftEnds(List<Concord.CodeInstruction> stream) {
-        stream.Add(new Concord.CodeInstruction(OpCodes.Nop));
+    private static Concord.Label AppendSacrificialNopAndShiftEnds(List<Concord.CodeInstruction> stream, Concord.ITranspilerContext context) {
+        Concord.Label filler = context.DefineLabel();
+        Concord.CodeInstruction sacrificial = new Concord.CodeInstruction(OpCodes.Nop);
+        sacrificial.labels.Add(filler);
+        stream.Add(sacrificial);
 
         for (int i = stream.Count - 2; i >= 0; i--) {
             Concord.CodeInstruction current = stream[i];
@@ -339,6 +372,8 @@ internal static class CodeInstructionConverter {
 
             stream[i + 1].blocks.InsertRange(0, ends);
         }
+
+        return filler;
     }
 
     // The filler is found structurally - the sole Nop with no operand carrying an EndExceptionBlock
@@ -347,20 +382,18 @@ internal static class CodeInstructionConverter {
     // place rather than stripped: that is exactly the terminal, non-null HandlerEnd anchor the
     // sacrificial instruction exists to provide, so removing it would recreate the null-HandlerEnd
     // problem it was added to avoid.
-    private static void StripSacrificialNop(List<Concord.CodeInstruction> composed) {
-        int index = composed.FindIndex(instruction =>
-            instruction.opcode == OpCodes.Nop &&
-            instruction.operand is null &&
-            instruction.blocks.Exists(block => block.blockType == Concord.ExceptionBlockType.EndExceptionBlock));
+    private static void StripSacrificialNop(List<Concord.CodeInstruction> composed, Concord.Label filler) {
+        int index = composed.FindIndex(instruction => instruction.labels.Contains(filler));
 
         if (index < 0 || index == composed.Count - 1) {
             return;
         }
 
-        Concord.CodeInstruction filler = composed[index];
+        Concord.CodeInstruction sacrificial = composed[index];
         Concord.CodeInstruction next = composed[index + 1];
-        next.blocks.InsertRange(0, filler.blocks);
-        next.labels.AddRange(filler.labels);
+        next.blocks.InsertRange(0, sacrificial.blocks);
+        next.labels.AddRange(sacrificial.labels);
+        next.labels.Remove(filler);
         composed.RemoveAt(index);
     }
 

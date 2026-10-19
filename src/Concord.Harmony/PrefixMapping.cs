@@ -90,8 +90,19 @@ internal static class BoundParameters {
         return false;
     }
 
-    internal static Type InstanceTypeOf(MethodBase target) {
-        return target.DeclaringType!;
+    internal static Type InstanceTypeOf(MethodBase target, MethodInfo patch) {
+        Type declaringType = target.DeclaringType!;
+        foreach (ParameterInfo parameter in patch.GetParameters()) {
+            if (parameter.Name != InstanceName || parameter.ParameterType.IsByRef || parameter.ParameterType.IsValueType) {
+                continue;
+            }
+
+            if (parameter.ParameterType != declaringType && declaringType.IsAssignableFrom(parameter.ParameterType)) {
+                return parameter.ParameterType;
+            }
+        }
+
+        return declaringType;
     }
 
     internal static bool CanBindInstance(MethodBase target) {
@@ -471,7 +482,7 @@ internal static class PrefixMapping {
         }
 
         Type returnType = HarmonyFinalizerShape.ReturnTypeOf(target);
-        Type? instanceType = BoundParameters.CanBindInstance(target) ? BoundParameters.InstanceTypeOf(target) : null;
+        Type? instanceType = BoundParameters.CanBindInstance(target) ? BoundParameters.InstanceTypeOf(target, prefix) : null;
         int slot = Register(prefix, returnType, instanceType);
         return new Injection(Shim(returnType, instanceType), new InjectAt.Head(), owner, 0) {
             ForeignOrigin = true,

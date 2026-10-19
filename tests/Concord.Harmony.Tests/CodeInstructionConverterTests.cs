@@ -120,6 +120,38 @@ public class CodeInstructionConverterTests
     }
 
     [Fact]
+    public void ExceptionBlocks_TwoRegionsWhereAnEndLandsOnAPlainNop_KeepsEveryRealInstruction()
+    {
+        ILGenerator generator = NewGenerator();
+
+        List<CodeInstruction> stream = new List<CodeInstruction>
+        {
+            new CodeInstruction(OpCodes.Nop).WithBlocks(new ExceptionBlock(ExceptionBlockType.BeginExceptionBlock)),
+            new CodeInstruction(OpCodes.Pop).WithBlocks(new ExceptionBlock(ExceptionBlockType.BeginCatchBlock, typeof(Exception))),
+            new CodeInstruction(OpCodes.Nop).WithBlocks(new ExceptionBlock(ExceptionBlockType.EndExceptionBlock)),
+            new CodeInstruction(OpCodes.Nop),
+            new CodeInstruction(OpCodes.Nop).WithBlocks(new ExceptionBlock(ExceptionBlockType.BeginExceptionBlock)),
+            new CodeInstruction(OpCodes.Pop).WithBlocks(new ExceptionBlock(ExceptionBlockType.BeginCatchBlock, typeof(Exception))),
+            new CodeInstruction(OpCodes.Nop).WithBlocks(new ExceptionBlock(ExceptionBlockType.EndExceptionBlock)),
+            new CodeInstruction(OpCodes.Ret),
+        };
+
+        Concord.ITranspilerContext context = NewStreamContext();
+        List<Concord.CodeInstruction> concord = CodeInstructionConverter.ToConcord(stream, context, out HarmonyStreamContext harmonyContext);
+        List<CodeInstruction> outgoing = CodeInstructionConverter.FromConcord(concord, harmonyContext, generator);
+
+        Assert.Equal(
+            stream.ConvertAll(instruction => instruction.opcode.Name),
+            outgoing.GetRange(0, stream.Count).ConvertAll(instruction => instruction.opcode.Name));
+        for (int i = 0; i < stream.Count; i++)
+        {
+            Assert.Equal(
+                stream[i].blocks.ConvertAll(block => block.blockType),
+                outgoing[i].blocks.ConvertAll(block => block.blockType));
+        }
+    }
+
+    [Fact]
     public void ExceptionBlocks_NestedTryOpening_DoubleBeginExceptionBlockMarkersSurvive()
     {
         ILGenerator generator = NewGenerator();

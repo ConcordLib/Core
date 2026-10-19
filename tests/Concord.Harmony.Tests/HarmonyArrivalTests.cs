@@ -65,7 +65,7 @@ public sealed class HarmonyArrivalTests
     }
 
     [Fact]
-    public void AHarmonyThisBuildNeverMeasured_ArrivesButIsNeverHooked()
+    public void AHarmonyThisBuildNeverMeasured_ArrivesAndGetsHooked()
     {
         List<string> log = new List<string>();
 
@@ -76,12 +76,12 @@ public sealed class HarmonyArrivalTests
 
             Assert.Contains("Version=2.4.1.0", old.FullName);
             Assert.True(HarmonyArrival.IsArmed(old));
-            Assert.False(Hooked(old), "a 0Harmony this build never measured got a notifier detour");
-            Assert.Contains(log, line => line.Contains("Harmony 2.4.1.0 is unchecked"));
+            Assert.True(Hooked(old), "a 0Harmony carrying both probed members did not get a notifier detour");
+            Assert.Contains(log, line => line.StartsWith(CoexistenceLogMarkers.HookInstalled, StringComparison.Ordinal) && line.Contains("2.4.1.0") && line.Contains("#" + old.GetHashCode()));
 
             string stamp = " #" + old.GetHashCode() + " ";
-            Assert.Contains(log, line => line.StartsWith(HarmonyArrival.ArmFailedMarker, StringComparison.Ordinal) && line.Contains(stamp));
-            Assert.DoesNotContain(log, line => line.StartsWith(HarmonyArrival.ArmedMarker, StringComparison.Ordinal) && line.Contains(stamp));
+            Assert.Contains(log, line => line.StartsWith(HarmonyArrival.ArmedMarker, StringComparison.Ordinal) && line.Contains(stamp));
+            Assert.DoesNotContain(log, line => line.StartsWith(HarmonyArrival.ArmFailedMarker, StringComparison.Ordinal) && line.Contains(stamp));
         }
         finally
         {

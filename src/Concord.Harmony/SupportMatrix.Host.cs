@@ -1,4 +1,3 @@
-using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using Concord.Emit;
@@ -8,11 +7,9 @@ namespace Concord.Harmony
 {
     internal static partial class SupportMatrix
     {
-        private static readonly PropertyInfo? InnerFinalizersProperty = typeof(Patches).GetProperty("InnerFinalizers");
-
-        private static readonly FieldInfo? InnerFinalizersField = typeof(Patches).GetField("InnerFinalizers");
-
         private static readonly FieldInfo? InnerTargetField = typeof(Patch).GetField("innerTarget");
+
+        private static readonly FieldInfo? InnerMethodField = typeof(Patch).GetField("innerMethod");
 
         internal static bool HasInnerPatches(Patches? patchInfo)
         {
@@ -21,7 +18,9 @@ namespace Concord.Harmony
                 return false;
             }
 
-            return patchInfo.InnerPrefixes.Count > 0 || patchInfo.InnerPostfixes.Count > 0 || InnerFinalizers(patchInfo).Count > 0;
+            return HarmonyPatchSort.InnerCategory(patchInfo, "InnerPrefixes").Count > 0 ||
+                HarmonyPatchSort.InnerCategory(patchInfo, "InnerPostfixes").Count > 0 ||
+                HarmonyPatchSort.InnerCategory(patchInfo, "InnerFinalizers").Count > 0;
         }
 
         private static partial string? ValidateHost(MethodBase target, IReadOnlyList<Injection> added, Patches? patchInfo)
@@ -54,11 +53,12 @@ namespace Concord.Harmony
             MethodInfo? inner;
             try
             {
-                inner = patch.innerMethod?.Method;
+                object? innerMethod = InnerMethodField?.GetValue(patch);
+                inner = innerMethod?.GetType().GetProperty("Method")?.GetValue(innerMethod) as MethodInfo;
             }
             catch (System.Exception ex)
             {
-                return $"Target {target.Name} has a Harmony inner patch whose inner method will not resolve: {ex.Message}";
+                return $"Target {target.Name} has a Harmony inner patch whose inner method will not resolve: {ExceptionReason.Of(ex)}";
             }
 
             if (inner == null)
@@ -85,31 +85,10 @@ namespace Concord.Harmony
         private static List<Patch> InnerPatches(Patches patchInfo)
         {
             List<Patch> all = new List<Patch>();
-            all.AddRange(patchInfo.InnerPrefixes);
-            all.AddRange(patchInfo.InnerPostfixes);
-            all.AddRange(InnerFinalizers(patchInfo));
+            all.AddRange(HarmonyPatchSort.InnerCategory(patchInfo, "InnerPrefixes"));
+            all.AddRange(HarmonyPatchSort.InnerCategory(patchInfo, "InnerPostfixes"));
+            all.AddRange(HarmonyPatchSort.InnerCategory(patchInfo, "InnerFinalizers"));
             return all;
-        }
-
-        private static List<Patch> InnerFinalizers(Patches patchInfo)
-        {
-            object? value = InnerFinalizersProperty != null
-                ? InnerFinalizersProperty.GetValue(patchInfo, null)
-                : InnerFinalizersField?.GetValue(patchInfo);
-
-            List<Patch> finalizers = new List<Patch>();
-            if (value is IEnumerable items)
-            {
-                foreach (object item in items)
-                {
-                    if (item is Patch patch)
-                    {
-                        finalizers.Add(patch);
-                    }
-                }
-            }
-
-            return finalizers;
         }
     }
 }

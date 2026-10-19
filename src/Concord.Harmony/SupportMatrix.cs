@@ -15,9 +15,14 @@ namespace Concord.Harmony
 
         private static readonly FieldInfo?[] IncomingFields = MatchIncomingFields(PatchesCtor);
 
-        private static readonly Version[] MeasuredReleases = { new Version(3, 0) };
+        private static readonly Version[] MeasuredReleases = { new Version(2, 4, 2), new Version(2, 4, 3), new Version(3, 0) };
 
-        private static readonly Dictionary<Version, string> RefusedReleases = new Dictionary<Version, string>();
+        private static readonly Dictionary<Version, string> RefusedReleases = new Dictionary<Version, string>
+        {
+            { new Version(2, 2, 2), "carries no MonoMod.Core.DetourFactory type" },
+            { new Version(2, 3, 3), "carries no MonoMod.Core.DetourFactory.SetCurrentFactory" },
+            { new Version(2, 3, 6), "carries no MonoMod.Core.DetourFactory.SetCurrentFactory" },
+        };
 
         internal static Patches? Incoming(PatchInfo? patchInfo)
         {

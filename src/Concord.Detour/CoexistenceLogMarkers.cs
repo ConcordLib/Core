@@ -35,6 +35,12 @@ public static class CoexistenceLogMarkers {
     public const string HookUnavailable = "[Concord.Coex] hook-unavailable";
 
     /// <summary>
+    ///     The hook installed, but the targets Harmony had already patched could not be read, so one of
+    ///     them may be suppressed into a body write that never runs.
+    /// </summary>
+    public const string SeedUnreadable = "[Concord.Coex] seed-unreadable";
+
+    /// <summary>
     ///     A target Concord had detoured itself moved onto the host after a foreign patch arrived.
     /// </summary>
     public const string Promoted = "[Concord.Coex] promoted";

@@ -569,6 +569,17 @@ public static class WrapperComposer {
             IEnumerable<CodeInstruction> produced = TranspilerInvoker.Invoke(transpilers[i].InjectionMethod, instructions, context);
             instructions = produced as List<CodeInstruction> ?? new List<CodeInstruction>(produced);
 
+            if (ControlFlowValidator.FindIllegalBranch(instructions) is string illegal) {
+                MethodBase culprit = transpilers[i].InjectionMethod;
+                throw new ConcordEmitException(
+                    ControlFlowValidator.Code,
+                    $"Transpiler '{culprit.DeclaringType?.Name}.{culprit.Name}' on '{resolved.DeclaringType?.Name}.{resolved.Name}' produced a body the runtime refuses: {illegal}") {
+                    LocalBindingMethod = culprit,
+                    LocalBindingInjection = transpilers[i],
+                    BrokenByAForeignEdit = true,
+                };
+            }
+
             int emitted = CountGetExecutingAssemblyCalls(instructions);
             if (emitted > baseline) {
                 MethodBase offender = transpilers[i].InjectionMethod;
@@ -1178,6 +1189,7 @@ public static class WrapperComposer {
         AssembleInto(wrapper.Definition, resolved, declarative, returnType, rawLocalCount);
         RunTranspilers(wrapper.Definition, resolved, finalTranspilers);
         MultiDimArrayCalls.Rewrite(wrapper.Definition);
+        HandlerEndTrimmer.Apply(wrapper.Definition);
         DescribeComposedBody(wrapper.Definition, resolved, ordered, out ComposedBody? body, out string? bodyRejection);
         MethodInfo wrapperMethod = wrapper.Generate();
         return new ComposeResult(wrapperMethod, () => OriginalBody.Clone(resolved), rejected, body, bodyRejection);
@@ -1287,6 +1299,8 @@ public static class WrapperComposer {
         RunTranspilers(wrapper.Definition, resolved, preTranspilers);
         AssembleInto(wrapper.Definition, resolved, declarative, returnType, rawLocalCount);
         RunTranspilers(wrapper.Definition, resolved, finalTranspilers);
+
+        HandlerEndTrimmer.Apply(wrapper.Definition);
 
         TranspilerContext readContext = new TranspilerContext(resolved);
         return CecilCodeConverter.ToInstructions(wrapper.Definition, readContext, provenance, firstFreshLabelId);

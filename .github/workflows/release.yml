@@ -121,14 +121,20 @@ jobs:
       - name: Test (net472)
         if: startsWith(matrix.runner, 'windows')
         shell: pwsh
+        env:
+          TEST_LABEL: ${{ matrix.label }}
         run: |
           $failed = @()
           $suites = @(
             'tests/Concord.Detour.Tests/Concord.Detour.Tests.csproj',
             'tests/Concord.Emit.Tests/Concord.Emit.Tests.csproj',
             'tests/Concord.AttachedData.Tests/Concord.AttachedData.Tests.csproj',
-            'tests/Concord.Orchestration.Tests/Concord.Orchestration.Tests.csproj'
+            'tests/Concord.Orchestration.Tests/Concord.Orchestration.Tests.csproj',
+            'tests/Concord.Harmony.Tests/Concord.Harmony.Tests.csproj'
           )
+          if ($env:TEST_LABEL -eq 'windows-arm64') {
+            $suites = $suites | Where-Object { $_ -notlike '*Concord.Harmony.Tests*' }
+          }
           foreach ($suite in $suites) {
             dotnet test $suite -c Release --no-restore -f net472
             if ($LASTEXITCODE -ne 0) { $failed += $suite }
