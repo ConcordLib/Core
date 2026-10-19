@@ -19,6 +19,7 @@ public static class EvictionReport {
     /// <param name="target">The method whose composition dropped the injection.</param>
     /// <param name="rejection">The injection the composer dropped.</param>
     /// <returns>The line to log, or <c>null</c> when it was already reported.</returns>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "CA1510", Justification = "ArgumentNullException.ThrowIfNull needs net6 or later and this project also targets netstandard2.0 and net472.")]
     public static string? Compose(string marker, MethodBase target, RejectedInjection rejection) {
         if (marker is null) {
             throw new ArgumentNullException(nameof(marker));
