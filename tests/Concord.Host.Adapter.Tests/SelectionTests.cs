@@ -105,6 +105,60 @@ public sealed class CapabilityTests {
         Assert.Contains("no detail was captured", RuntimeCapability.Explain(support));
     }
 
+    [Theory]
+    [InlineData(0x2B000001, true)]
+    [InlineData(0x2B000000, true)]
+    [InlineData(0x06000001, false)]
+    [InlineData(0x0A000001, false)]
+    [InlineData(0x11000013, false)]
+    public void ADefinitionTokenInTheMethodSpecTableMeansTheRuntimeInstantiatesIt(int token, bool instantiates) {
+        Assert.Equal(instantiates, RuntimeCapability.InstantiatesDefinitions(token));
+    }
+
+    [Fact]
+    public void AMethodSpecVerdictReadsTheTopByteUnsignedSoAHighTableIsNotMistakenForOne() {
+        Assert.False(RuntimeCapability.InstantiatesDefinitions(unchecked((int)0xFF000001)));
+        Assert.False(RuntimeCapability.InstantiatesDefinitions(-1));
+    }
+
+    [Fact]
+    public void AMintThatHandsBackAMethodSpecIsTheOnlyRuntimeThatCanNameAGenericMethod() {
+        Assert.True(RuntimeCapability.MintsMethodSpecsThrough(() => 0x2B000001));
+        Assert.False(RuntimeCapability.MintsMethodSpecsThrough(() => 0x06000001));
+        Assert.False(RuntimeCapability.MintsMethodSpecsThrough(() => 0x0A000001));
+    }
+
+    [Fact]
+    public void AMintThatThrowsCountsAsARefusalRatherThanTakingTheProcessDown() {
+        Assert.False(RuntimeCapability.MintsMethodSpecsThrough(() => throw new PlatformNotSupportedException()));
+        Assert.False(RuntimeCapability.MintsMethodSpecsThrough(() => throw new InvalidOperationException()));
+        Assert.Throws<ArgumentNullException>(() => RuntimeCapability.MintsMethodSpecsThrough(null!));
+    }
+
+    [Fact]
+    public void AnAvailableRuntimeSaysWhetherABodyMayNameAGenericMethod() {
+        string mints = RuntimeCapability.Explain(BodyReplacement.Available, null, true);
+        string malformed = RuntimeCapability.Explain(BodyReplacement.Available, null, false);
+
+        Assert.Contains("mints a usable MethodSpec", mints);
+        Assert.Contains("malformed MethodSpec", malformed);
+        Assert.Contains("stays on the detour backend", malformed);
+        Assert.NotEqual(mints, malformed);
+    }
+
+    [Fact]
+    public void AVerdictOtherThanAvailableExplainsTheSameEitherWayTheRuntimeMints() {
+        foreach (BodyReplacement support in Enum.GetValues<BodyReplacement>()) {
+            if (support == BodyReplacement.Available) {
+                continue;
+            }
+
+            Assert.Equal(
+                RuntimeCapability.Explain(support, "detail", true),
+                RuntimeCapability.Explain(support, "detail", false));
+        }
+    }
+
     private static BodyReplacement Support(Type? updater, bool mintingBound) {
         (BodyReplacement support, string? failure) = RuntimeCapability.Probe(updater, mintingBound);
         Assert.Null(failure);

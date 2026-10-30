@@ -209,5 +209,10 @@ public class TokenMintingTests {
         Assert.Contains("WaylithClr.MethodBodyUpdater", thrown.Message);
         Assert.Contains("GetTokenFor(Module, Type)", thrown.Message);
         Assert.Contains("detour backend", thrown.Message);
+
+        PlatformNotSupportedException onAMethod = Assert.Throws<PlatformNotSupportedException>(
+            () => new ForkMinter().Token(Here, typeof(object).GetMethod(nameof(ToString))!));
+
+        Assert.Contains("GetTokenFor(Module, MethodBase)", onAMethod.Message);
     }
 }

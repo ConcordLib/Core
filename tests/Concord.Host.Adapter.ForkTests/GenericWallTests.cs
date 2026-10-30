@@ -79,7 +79,41 @@ public sealed class GenericWallTests : IDisposable {
     }
 
     [Fact(Skip = NoFork, SkipWhen = nameof(Unavailable))]
-    public void Wall1OpenDefinitionGetsAMethodDefAndAnMvarSpecRunsPerInstantiation() {
+    public void TheMethodSpecCapabilityProbeSaysWhatAPublishedGenericCallActuallyDoes() {
+        Module module = typeof(GenericWallHosts).Module;
+        MethodInfo constructed = IdentityDefinition.MakeGenericMethod(typeof(int));
+        MethodInfo host = typeof(GenericWallHosts).GetMethod(nameof(GenericWallHosts.CallsProbedConstructed))!;
+        Note($"{nameof(RuntimeCapability)}.{nameof(RuntimeCapability.MintsMethodSpecs)}: {RuntimeCapability.MintsMethodSpecs}");
+        Note($"token for Identity<int>: {Attempt(() => $"0x{new ForkMinter().Token(module, constructed):X8}")}");
+
+        Assert.Equal(-1, GenericWallHosts.CallsProbedConstructed());
+        string outcome = Attempt(() => {
+            Publish(host, Calling(constructed, 7));
+            return GenericWallHosts.CallsProbedConstructed().ToString();
+        });
+        Note($"CallsProbedConstructed() after publishing 'ldc.i4 7; call Identity<int>; ret': {outcome}");
+
+        Assert.True(RuntimeCapability.MintsMethodSpecs == (outcome == "7"), Report());
+    }
+
+    [Fact(Skip = NoFork, SkipWhen = nameof(Unavailable))]
+    public void AConstructedGenericCallPublishesThroughTheTokenSourceTheBackendActuallyUses() {
+        MethodInfo constructed = IdentityDefinition.MakeGenericMethod(typeof(int));
+        MethodInfo host = typeof(GenericWallHosts).GetMethod(nameof(GenericWallHosts.CallsMintedConstructed))!;
+        Note($"{nameof(RuntimeCapability)}.{nameof(RuntimeCapability.MintsMethodSpecs)}: {RuntimeCapability.MintsMethodSpecs}");
+
+        Assert.Equal(-1, GenericWallHosts.CallsMintedConstructed());
+        string outcome = Attempt(() => {
+            Publish(host, Minting(constructed, 7));
+            return GenericWallHosts.CallsMintedConstructed().ToString();
+        });
+        Note($"CallsMintedConstructed() after publishing through {nameof(WaylithTokenSource)}: {outcome}");
+
+        Assert.True(outcome == "7", Report());
+    }
+
+    [Fact(Skip = NoFork, SkipWhen = nameof(Unavailable))]
+    public void Wall1OpenDefinitionGetsAnMvarSpecThatOnlyRunsInsideAGenericBody() {
         Module module = typeof(GenericWallHosts).Module;
         int definitionToken = new ForkMinter().Token(module, IdentityDefinition);
         Note($"token for Identity<T> definition: 0x{definitionToken:X8} (table 0x{definitionToken >> 24:X2})");
@@ -87,7 +121,8 @@ public sealed class GenericWallTests : IDisposable {
 
         MethodInfo host = typeof(GenericWallHosts).GetMethod(nameof(GenericWallHosts.CallsDefinition))!;
         Publish(host, Calling(IdentityDefinition, 7));
-        Note($"CallsDefinition() after publishing a call on the bare definition token: {Attempt(() => GenericWallHosts.CallsDefinition().ToString())}");
+        string intoPlainBody = Attempt(() => GenericWallHosts.CallsDefinition().ToString());
+        Note($"CallsDefinition() after publishing a call on the bare definition token: {intoPlainBody}");
 
         Type ownParameter = WrapperDefinition.GetGenericArguments()[0];
         MethodInfo overOwnParameter = IdentityDefinition.MakeGenericMethod(ownParameter);
@@ -104,8 +139,9 @@ public sealed class GenericWallTests : IDisposable {
         Note($"Wrapper<string>(3) after the same publish: {viaString}");
 
         Assert.True(
-            definitionToken >> 24 == 0x06
-            && mvarToken >> 24 == 0x2B
+            definitionToken >> 24 == 0x2B
+            && definitionToken == mvarToken
+            && intoPlainBody.StartsWith("threw BadImageFormatException", StringComparison.Ordinal)
             && viaInt == "3"
             && viaString == "3",
             Report());
@@ -235,6 +271,24 @@ public sealed class GenericWallTests : IDisposable {
             false);
 
         return BodyEncoder.Encode(body, new RawTokens(typeof(GenericWallHosts).Module), new ComputedStack()).Bytes;
+    }
+
+    private static byte[] Minting(MethodInfo callee, int argument) {
+        ComposedBody body = new ComposedBody(
+            [
+                new ComposedInstruction(new CodeInstruction(OpCodes.Ldc_I4, argument), null, null),
+                new ComposedInstruction(new CodeInstruction(OpCodes.Call, callee), null, null),
+                new ComposedInstruction(new CodeInstruction(OpCodes.Ret), null, null),
+            ],
+            [],
+            [],
+            false);
+
+        return BodyEncoder.Encode(
+                body,
+                new WaylithTokenSource(typeof(GenericWallHosts).Module),
+                new ComputedStack())
+            .Bytes;
     }
 
     private static byte[] Measuring(MethodInfo callee) {

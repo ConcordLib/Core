@@ -72,16 +72,10 @@ public sealed class ForkMinter : IMetadataMinter {
         && LocalsSignatureToken is not null;
 
     /// <inheritdoc />
+    /// <remarks>A generic method operand needs <see cref="RuntimeCapability.MintsMethodSpecs" /> checked first; the MethodSpec the runtime builds here is unusable without it.</remarks>
     /// <exception cref="PlatformNotSupportedException">This runtime has no token api; keep the detour backend.</exception>
     public int Token(Module target, MethodBase method) {
-        Func<Module, MethodBase, int> mint = Bound(MethodToken, TokenEntry, nameof(MethodBase));
-        if (method is not MethodInfo { IsGenericMethod: true, IsGenericMethodDefinition: false } constructed
-            || !MethodSpecMinter.IsAvailable) {
-            return mint(target, method);
-        }
-
-        int parent = mint(target, constructed.GetGenericMethodDefinition());
-        return MethodSpecMinter.Token(target, parent, constructed.GetGenericArguments());
+        return Bound(MethodToken, TokenEntry, nameof(MethodBase))(target, method);
     }
 
     /// <inheritdoc />

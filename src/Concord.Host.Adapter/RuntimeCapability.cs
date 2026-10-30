@@ -64,12 +64,16 @@ public static class RuntimeCapability {
 
     private const string RuntimeSwitch = "DOTNET_MethodBodyUpdater";
 
+    private const int MethodSpecTable = 0x2B;
+
     private static readonly (BodyReplacement Support, string? Failure) Once =
         Probe(Updater(), ForkMinter.IsAvailable);
 
     private static readonly bool SkipsOnce = SkipsAccessChecks(
         AppContext.GetData(AccessCheckKey),
         Environment.GetEnvironmentVariable(AccessCheckSwitch));
+
+    private static readonly bool MintsOnce = ProbeMethodSpecs();
 
     /// <summary>The one-shot verdict for this process.</summary>
     public static BodyReplacement Support => Once.Support;
@@ -91,6 +95,12 @@ public static class RuntimeCapability {
     ///     place may name a private or internal member of another assembly and the call still runs.
     /// </summary>
     public static bool IgnoresAccessChecks => SkipsOnce;
+
+    /// <summary>
+    ///     <see langword="true" /> when a generic method operand can be named in a replaced body. Where it is
+    ///     <see langword="false" /> the MethodSpec is malformed, published anyway, and throws on first compile.
+    /// </summary>
+    public static bool MintsMethodSpecs => MintsOnce;
 
     /// <summary>This runtime's own description, as it appears in every message this type produces.</summary>
     public static string Runtime => RuntimeInformation.FrameworkDescription;
@@ -175,9 +185,26 @@ public static class RuntimeCapability {
     /// <returns>A log-ready sentence naming the api, this runtime, and what the verdict costs the caller.</returns>
     /// <exception cref="NotSupportedException">The verdict is not a declared <see cref="BodyReplacement" /> value.</exception>
     public static string Explain(BodyReplacement support, string? failure) {
+        return Explain(support, failure, MintsMethodSpecs);
+    }
+
+    /// <summary>
+    ///     Explains a verdict against a supplied MethodSpec answer. The pure form behind
+    ///     <see cref="Explain(BodyReplacement, string?)" />, so a caller can pass a stand-in verdict.
+    /// </summary>
+    /// <param name="support">The verdict to explain.</param>
+    /// <param name="failure">The probe failure detail, read only for <see cref="BodyReplacement.ProbeFailed" />.</param>
+    /// <param name="mintsMethodSpecs">Whether a generic method operand can be named here, normally <see cref="MintsMethodSpecs" />.</param>
+    /// <returns>A log-ready sentence naming the api, this runtime, and what the verdict costs the caller.</returns>
+    /// <exception cref="NotSupportedException">The verdict is not a declared <see cref="BodyReplacement" /> value.</exception>
+    public static string Explain(BodyReplacement support, string? failure, bool mintsMethodSpecs) {
         return support switch {
             BodyReplacement.Available =>
-                $"'{UpdaterTypeName}' reports {SupportFlag} on '{Runtime}'",
+                $"'{UpdaterTypeName}' reports {SupportFlag} on '{Runtime}', and it "
+                + (mintsMethodSpecs
+                    ? "mints a usable MethodSpec, so a body may name a generic method"
+                    : "mints a malformed MethodSpec, so a target whose body names a generic method stays on the "
+                      + "detour backend"),
             BodyReplacement.ApiAbsent =>
                 $"'{UpdaterTypeName}' is not present on '{Runtime}', so method bodies cannot be replaced here",
             BodyReplacement.ApiUnrecognized =>
@@ -194,6 +221,49 @@ public static class RuntimeCapability {
                 "native runtime under it do not match: " + (failure ?? "no detail was captured"),
             _ => throw new NotSupportedException(support + " has no explanation"),
         };
+    }
+
+    /// <summary>
+    ///     Judges a runtime by the token it hands back for a generic method definition. The pure form behind
+    ///     <see cref="MintsMethodSpecs" />, so a caller can pass a stand-in token instead of minting one.
+    /// </summary>
+    /// <param name="definitionToken">The token this runtime returned for a generic method definition.</param>
+    /// <returns><see langword="true" /> when that token is a MethodSpec, the shape that mints a usable one.</returns>
+    public static bool InstantiatesDefinitions(int definitionToken) {
+        return (definitionToken >>> 24) == MethodSpecTable;
+    }
+
+    /// <summary>
+    ///     Judges this runtime through a supplied minting step, treating a throw as a refusal. The pure form
+    ///     behind <see cref="MintsMethodSpecs" />, so a caller can pass a stand-in minter.
+    /// </summary>
+    /// <param name="mint">Mints a token for a generic method definition, normally through the fork's token api.</param>
+    /// <returns><see langword="true" /> only when the mint returns a MethodSpec token.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="mint" /> is <c>null</c>.</exception>
+    public static bool MintsMethodSpecsThrough(Func<int> mint) {
+        ArgumentNullException.ThrowIfNull(mint);
+
+        try {
+            return InstantiatesDefinitions(mint());
+        } catch (Exception thrown) when (thrown is not OutOfMemoryException) {
+            return false;
+        }
+    }
+
+    private static bool ProbeMethodSpecs() {
+        return ForkMinter.IsAvailable && MintsMethodSpecsThrough(Mint);
+    }
+
+    private static int Mint() {
+        MethodInfo generic = typeof(RuntimeCapability).GetMethod(
+            nameof(Generic),
+            BindingFlags.NonPublic | BindingFlags.Static)!;
+
+        return new ForkMinter().Token(typeof(RuntimeCapability).Module, generic);
+    }
+
+    private static T Generic<T>(T value) {
+        return value;
     }
 
     private static bool Declares(Type updater, string entry) {

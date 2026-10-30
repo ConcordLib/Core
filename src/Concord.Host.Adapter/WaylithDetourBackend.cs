@@ -242,7 +242,7 @@ public sealed class ComposedBodyPublisher : ITargetBodyOwner {
             encoded = BodyEncoder.Encode(composed.Body, WaylithDetourBackend.Tokens(target.Module), new ComputedStack());
             map = WaylithDetourBackend.OffsetMap(target, composed.Body, encoded, ordered);
         } catch (Exception failure) when (failure is not OutOfMemoryException) {
-            HandOff(target, TargetEligibility.ForRuntimeRefusal(target, failure), ordered, held);
+            HandOff(target, TargetEligibility.ForRuntimeRefusal(target, failure, "encoding its body"), ordered, held);
             return;
         }
 
@@ -258,7 +258,7 @@ public sealed class ComposedBodyPublisher : ITargetBodyOwner {
             writer.Write(target, encoded.Bytes, map);
             WaylithDetourBackend.Writers.Published(target, encoded.Bytes.Length);
         } catch (Exception failure) when (failure is not OutOfMemoryException) {
-            HandOff(target, TargetEligibility.ForRuntimeRefusal(target, failure), ordered, held);
+            HandOff(target, TargetEligibility.ForRuntimeRefusal(target, failure, "writing its body"), ordered, held);
             return;
         }
 
@@ -837,7 +837,7 @@ public sealed class WaylithDetourBackend : IDetourBackend, IOwnsBodyQuery, ISupp
                 Writers.Published(target, encoded.Bytes.Length);
             } catch (Exception failure) when (failure is not OutOfMemoryException) {
                 Writers.Release(target);
-                reason = TargetEligibility.ForRuntimeRefusal(target, failure).Message;
+                reason = TargetEligibility.ForRuntimeRefusal(target, failure, "publishing its forwarder body").Message;
                 return null;
             }
 

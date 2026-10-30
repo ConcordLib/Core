@@ -206,12 +206,32 @@ public class TargetEligibilityTests {
     public void ARuntimeRefusalAtPublishTimeFallsBack() {
         TargetVerdict verdict = TargetEligibility.ForRuntimeRefusal(
             Of(nameof(Bodyless.Implemented)),
-            new NotSupportedException("Method body replacement is not supported for this method."));
+            new NotSupportedException("Method body replacement is not supported for this method."),
+            "writing its body");
 
         Assert.Equal(TargetHandling.Detour, verdict.Handling);
         Assert.StartsWith(TargetEligibility.FallbackMarker, verdict.Message);
         Assert.Contains("NotSupportedException", verdict.Message);
+        Assert.Contains("while writing its body", verdict.Message);
         Assert.Contains("Method body replacement is not supported for this method", verdict.Message);
+    }
+
+    [Fact]
+    public void ARuntimeRefusalNamesTheMemberThatThrewSoTwoStagesAreTellableApart() {
+        Exception thrown;
+        try {
+            throw new NotSupportedException("no");
+        } catch (NotSupportedException caught) {
+            thrown = caught;
+        }
+
+        TargetVerdict verdict = TargetEligibility.ForRuntimeRefusal(
+            Of(nameof(Bodyless.Implemented)),
+            thrown,
+            "encoding its body");
+
+        Assert.Contains("while encoding its body", verdict.Message);
+        Assert.Contains(nameof(ARuntimeRefusalNamesTheMemberThatThrewSoTwoStagesAreTellableApart), verdict.Message);
     }
 
     [Fact]
@@ -232,8 +252,14 @@ public class TargetEligibilityTests {
         Assert.Throws<ArgumentNullException>(() => TargetEligibility.Judge(null!));
         Assert.Throws<ArgumentNullException>(() => TargetEligibility.ForRejectedBody(null!, "why"));
         Assert.Throws<ArgumentException>(() => TargetEligibility.ForRejectedBody(Of(nameof(Bodyless.Implemented)), " "));
-        Assert.Throws<ArgumentNullException>(() => TargetEligibility.ForRuntimeRefusal(null!, new NotSupportedException()));
         Assert.Throws<ArgumentNullException>(
-            () => TargetEligibility.ForRuntimeRefusal(Of(nameof(Bodyless.Implemented)), null!));
+            () => TargetEligibility.ForRuntimeRefusal(null!, new NotSupportedException(), "writing its body"));
+        Assert.Throws<ArgumentNullException>(
+            () => TargetEligibility.ForRuntimeRefusal(Of(nameof(Bodyless.Implemented)), null!, "writing its body"));
+        Assert.Throws<ArgumentException>(
+            () => TargetEligibility.ForRuntimeRefusal(
+                Of(nameof(Bodyless.Implemented)),
+                new NotSupportedException(),
+                " "));
     }
 }
