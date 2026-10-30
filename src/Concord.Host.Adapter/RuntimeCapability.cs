@@ -64,12 +64,16 @@ public static class RuntimeCapability {
 
     private const string RuntimeSwitch = "DOTNET_MethodBodyUpdater";
 
+    private const int MethodSpecTable = 0x2B;
+
     private static readonly (BodyReplacement Support, string? Failure) Once =
         Probe(Updater(), ForkMinter.IsAvailable);
 
     private static readonly bool SkipsOnce = SkipsAccessChecks(
         AppContext.GetData(AccessCheckKey),
         Environment.GetEnvironmentVariable(AccessCheckSwitch));
+
+    private static readonly bool MintsOnce = ProbeMethodSpecs();
 
     /// <summary>The one-shot verdict for this process.</summary>
     public static BodyReplacement Support => Once.Support;
@@ -91,6 +95,12 @@ public static class RuntimeCapability {
     ///     place may name a private or internal member of another assembly and the call still runs.
     /// </summary>
     public static bool IgnoresAccessChecks => SkipsOnce;
+
+    /// <summary>
+    ///     <see langword="true" /> when a generic method operand can be named in a replaced body. Where it is
+    ///     <see langword="false" /> the MethodSpec is malformed, published anyway, and throws on first compile.
+    /// </summary>
+    public static bool MintsMethodSpecs => MintsOnce;
 
     /// <summary>This runtime's own description, as it appears in every message this type produces.</summary>
     public static string Runtime => RuntimeInformation.FrameworkDescription;
@@ -177,7 +187,11 @@ public static class RuntimeCapability {
     public static string Explain(BodyReplacement support, string? failure) {
         return support switch {
             BodyReplacement.Available =>
-                $"'{UpdaterTypeName}' reports {SupportFlag} on '{Runtime}'",
+                $"'{UpdaterTypeName}' reports {SupportFlag} on '{Runtime}', and it "
+                + (MintsMethodSpecs
+                    ? "mints a usable MethodSpec, so a body may name a generic method"
+                    : "mints a malformed MethodSpec, so a target whose body names a generic method stays on the "
+                      + "detour backend"),
             BodyReplacement.ApiAbsent =>
                 $"'{UpdaterTypeName}' is not present on '{Runtime}', so method bodies cannot be replaced here",
             BodyReplacement.ApiUnrecognized =>
@@ -194,6 +208,26 @@ public static class RuntimeCapability {
                 "native runtime under it do not match: " + (failure ?? "no detail was captured"),
             _ => throw new NotSupportedException(support + " has no explanation"),
         };
+    }
+
+    private static bool ProbeMethodSpecs() {
+        if (!ForkMinter.IsAvailable) {
+            return false;
+        }
+
+        try {
+            MethodInfo generic = typeof(RuntimeCapability).GetMethod(
+                nameof(Generic),
+                BindingFlags.NonPublic | BindingFlags.Static)!;
+            int definitionToken = new ForkMinter().Token(typeof(RuntimeCapability).Module, generic);
+            return (definitionToken >>> 24) == MethodSpecTable;
+        } catch (Exception thrown) when (thrown is not OutOfMemoryException) {
+            return false;
+        }
+    }
+
+    private static T Generic<T>(T value) {
+        return value;
     }
 
     private static bool Declares(Type updater, string entry) {

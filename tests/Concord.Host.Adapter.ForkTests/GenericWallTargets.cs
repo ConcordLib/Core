@@ -63,6 +63,16 @@ public static class GenericWallHosts {
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
+    public static int CallsProbedConstructed() {
+        return -1;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static int CallsMintedConstructed() {
+        return -1;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static int OpenMethod<T>() {
         return 1;
     }

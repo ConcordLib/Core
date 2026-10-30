@@ -61,7 +61,7 @@ public sealed class WaylithTokenSource : ITokenSource {
     /// <param name="method">The method to name in the body.</param>
     /// <returns>The metadata token for <paramref name="method" /> in the target module.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="method" /> is <c>null</c>.</exception>
-    /// <exception cref="TokenAccessException">The method is generic, or it is out of reach from the target module. Any generic method is refused, including the open definition a generic method resolves to when it calls itself, because the runtime mints its MethodSpec from a malformed signature blob and the published body throws <c>BadImageFormatException</c> on first compile.</exception>
+    /// <exception cref="TokenAccessException">The method is out of reach from the target module, or it is generic on a runtime where <see cref="RuntimeCapability.MintsMethodSpecs" /> is <c>false</c>, which covers the open definition a generic method resolves to when it calls itself.</exception>
     /// <exception cref="PlatformNotSupportedException">The default minter is in use and this runtime is not the fork.</exception>
     public int TokenFor(MethodBase method) {
         ArgumentNullException.ThrowIfNull(method);
@@ -91,7 +91,7 @@ public sealed class WaylithTokenSource : ITokenSource {
     }
 
     private void RefuseMethodSpec(MethodBase method) {
-        if (method is not MethodInfo { IsGenericMethod: true } generic || MethodSpecMinter.IsAvailable) {
+        if (method is not MethodInfo { IsGenericMethod: true } generic || RuntimeCapability.MintsMethodSpecs) {
             return;
         }
 

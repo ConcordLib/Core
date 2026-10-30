@@ -72,18 +72,25 @@ public static class TargetEligibility {
             StillApplies);
     }
 
-    /// <summary>Builds the fallback verdict for a body the runtime itself threw on at publish time, folding the exception type and message into the explanation.</summary>
+    /// <summary>Builds the fallback verdict for a body the runtime itself threw on, naming the stage that failed and the member that threw so a log reader can tell a metadata refusal from a body-write refusal.</summary>
     /// <param name="target">The method whose publish attempt failed.</param>
     /// <param name="refusal">The exception the runtime threw.</param>
+    /// <param name="stage">What was underway, as a participle phrase reading after "while": <c>"encoding its body"</c>.</param>
     /// <returns>A <see cref="TargetHandling.Detour" /> verdict whose message starts with <see cref="FallbackMarker" />.</returns>
-    /// <exception cref="ArgumentNullException">Either argument is <c>null</c>.</exception>
-    public static TargetVerdict ForRuntimeRefusal(MethodBase target, Exception refusal) {
+    /// <exception cref="ArgumentNullException"><paramref name="target" /> or <paramref name="refusal" /> is <c>null</c>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="stage" /> is <c>null</c>, empty, or white space.</exception>
+    public static TargetVerdict ForRuntimeRefusal(MethodBase target, Exception refusal, string stage) {
         ArgumentNullException.ThrowIfNull(target);
         ArgumentNullException.ThrowIfNull(refusal);
+        ArgumentException.ThrowIfNullOrWhiteSpace(stage);
+
+        string thrower = refusal.TargetSite is { } site
+            ? $" out of '{site.DeclaringType?.Name}.{site.Name}'"
+            : string.Empty;
 
         return Fallback(
-            $"{Describe(target)} was refused by the runtime at publish time: " +
-            $"{refusal.GetType().Name}, {refusal.Message.TrimEnd('.')}. {StillApplies}");
+            $"{Describe(target)} was refused by the runtime while {stage}: " +
+            $"{refusal.GetType().Name}{thrower}, {refusal.Message.TrimEnd('.')}. {StillApplies}");
     }
 
     /// <summary>Gate for logging a fallback, so a target that falls back on every patch attempt is only announced the first time in a process.</summary>
