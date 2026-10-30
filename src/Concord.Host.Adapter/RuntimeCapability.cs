@@ -185,10 +185,23 @@ public static class RuntimeCapability {
     /// <returns>A log-ready sentence naming the api, this runtime, and what the verdict costs the caller.</returns>
     /// <exception cref="NotSupportedException">The verdict is not a declared <see cref="BodyReplacement" /> value.</exception>
     public static string Explain(BodyReplacement support, string? failure) {
+        return Explain(support, failure, MintsMethodSpecs);
+    }
+
+    /// <summary>
+    ///     Explains a verdict against a supplied MethodSpec answer. The pure form behind
+    ///     <see cref="Explain(BodyReplacement, string?)" />, so a caller can pass a stand-in verdict.
+    /// </summary>
+    /// <param name="support">The verdict to explain.</param>
+    /// <param name="failure">The probe failure detail, read only for <see cref="BodyReplacement.ProbeFailed" />.</param>
+    /// <param name="mintsMethodSpecs">Whether a generic method operand can be named here, normally <see cref="MintsMethodSpecs" />.</param>
+    /// <returns>A log-ready sentence naming the api, this runtime, and what the verdict costs the caller.</returns>
+    /// <exception cref="NotSupportedException">The verdict is not a declared <see cref="BodyReplacement" /> value.</exception>
+    public static string Explain(BodyReplacement support, string? failure, bool mintsMethodSpecs) {
         return support switch {
             BodyReplacement.Available =>
                 $"'{UpdaterTypeName}' reports {SupportFlag} on '{Runtime}', and it "
-                + (MintsMethodSpecs
+                + (mintsMethodSpecs
                     ? "mints a usable MethodSpec, so a body may name a generic method"
                     : "mints a malformed MethodSpec, so a target whose body names a generic method stays on the "
                       + "detour backend"),
@@ -210,20 +223,43 @@ public static class RuntimeCapability {
         };
     }
 
-    private static bool ProbeMethodSpecs() {
-        if (!ForkMinter.IsAvailable) {
-            return false;
-        }
+    /// <summary>
+    ///     Judges a runtime by the token it hands back for a generic method definition. The pure form behind
+    ///     <see cref="MintsMethodSpecs" />, so a caller can pass a stand-in token instead of minting one.
+    /// </summary>
+    /// <param name="definitionToken">The token this runtime returned for a generic method definition.</param>
+    /// <returns><see langword="true" /> when that token is a MethodSpec, the shape that mints a usable one.</returns>
+    public static bool InstantiatesDefinitions(int definitionToken) {
+        return (definitionToken >>> 24) == MethodSpecTable;
+    }
+
+    /// <summary>
+    ///     Judges this runtime through a supplied minting step, treating a throw as a refusal. The pure form
+    ///     behind <see cref="MintsMethodSpecs" />, so a caller can pass a stand-in minter.
+    /// </summary>
+    /// <param name="mint">Mints a token for a generic method definition, normally through the fork's token api.</param>
+    /// <returns><see langword="true" /> only when the mint returns a MethodSpec token.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="mint" /> is <c>null</c>.</exception>
+    public static bool MintsMethodSpecsThrough(Func<int> mint) {
+        ArgumentNullException.ThrowIfNull(mint);
 
         try {
-            MethodInfo generic = typeof(RuntimeCapability).GetMethod(
-                nameof(Generic),
-                BindingFlags.NonPublic | BindingFlags.Static)!;
-            int definitionToken = new ForkMinter().Token(typeof(RuntimeCapability).Module, generic);
-            return (definitionToken >>> 24) == MethodSpecTable;
+            return InstantiatesDefinitions(mint());
         } catch (Exception thrown) when (thrown is not OutOfMemoryException) {
             return false;
         }
+    }
+
+    private static bool ProbeMethodSpecs() {
+        return ForkMinter.IsAvailable && MintsMethodSpecsThrough(Mint);
+    }
+
+    private static int Mint() {
+        MethodInfo generic = typeof(RuntimeCapability).GetMethod(
+            nameof(Generic),
+            BindingFlags.NonPublic | BindingFlags.Static)!;
+
+        return new ForkMinter().Token(typeof(RuntimeCapability).Module, generic);
     }
 
     private static T Generic<T>(T value) {
